@@ -13,8 +13,24 @@
     "commands": [
       { "command": "viVoice.toggle", "title": "Vi Voice: Bắt đầu / dừng nghe" },
       { "command": "viVoice.setApiKey", "title": "Vi Voice: Set Groq API Key" },
-      { "command": "viVoice.retry", "title": "Vi Voice: Gửi lại audio cuối" }
+      { "command": "viVoice.retry", "title": "Vi Voice: Gửi lại audio cuối" },
+      { "command": "viVoice.pickMic", "title": "Vi Voice: Chọn micro" }
     ],
+    "configuration": {
+      "title": "Vi Voice",
+      "properties": {
+        "viVoice.ffmpegPath": {
+          "type": "string",
+          "default": "ffmpeg",
+          "description": "Đường dẫn ffmpeg. Mặc định lấy từ PATH."
+        },
+        "viVoice.micDevice": {
+          "type": "string",
+          "default": "",
+          "description": "Tên thiết bị mic (dshow). Bỏ trống để tự chọn thiết bị đầu tiên. Xem danh sách bằng lệnh 'Vi Voice: Chọn micro'."
+        }
+      }
+    },
     "keybindings": [
       { "command": "viVoice.toggle", "key": "ctrl+alt+space", "args": { "target": "clipboard" } },
       { "command": "viVoice.toggle", "key": "ctrl+alt+space", "when": "editorTextFocus", "args": { "target": "editor" } },

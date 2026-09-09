@@ -27,7 +27,7 @@ export function postProcess(text: string): string {
 export async function transcribe(audio: Uint8Array, opts: TranscribeOptions): Promise<string> {
   const fetchFn = opts.fetchFn ?? fetch;
   const form = new FormData();
-  form.append('file', new Blob([audio as BlobPart], { type: 'audio/webm' }), 'audio.webm');
+  form.append('file', new Blob([audio as BlobPart], { type: 'audio/wav' }), 'audio.wav');
   form.append('model', MODEL);
   form.append('language', 'vi');
   form.append('response_format', 'json');

@@ -32,7 +32,7 @@ describe('transcribe', () => {
     expect(form.get('language')).toBe('vi');
     expect(form.get('response_format')).toBe('json');
     expect(typeof form.get('prompt')).toBe('string');
-    expect((form.get('file') as File).name).toBe('audio.webm');
+    expect((form.get('file') as File).name).toBe('audio.wav');
   });
 
   it.each([

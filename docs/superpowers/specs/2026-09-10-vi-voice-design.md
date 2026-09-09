@@ -49,21 +49,31 @@ Ba module trong extension host, một webview, một script AutoHotkey.
 - Đích được chốt lúc **bắt đầu** ghi. Lúc dừng, người dùng có thể đã đổi focus,
   vẫn chèn vào đích ban đầu.
 
-### 2. Recorder (webview)
+### 2. Recorder (ffmpeg dshow, chạy nền)
 
-- `WebviewPanel` mở ở `ViewColumn.Beside`, `retainContextWhenHidden: true`,
-  giữ suốt phiên để không xin quyền mic lại. Nội dung: một dòng trạng thái,
-  không có nút.
-- Nhận message `start` → `getUserMedia({audio:true})`, `MediaRecorder`
-  mimeType `audio/webm;codecs=opus`. Nhận `stop` → gom chunks thành Blob →
-  `arrayBuffer` → `postMessage({type:"audio", bytes})`.
-- Lỗi quyền mic → `postMessage({type:"error", code:"mic-denied"})`.
-- Ghi quá 120 giây tự dừng (bảo vệ khỏi quên tắt).
+Kết quả spike 2026-09-10: VS Code từ chối `getUserMedia` trong webview
+(`NotAllowedError`) dù Windows đã cho phép, nên bỏ hướng webview.
+
+- Spawn `ffmpeg -f dshow -audio_buffer_size 50 -i audio=<tên mic> -ac 1
+  -ar 16000 -f s16le -flush_packets 1 pipe:1`, đọc PCM thô từ stdout.
+- Mở mic mất ~2-3 giây, vì vậy tiến trình ffmpeg được **giữ chạy nền**: lúc
+  rảnh bỏ dữ liệu, lúc ghi gom chunk. Bấm phím là ghi ngay. Tự tắt sau 10
+  phút không dùng (lần dùng kế tiếp chờ mở mic lại).
+- Trên Windows, ffmpeg không nhận `q` qua stdin, nên dừng bằng cách ngừng
+  gom chunk (ghi thêm 300 ms đuôi) chứ không kill tiến trình. PCM được bọc
+  header WAV 44 byte trong Node (`src/wav.ts`).
+- Tên mic: setting `viVoice.micDevice`; bỏ trống thì lấy thiết bị `(audio)`
+  đầu tiên từ `ffmpeg -list_devices true -f dshow -i dummy`. Lệnh
+  `Vi Voice: Chọn micro` hiện QuickPick để chọn. Setting `viVoice.ffmpegPath`
+  mặc định `ffmpeg` trong PATH.
+- Lỗi: ffmpeg không có (ENOENT) → hướng dẫn `winget install Gyan.FFmpeg`;
+  không có mic → thông báo; ffmpeg thoát sớm → kèm dòng stderr cuối.
+- Ghi quá 120 giây tự dừng (bảo vệ khỏi quên tắt). Audio dưới 500 ms bỏ qua.
 
 ### 3. Transcriber
 
 - `POST https://api.groq.com/openai/v1/audio/transcriptions`, multipart:
-  `file` (audio.webm), `model=whisper-large-v3`, `language=vi`,
+  `file` (audio.wav, 16 kHz mono), `model=whisper-large-v3`, `language=vi`,
   `response_format=json`, `prompt` = câu tiếng Việt có xen thuật ngữ code
   (refactor, commit, pull request, function, component…) để Whisper giữ nguyên
   từ tiếng Anh.
@@ -105,11 +115,12 @@ cũng toggle được (đích = clipboard).
 vi-voice/
   package.json            contributes: commands, keybindings, configuration
   src/extension.ts        activate: đăng ký lệnh, status bar, nối các module
-  src/recorder.ts         quản lý webview, promise start/stop → Uint8Array
+  src/recorder.ts         ffmpeg dshow chạy nền, start/stop → WAV Uint8Array
   src/transcriber.ts      gọi Groq, hậu xử lý
   src/injector.ts         chèn text theo target
   src/status.ts           status bar
-  media/recorder.html     webview: getUserMedia + MediaRecorder
+  src/wav.ts              bọc PCM thành WAV
+  src/devices.ts          liệt kê mic qua ffmpeg dshow
   hotkey/vi-voice.ahk     RCtrl+RAlt → Ctrl+Alt+Space
   test/                   vitest cho transcriber (mock fetch) và injector (mock vscode)
 ```
