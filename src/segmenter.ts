@@ -8,8 +8,10 @@ export interface SegmenterOptions {
   leadInMs?: number;
   /** Khung phân tích (ms). */
   frameMs?: number;
-  /** Peak dưới mức này (dBFS) coi là im lặng. */
+  /** RMS của khung dưới mức này (dBFS) coi là im lặng. */
   speechThresholdDb?: number;
+  /** Tổng thời gian khung có tiếng nói tối thiểu (ms) để cụm được gửi; ngắn hơn coi là tiếng động. */
+  minSpeechMs?: number;
 }
 
 /**
@@ -23,6 +25,8 @@ export class Segmenter {
   private readonly frameBytes: number;
   private readonly bytesPerMs: number;
   private readonly threshold: number;
+  private readonly minSpeechMs: number;
+  private speechMs = 0;
 
   private pending: Uint8Array = new Uint8Array(0); // bytes chưa đủ một khung
   private frames: Uint8Array[] = []; // các khung của cụm hiện tại
@@ -37,7 +41,8 @@ export class Segmenter {
     this.leadInMs = opts.leadInMs ?? 200;
     this.bytesPerMs = (opts.sampleRate * 2) / 1000;
     this.frameBytes = Math.round(this.bytesPerMs * frameMs);
-    this.threshold = 32768 * Math.pow(10, (opts.speechThresholdDb ?? -40) / 20);
+    this.threshold = 32768 * Math.pow(10, (opts.speechThresholdDb ?? -42) / 20);
+    this.minSpeechMs = opts.minSpeechMs ?? 300;
   }
 
   push(chunk: Uint8Array): void {
@@ -60,9 +65,10 @@ export class Segmenter {
 
   private frame(f: Uint8Array): void {
     const frameMs = f.length / this.bytesPerMs;
-    const loud = peak(f) >= this.threshold;
+    const loud = rms(f) >= this.threshold;
     if (loud) {
       this.hasSpeech = true;
+      this.speechMs += frameMs;
       this.silenceRunMs = 0;
     } else {
       this.silenceRunMs += frameMs;
@@ -83,23 +89,26 @@ export class Segmenter {
 
   private emit(): void {
     const frames = this.frames;
-    const had = this.hasSpeech;
+    const enough = this.hasSpeech && this.speechMs >= this.minSpeechMs;
     this.frames = [];
     this.hasSpeech = false;
+    this.speechMs = 0;
     this.silenceRunMs = 0;
     this.segmentMs = 0;
-    if (had && frames.length) this.onSegment(concat(frames));
+    if (enough && frames.length) this.onSegment(concat(frames));
   }
 }
 
-function peak(pcm: Uint8Array): number {
+function rms(pcm: Uint8Array): number {
   const view = new DataView(pcm.buffer, pcm.byteOffset, pcm.byteLength);
-  let max = 0;
+  let sumSq = 0;
+  let n = 0;
   for (let i = 0; i + 1 < pcm.byteLength; i += 2) {
-    const a = Math.abs(view.getInt16(i, true));
-    if (a > max) max = a;
+    const s = view.getInt16(i, true);
+    sumSq += s * s;
+    n++;
   }
-  return max;
+  return n ? Math.sqrt(sumSq / n) : 0;
 }
 
 function concat(parts: Uint8Array[]): Uint8Array {

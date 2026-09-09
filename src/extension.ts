@@ -178,11 +178,12 @@ export function activate(ctx: vscode.ExtensionContext): void {
             'Kiểm tra mic trong Windows Settings > Sound > Input, hoặc chạy lệnh "Vi Voice: Chọn micro".',
         );
       }
+      status.set('idle');
     } catch (err) {
       session = undefined;
+      status.set('idle');
       void vscode.window.showErrorMessage(`Vi Voice: ${(err as Error).message}`);
     } finally {
-      status.set('idle');
       busy = false;
     }
   }

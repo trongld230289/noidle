@@ -64,6 +64,22 @@ describe('Segmenter', () => {
     expect(ms(segments[0].byteLength)).toBeCloseTo(800, -2);
   });
 
+  it('ignores a short click (100ms) surrounded by silence', () => {
+    const { seg, segments } = make();
+    seg.push(silence(500));
+    seg.push(speech(100));
+    seg.push(silence(1000));
+    seg.flush();
+    expect(segments).toHaveLength(0);
+  });
+
+  it('ignores background noise below the RMS threshold', () => {
+    const { seg, segments } = make();
+    seg.push(pcm(3000, 150)); // ~ -47 dBFS RMS
+    seg.flush();
+    expect(segments).toHaveLength(0);
+  });
+
   it('handles chunks of arbitrary size', () => {
     const { seg, segments } = make();
     const all = new Uint8Array([...speech(1000), ...silence(700)]);
