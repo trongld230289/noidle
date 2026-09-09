@@ -39,8 +39,23 @@ function config() {
   };
 }
 
+/**
+ * Terminal gửi mọi phím cho shell trừ các lệnh trong commandsToSkipShell.
+ * Không có dòng này thì Ctrl+Alt+Space trong terminal thành ký tự lạ thay vì bật Vi Voice.
+ */
+async function ensureTerminalSkipShell(): Promise<void> {
+  const cfg = vscode.workspace.getConfiguration('terminal.integrated');
+  const list = cfg.get<string[]>('commandsToSkipShell', []);
+  if (list.includes('viVoice.toggle')) return;
+  await cfg.update('commandsToSkipShell', [...list, 'viVoice.toggle'], vscode.ConfigurationTarget.Global);
+  void vscode.window.showInformationMessage(
+    'Vi Voice: đã thêm "viVoice.toggle" vào setting terminal.integrated.commandsToSkipShell để phím tắt chạy được trong terminal.',
+  );
+}
+
 export function activate(ctx: vscode.ExtensionContext): void {
   const status = new StatusBar();
+  void ensureTerminalSkipShell().catch(() => undefined);
   let recorder = new Recorder(config());
   const api: InjectorApi = {
     activeTerminal: () => vscode.window.activeTerminal,
