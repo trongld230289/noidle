@@ -14,7 +14,8 @@
       { "command": "viVoice.toggle", "title": "Vi Voice: Bắt đầu / dừng nghe" },
       { "command": "viVoice.setApiKey", "title": "Vi Voice: Set Groq API Key" },
       { "command": "viVoice.retry", "title": "Vi Voice: Gửi lại audio cuối" },
-      { "command": "viVoice.pickMic", "title": "Vi Voice: Chọn micro" }
+      { "command": "viVoice.pickMic", "title": "Vi Voice: Chọn micro" },
+      { "command": "viVoice.saveLastAudio", "title": "Vi Voice: Lưu audio cuối ra file (debug)" }
     ],
     "configuration": {
       "title": "Vi Voice",

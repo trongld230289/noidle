@@ -24,3 +24,19 @@ export function pcmToWav(pcm: Uint8Array, sampleRate: number, channels: number):
   out.set(pcm, 44);
   return out;
 }
+
+/** Mức âm của WAV s16le: peak và RMS tính theo dBFS (0 = cực đại, -Infinity = im lặng). */
+export function audioLevel(wav: Uint8Array): { peakDb: number; rmsDb: number } {
+  const view = new DataView(wav.buffer, wav.byteOffset + 44, wav.byteLength - 44);
+  const n = Math.floor(view.byteLength / 2);
+  let peak = 0;
+  let sumSq = 0;
+  for (let i = 0; i < n; i++) {
+    const s = view.getInt16(i * 2, true);
+    const a = Math.abs(s);
+    if (a > peak) peak = a;
+    sumSq += s * s;
+  }
+  const toDb = (x: number) => (x > 0 ? 20 * Math.log10(x / 32768) : -Infinity);
+  return { peakDb: toDb(peak), rmsDb: n > 0 ? toDb(Math.sqrt(sumSq / n)) : -Infinity };
+}

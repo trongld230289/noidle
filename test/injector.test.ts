@@ -8,6 +8,8 @@ function fakeApi(overrides: Partial<InjectorApi> = {}) {
     activeTerminal: () => ({ sendText }),
     executeCommand: vi.fn(async () => undefined),
     writeClipboard: vi.fn(async () => undefined),
+    readClipboard: vi.fn(async () => 'old'),
+    pasteKeystroke: vi.fn(async () => undefined),
     ...overrides,
   };
   return api;
@@ -21,10 +23,11 @@ describe('inject', () => {
     expect(api.writeClipboard).not.toHaveBeenCalled();
   });
 
-  it('terminal without active terminal falls back to clipboard', async () => {
+  it('terminal without active terminal falls back to paste', async () => {
     const api = fakeApi({ activeTerminal: () => undefined });
-    expect(await inject('terminal', 'a', api)).toBe('clipboard');
-    expect(api.writeClipboard).toHaveBeenCalledWith('a');
+    expect(await inject('terminal', 'a', api)).toBe('paste');
+    expect(api.writeClipboard).toHaveBeenNthCalledWith(1, 'a');
+    expect(api.pasteKeystroke).toHaveBeenCalled();
   });
 
   it.each(['chat', 'editor'] as const)('%s: uses the type command', async (target) => {
@@ -33,16 +36,25 @@ describe('inject', () => {
     expect(api.executeCommand).toHaveBeenCalledWith('type', { text: 'b' });
   });
 
-  it('type command failure falls back to clipboard', async () => {
+  it('type command failure falls back to paste', async () => {
     const api = fakeApi({ executeCommand: vi.fn(async () => { throw new Error('no editor'); }) });
-    expect(await inject('editor', 'c', api)).toBe('clipboard');
-    expect(api.writeClipboard).toHaveBeenCalledWith('c');
+    expect(await inject('editor', 'c', api)).toBe('paste');
+    expect(api.writeClipboard).toHaveBeenNthCalledWith(1, 'c');
   });
 
-  it('clipboard target writes clipboard', async () => {
+  it('clipboard target: copies, sends Ctrl+V, then restores old clipboard', async () => {
     const api = fakeApi();
-    expect(await inject('clipboard', 'd', api)).toBe('clipboard');
-    expect(api.writeClipboard).toHaveBeenCalledWith('d');
+    expect(await inject('clipboard', 'd', api)).toBe('paste');
+    expect(api.writeClipboard).toHaveBeenNthCalledWith(1, 'd');
+    expect(api.pasteKeystroke).toHaveBeenCalled();
+    expect(api.writeClipboard).toHaveBeenNthCalledWith(2, 'old');
+  });
+
+  it('clipboard target: paste keystroke failure leaves text in clipboard', async () => {
+    const api = fakeApi({ pasteKeystroke: vi.fn(async () => { throw new Error('no powershell'); }) });
+    expect(await inject('clipboard', 'e', api)).toBe('clipboard');
+    expect(api.writeClipboard).toHaveBeenCalledTimes(1);
+    expect(api.writeClipboard).toHaveBeenCalledWith('e');
   });
 
   it('empty text does nothing', async () => {

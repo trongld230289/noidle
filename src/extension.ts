@@ -4,10 +4,32 @@ import { Recorder } from './recorder';
 import { listAudioDevices } from './devices';
 import { transcribe, TranscribeError } from './transcriber';
 import { inject, InjectorApi, Target } from './injector';
+import { audioLevel } from './wav';
+import * as fs from 'fs';
+import { execFile } from 'child_process';
+import * as os from 'os';
+import * as path from 'path';
 
 const SECRET_KEY = 'viVoice.groqApiKey';
 const MAX_RECORD_MS = 120_000;
 const MIN_RECORD_MS = 500;
+/** Dưới mức này coi như không có tiếng nói, không gửi Groq (tránh Whisper bịa câu). */
+const QUIET_PEAK_DB = -40;
+
+/** Gửi Ctrl+V vào cửa sổ đang focus bằng SendKeys của Windows. */
+function sendCtrlV(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'powershell',
+      [
+        '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command',
+        'Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait("^v")',
+      ],
+      { windowsHide: true, timeout: 5000 },
+      (err) => (err ? reject(new Error(`Không gửi được Ctrl+V: ${err.message}`)) : resolve()),
+    );
+  });
+}
 
 function config() {
   const c = vscode.workspace.getConfiguration('viVoice');
@@ -24,6 +46,8 @@ export function activate(ctx: vscode.ExtensionContext): void {
     activeTerminal: () => vscode.window.activeTerminal,
     executeCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),
     writeClipboard: (text) => vscode.env.clipboard.writeText(text),
+    readClipboard: () => vscode.env.clipboard.readText(),
+    pasteKeystroke: sendCtrlV,
   };
 
   let target: Target = 'clipboard';
@@ -62,7 +86,6 @@ export function activate(ctx: vscode.ExtensionContext): void {
     status.set('transcribing');
     try {
       const text = await transcribe(audio, { apiKey });
-      lastAudio = undefined;
       if (!text) {
         void vscode.window.showWarningMessage('Vi Voice: không nghe được gì');
         return;
@@ -100,8 +123,18 @@ export function activate(ctx: vscode.ExtensionContext): void {
       }
       clearTimeout(maxTimer);
       const audio = await recorder.stop();
+      lastAudio = audio;
       if (Recorder.durationMs(audio) < MIN_RECORD_MS) {
         status.set('idle');
+        return;
+      }
+      const level = audioLevel(audio);
+      if (level.peakDb < QUIET_PEAK_DB) {
+        status.set('idle');
+        void vscode.window.showWarningMessage(
+          `Vi Voice: mic gần như im lặng (peak ${level.peakDb.toFixed(0)} dB, rms ${level.rmsDb.toFixed(0)} dB). ` +
+            'Kiểm tra mic trong Windows Settings > Sound > Input, hoặc chạy lệnh "Vi Voice: Chọn micro".',
+        );
         return;
       }
       await deliver(audio);
@@ -137,9 +170,23 @@ export function activate(ctx: vscode.ExtensionContext): void {
     }
   }
 
+  async function saveLastAudio(): Promise<void> {
+    if (!lastAudio) {
+      void vscode.window.showInformationMessage('Vi Voice: chưa có audio nào');
+      return;
+    }
+    const file = path.join(os.tmpdir(), 'vi-voice-last.wav');
+    await fs.promises.writeFile(file, lastAudio);
+    const level = audioLevel(lastAudio);
+    void vscode.window.showInformationMessage(
+      `Vi Voice: đã lưu ${file} (${(Recorder.durationMs(lastAudio) / 1000).toFixed(1)}s, peak ${level.peakDb.toFixed(0)} dB)`,
+    );
+  }
+
   ctx.subscriptions.push(
     status,
     { dispose: () => recorder.dispose() },
+    vscode.commands.registerCommand('viVoice.saveLastAudio', saveLastAudio),
     vscode.commands.registerCommand('viVoice.toggle', toggle),
     vscode.commands.registerCommand('viVoice.setApiKey', setApiKey),
     vscode.commands.registerCommand('viVoice.retry', retry),
