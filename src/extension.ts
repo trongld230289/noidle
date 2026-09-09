@@ -41,7 +41,7 @@ function config() {
 
 /**
  * Terminal gửi mọi phím cho shell trừ các lệnh trong commandsToSkipShell.
- * Không có dòng này thì Ctrl+Alt+Space trong terminal thành ký tự lạ thay vì bật Vi Voice.
+ * Không có dòng này thì F6 trong terminal thành ký tự lạ thay vì bật Vi Voice.
  */
 async function ensureTerminalSkipShell(): Promise<void> {
   const cfg = vscode.workspace.getConfiguration('terminal.integrated');

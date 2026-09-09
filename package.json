@@ -33,10 +33,10 @@
       }
     },
     "keybindings": [
-      { "command": "viVoice.toggle", "key": "ctrl+alt+space", "args": { "target": "clipboard" } },
-      { "command": "viVoice.toggle", "key": "ctrl+alt+space", "when": "editorTextFocus", "args": { "target": "editor" } },
-      { "command": "viVoice.toggle", "key": "ctrl+alt+space", "when": "inChatInput", "args": { "target": "chat" } },
-      { "command": "viVoice.toggle", "key": "ctrl+alt+space", "when": "terminalFocus", "args": { "target": "terminal" } }
+      { "command": "viVoice.toggle", "key": "f6", "args": { "target": "clipboard" } },
+      { "command": "viVoice.toggle", "key": "f6", "when": "editorTextFocus", "args": { "target": "editor" } },
+      { "command": "viVoice.toggle", "key": "f6", "when": "inChatInput", "args": { "target": "chat" } },
+      { "command": "viVoice.toggle", "key": "f6", "when": "terminalFocus", "args": { "target": "terminal" } }
     ]
   },
   "scripts": {

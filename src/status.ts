@@ -15,12 +15,12 @@ export class StatusBar implements vscode.Disposable {
     switch (state) {
       case 'idle':
         this.item.text = '$(mic) Vi Voice';
-        this.item.tooltip = 'Ctrl+Alt+Space để bắt đầu nghe';
+        this.item.tooltip = 'F6 để bắt đầu nghe';
         this.item.backgroundColor = undefined;
         break;
       case 'recording':
         this.item.text = '$(record) Đang nghe…';
-        this.item.tooltip = 'Ctrl+Alt+Space để dừng';
+        this.item.tooltip = 'F6 để dừng';
         this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
         break;
       case 'transcribing':
