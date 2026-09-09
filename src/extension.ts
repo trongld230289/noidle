@@ -1,10 +1,11 @@
 import * as vscode from 'vscode';
 import { StatusBar } from './status';
-import { Recorder } from './recorder';
+import { Recorder, SAMPLE_RATE, CHANNELS } from './recorder';
+import { Segmenter } from './segmenter';
 import { listAudioDevices } from './devices';
 import { transcribe, TranscribeError } from './transcriber';
 import { inject, InjectorApi, Target } from './injector';
-import { audioLevel } from './wav';
+import { audioLevel, pcmToWav } from './wav';
 import * as fs from 'fs';
 import { execFile } from 'child_process';
 import * as os from 'os';
@@ -13,8 +14,6 @@ import * as path from 'path';
 const SECRET_KEY = 'viVoice.groqApiKey';
 const MAX_RECORD_MS = 120_000;
 const MIN_RECORD_MS = 500;
-/** Dưới mức này coi như không có tiếng nói, không gửi Groq (tránh Whisper bịa câu). */
-const QUIET_PEAK_DB = -40;
 
 /** Gửi Ctrl+V vào cửa sổ đang focus bằng SendKeys của Windows. */
 function sendCtrlV(): Promise<void> {
@@ -33,9 +32,11 @@ function sendCtrlV(): Promise<void> {
 
 function config() {
   const c = vscode.workspace.getConfiguration('viVoice');
+  const typing = c.get<number>('typingDelayMs', 12);
   return {
     ffmpegPath: c.get<string>('ffmpegPath', 'ffmpeg') || 'ffmpeg',
     micDevice: c.get<string>('micDevice', '') || undefined,
+    typeDelayMs: typing > 0 ? typing : undefined,
   };
 }
 
@@ -53,6 +54,15 @@ async function ensureTerminalSkipShell(): Promise<void> {
   );
 }
 
+/** Một lần bấm F6 → nói → F6. Các cụm được gửi và chèn tuần tự trong lúc vẫn đang nghe. */
+interface Session {
+  target: Target;
+  segmenter: Segmenter;
+  queue: Promise<void>;
+  transcript: string;
+  segments: number;
+}
+
 export function activate(ctx: vscode.ExtensionContext): void {
   const status = new StatusBar();
   void ensureTerminalSkipShell().catch(() => undefined);
@@ -65,15 +75,15 @@ export function activate(ctx: vscode.ExtensionContext): void {
     pasteKeystroke: sendCtrlV,
   };
 
-  let target: Target = 'clipboard';
+  let session: Session | undefined;
   let busy = false;
-  let lastAudio: Uint8Array | undefined;
+  let lastAudio: Uint8Array | undefined; // toàn bộ lần ghi cuối (debug)
+  let failed: { wav: Uint8Array; target: Target; context: string } | undefined; // cụm gửi lỗi, để retry
   let maxTimer: NodeJS.Timeout | undefined;
 
-  // Đổi setting ffmpeg/mic thì tạo recorder mới.
   ctx.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('viVoice')) {
+      if (e.affectsConfiguration('viVoice.ffmpegPath') || e.affectsConfiguration('viVoice.micDevice')) {
         recorder.dispose();
         recorder = new Recorder(config());
       }
@@ -95,22 +105,15 @@ export function activate(ctx: vscode.ExtensionContext): void {
     return (await ctx.secrets.get(SECRET_KEY)) ?? setApiKey();
   }
 
-  async function deliver(audio: Uint8Array): Promise<void> {
-    const apiKey = await getApiKey();
-    if (!apiKey) return;
-    status.set('transcribing');
+  /** Gửi một cụm lên Groq và chèn kết quả. Trả về text đã chèn ('' nếu không có). */
+  async function deliverSegment(wav: Uint8Array, target: Target, context: string): Promise<string> {
+    const apiKey = await ctx.secrets.get(SECRET_KEY);
+    if (!apiKey) return '';
+    let text: string;
     try {
-      const text = await transcribe(audio, { apiKey });
-      if (!text) {
-        void vscode.window.showWarningMessage('Vi Voice: không nghe được gì');
-        return;
-      }
-      const used = await inject(target, text, api);
-      if (used === 'clipboard') {
-        void vscode.window.showInformationMessage(`Vi Voice: đã copy vào clipboard: "${text}"`);
-      }
+      text = await transcribe(wav, { apiKey, context });
     } catch (err) {
-      lastAudio = audio;
+      failed = { wav, target, context };
       if (err instanceof TranscribeError && err.kind === 'auth') {
         const pick = await vscode.window.showErrorMessage(`Vi Voice: ${err.message}`, 'Nhập lại key');
         if (pick) await setApiKey();
@@ -119,54 +122,84 @@ export function activate(ctx: vscode.ExtensionContext): void {
         const pick = await vscode.window.showErrorMessage(`Vi Voice: ${message}`, 'Gửi lại');
         if (pick) void vscode.commands.executeCommand('viVoice.retry');
       }
-    } finally {
-      status.set('idle');
+      return '';
     }
+    if (!text) return '';
+    const piece = (context ? ' ' : '') + text;
+    const used = await inject(target, piece, api, { typeDelayMs: config().typeDelayMs });
+    if (used === 'clipboard') {
+      void vscode.window.showInformationMessage(`Vi Voice: đã copy vào clipboard: "${text}"`);
+    }
+    return piece;
+  }
+
+  function enqueue(s: Session, pcm: Uint8Array): void {
+    s.segments++;
+    const wav = pcmToWav(pcm, SAMPLE_RATE, CHANNELS);
+    s.queue = s.queue
+      .then(async () => {
+        s.transcript += await deliverSegment(wav, s.target, s.transcript);
+      })
+      .catch(() => undefined);
   }
 
   async function toggle(args?: { target?: Target }): Promise<void> {
     if (busy) return;
     busy = true;
     try {
-      if (!recorder.recording) {
+      if (!session) {
         if (!(await getApiKey())) return;
-        target = args?.target ?? 'clipboard';
-        await recorder.start();
+        const s: Session = {
+          target: args?.target ?? 'clipboard',
+          segmenter: undefined as unknown as Segmenter,
+          queue: Promise.resolve(),
+          transcript: '',
+          segments: 0,
+        };
+        s.segmenter = new Segmenter({ sampleRate: SAMPLE_RATE }, (pcm) => enqueue(s, pcm));
+        await recorder.start((chunk) => s.segmenter.push(chunk));
+        session = s;
         status.set('recording');
         maxTimer = setTimeout(() => void vscode.commands.executeCommand('viVoice.toggle'), MAX_RECORD_MS);
         return;
       }
       clearTimeout(maxTimer);
+      const s = session;
+      session = undefined;
       const audio = await recorder.stop();
       lastAudio = audio;
-      if (Recorder.durationMs(audio) < MIN_RECORD_MS) {
-        status.set('idle');
-        return;
-      }
-      const level = audioLevel(audio);
-      if (level.peakDb < QUIET_PEAK_DB) {
-        status.set('idle');
+      s.segmenter.flush();
+      status.set('transcribing');
+      await s.queue;
+      if (s.segments === 0 && Recorder.durationMs(audio) >= MIN_RECORD_MS) {
+        const level = audioLevel(audio);
         void vscode.window.showWarningMessage(
-          `Vi Voice: mic gần như im lặng (peak ${level.peakDb.toFixed(0)} dB, rms ${level.rmsDb.toFixed(0)} dB). ` +
+          `Vi Voice: không nghe thấy tiếng nói (peak ${level.peakDb.toFixed(0)} dB, rms ${level.rmsDb.toFixed(0)} dB). ` +
             'Kiểm tra mic trong Windows Settings > Sound > Input, hoặc chạy lệnh "Vi Voice: Chọn micro".',
         );
-        return;
       }
-      await deliver(audio);
     } catch (err) {
-      status.set('idle');
+      session = undefined;
       void vscode.window.showErrorMessage(`Vi Voice: ${(err as Error).message}`);
     } finally {
+      status.set('idle');
       busy = false;
     }
   }
 
   async function retry(): Promise<void> {
-    if (!lastAudio) {
-      void vscode.window.showInformationMessage('Vi Voice: không có audio để gửi lại');
+    if (!failed) {
+      void vscode.window.showInformationMessage('Vi Voice: không có cụm nào cần gửi lại');
       return;
     }
-    await deliver(lastAudio);
+    const f = failed;
+    failed = undefined;
+    status.set('transcribing');
+    try {
+      await deliverSegment(f.wav, f.target, f.context);
+    } finally {
+      status.set('idle');
+    }
   }
 
   async function pickMic(): Promise<void> {
@@ -201,11 +234,11 @@ export function activate(ctx: vscode.ExtensionContext): void {
   ctx.subscriptions.push(
     status,
     { dispose: () => recorder.dispose() },
-    vscode.commands.registerCommand('viVoice.saveLastAudio', saveLastAudio),
     vscode.commands.registerCommand('viVoice.toggle', toggle),
     vscode.commands.registerCommand('viVoice.setApiKey', setApiKey),
     vscode.commands.registerCommand('viVoice.retry', retry),
     vscode.commands.registerCommand('viVoice.pickMic', pickMic),
+    vscode.commands.registerCommand('viVoice.saveLastAudio', saveLastAudio),
   );
 }
 

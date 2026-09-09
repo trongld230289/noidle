@@ -25,6 +25,11 @@
           "default": "ffmpeg",
           "description": "Đường dẫn ffmpeg. Mặc định lấy từ PATH."
         },
+        "viVoice.typingDelayMs": {
+          "type": "number",
+          "default": 12,
+          "description": "Hiệu ứng gõ từng ký tự: nghỉ bao nhiêu ms giữa các ký tự (0 = chèn nguyên cụm)."
+        },
         "viVoice.micDevice": {
           "type": "string",
           "default": "",

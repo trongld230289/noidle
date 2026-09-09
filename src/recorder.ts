@@ -36,11 +36,15 @@ export class Recorder {
     return this._recording;
   }
 
-  async start(): Promise<void> {
+  private onData: ((chunk: Uint8Array) => void) | undefined;
+
+  /** Bắt đầu ghi. onData (tuỳ chọn) nhận PCM s16le live trong lúc ghi. */
+  async start(onData?: (chunk: Uint8Array) => void): Promise<void> {
     if (this._recording) return;
     clearTimeout(this.idleTimer);
     await this.ensureProcess();
     this.chunks = [];
+    this.onData = onData;
     this._recording = true;
   }
 
@@ -94,7 +98,9 @@ export class Recorder {
     this.proc = proc;
     let stderrTail = '';
     proc.stdout!.on('data', (d: Buffer) => {
-      if (this._recording) this.chunks.push(d);
+      if (!this._recording) return;
+      this.chunks.push(d);
+      this.onData?.(new Uint8Array(d.buffer, d.byteOffset, d.byteLength));
     });
     proc.stderr!.on('data', (d: Buffer) => {
       stderrTail = (stderrTail + d.toString()).slice(-2000);

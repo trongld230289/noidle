@@ -57,6 +57,21 @@ describe('inject', () => {
     expect(api.writeClipboard).toHaveBeenCalledWith('e');
   });
 
+  it('typeDelayMs: terminal receives one sendText per character', async () => {
+    const api = fakeApi();
+    await inject('terminal', 'xin chào', api, { typeDelayMs: 0 });
+    expect(api.sendText).toHaveBeenCalledTimes('xin chào'.length);
+    expect(api.sendText).toHaveBeenNthCalledWith(1, 'x', false);
+    expect(api.sendText).toHaveBeenLastCalledWith('o', false);
+  });
+
+  it('typeDelayMs: editor receives one type command per character', async () => {
+    const api = fakeApi();
+    await inject('editor', 'ab', api, { typeDelayMs: 0 });
+    expect(api.executeCommand).toHaveBeenNthCalledWith(1, 'type', { text: 'a' });
+    expect(api.executeCommand).toHaveBeenNthCalledWith(2, 'type', { text: 'b' });
+  });
+
   it('empty text does nothing', async () => {
     const api = fakeApi();
     expect(await inject('terminal', '', api)).toBe('terminal');

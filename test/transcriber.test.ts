@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { transcribe, postProcess } from '../src/transcriber';
+import { transcribe, postProcess, buildPrompt } from '../src/transcriber';
 
 function fakeFetch(status: number, body: unknown) {
   return vi.fn(async () =>
@@ -18,6 +18,16 @@ describe('postProcess', () => {
   });
 });
 
+describe('buildPrompt', () => {
+  it('appends the tail of previous transcript to the base prompt', () => {
+    const base = buildPrompt();
+    expect(buildPrompt('xin chào')).toBe(`${base} xin chào`);
+    const long = 'a'.repeat(300);
+    expect(buildPrompt(long).endsWith('a'.repeat(150))).toBe(true);
+    expect(buildPrompt(long).length).toBe(base.length + 1 + 150);
+  });
+});
+
 describe('transcribe', () => {
   it('posts multipart to Groq with bearer key and returns processed text', async () => {
     const f = fakeFetch(200, { text: 'refactor hàm claimNext.' });
@@ -31,7 +41,7 @@ describe('transcribe', () => {
     expect(form.get('model')).toBe('whisper-large-v3');
     expect(form.get('language')).toBe('vi');
     expect(form.get('response_format')).toBe('json');
-    expect(typeof form.get('prompt')).toBe('string');
+    expect(form.get('prompt')).toBe(buildPrompt());
     expect((form.get('file') as File).name).toBe('audio.wav');
   });
 

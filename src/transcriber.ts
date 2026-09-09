@@ -11,6 +11,8 @@ export interface TranscribeOptions {
   apiKey: string;
   fetchFn?: typeof fetch;
   timeoutMs?: number;
+  /** Chữ đã nhận ở các cụm trước, để Whisper nối câu đúng. */
+  context?: string;
 }
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -19,6 +21,13 @@ const MODEL = 'whisper-large-v3';
 const PROMPT =
   'Tôi cần refactor function claimNext, rồi commit và tạo pull request. ' +
   'Component này dùng React hook, gọi API endpoint trả về JSON, viết unit test bằng vitest.';
+
+const MAX_CONTEXT_CHARS = 150;
+
+export function buildPrompt(context?: string): string {
+  const tail = (context ?? '').trim().slice(-MAX_CONTEXT_CHARS);
+  return tail ? `${PROMPT} ${tail}` : PROMPT;
+}
 
 export function postProcess(text: string): string {
   return text.trim().replace(/\.$/u, '');
@@ -31,7 +40,7 @@ export async function transcribe(audio: Uint8Array, opts: TranscribeOptions): Pr
   form.append('model', MODEL);
   form.append('language', 'vi');
   form.append('response_format', 'json');
-  form.append('prompt', PROMPT);
+  form.append('prompt', buildPrompt(opts.context));
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 30_000);
