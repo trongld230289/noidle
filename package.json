@@ -2,7 +2,7 @@
   "name": "vi-voice",
   "displayName": "Vi Voice",
   "description": "Gõ tiếng Việt bằng giọng nói vào terminal, Copilot Chat và editor",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "publisher": "trongld",
   "license": "MIT",
   "engines": {
@@ -51,13 +51,18 @@
           "default": 12,
           "description": "Hiệu ứng gõ từng ký tự: nghỉ bao nhiêu ms giữa các ký tự (0 = chèn nguyên cụm)."
         },
+        "viVoice.language": {
+          "type": "string",
+          "default": "vi",
+          "description": "Mã ngôn ngữ báo cho Whisper. Mặc định vi. Để trống thì Whisper tự nhận diện, có thể nghe từ tiếng Anh tốt hơn nhưng đôi khi dịch cả câu sang tiếng Anh."
+        },
         "viVoice.glossary": {
           "type": "array",
           "items": {
             "type": "string"
           },
           "default": [],
-          "description": "Thuật ngữ riêng hay nói: tên project, tên biến, tên người, từ viết tắt. Ví dụ [\"claimNext\", \"Vi Voice\", \"UX\"]. Được đưa vào prompt Whisper và LLM để viết đúng chính tả."
+          "description": "Từ tiếng Anh hay nói mà Whisper nghe sai, cùng tên project, tên biến, tên người. Ví dụ [\"impact\", \"order view\", \"claimNext\"]. Được đưa vào prompt Whisper và LLM để viết đúng."
         },
         "viVoice.refine": {
           "type": "boolean",

@@ -41,6 +41,7 @@ function config() {
     micDevice: c.get<string>('micDevice', '') || undefined,
     typeDelayMs: typing > 0 ? typing : undefined,
     glossary: c.get<string[]>('glossary', []),
+    language: c.get<string>('language', 'vi'),
     refine: c.get<boolean>('refine', true),
     refineModel: c.get<string>('refineModel', DEFAULT_REFINE_MODEL) || DEFAULT_REFINE_MODEL,
   };
@@ -154,6 +155,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       text = await transcribe(wav, {
         apiKey,
         glossary: cfg.glossary,
+        language: cfg.language,
         onRaw: (raw) => log(`whisper thô: ${JSON.stringify(raw)}`),
       });
     } catch (err) {

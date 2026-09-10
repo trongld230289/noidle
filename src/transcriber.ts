@@ -13,6 +13,8 @@ export interface TranscribeOptions {
   timeoutMs?: number;
   /** Thuật ngữ riêng của người dùng, đưa vào prompt để Whisper viết đúng. */
   glossary?: string[];
+  /** Mã ngôn ngữ cho Whisper (mặc định 'vi'). Rỗng = để Whisper tự nhận diện. */
+  language?: string;
   /** Nhận chữ thô của Whisper trước khi lọc, để ghi log. */
   onRaw?: (raw: string) => void;
 }
@@ -22,10 +24,13 @@ const MODEL = 'whisper-large-v3';
 // Gợi ý ngữ cảnh để Whisper giữ nguyên thuật ngữ và chữ viết tắt tiếng Anh thay vì phiên âm
 // (UI thành "du ai", API thành "ây pi ai"). Whisper chỉ đọc ~224 token cuối nên phải ngắn.
 // Viết thành câu tự nhiên: Whisper bắt chước văn phong của prompt, danh sách rời rạc làm nó ra chữ lạ.
+// Tránh từ tiếng Anh ngắn dễ lẫn với từ tiếng Việt (bug, log): Whisper hay ghép chúng vào câu
+// thay cho từ thật ("có bị impact không" thành "có bị bug không").
 const PROMPT =
-  'Mình đang sửa UI và gọi API, đọc JSON, viết CSS với SQL, dùng React hook và TypeScript. ' +
+  'Mình đang sửa UI: thêm button, label, input, form, modal, dropdown, table, column, layout, component, page. ' +
+  'Gọi API, đọc JSON, viết CSS, dùng React hook và TypeScript. ' +
   'Xong thì git commit, push, tạo pull request, chạy unit test, build rồi deploy. ' +
-  'Có bug thì xem log để debug, refactor function, hỏi Copilot hoặc Claude.';
+  'Việc này có impact gì không, có cần refactor function không, hỏi Copilot hoặc Claude.';
 
 /**
  * Prompt cho Whisper: thuật ngữ mặc định rồi từ điển của người dùng.
@@ -46,7 +51,8 @@ export async function transcribe(audio: Uint8Array, opts: TranscribeOptions): Pr
   const form = new FormData();
   form.append('file', new Blob([audio as BlobPart], { type: 'audio/wav' }), 'audio.wav');
   form.append('model', MODEL);
-  form.append('language', 'vi');
+  const language = opts.language === undefined ? 'vi' : opts.language.trim();
+  if (language) form.append('language', language);
   form.append('response_format', 'verbose_json');
   const prompt = buildPrompt(opts.glossary);
   form.append('prompt', prompt);

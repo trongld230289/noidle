@@ -78,6 +78,13 @@ describe('transcribe', () => {
     expect(text).toBe('rồi chạy test');
   });
 
+  it('omits language when set to empty so Whisper auto-detects', async () => {
+    const f = fakeFetch(200, { text: 'ok' });
+    await transcribe(audio, { apiKey: 'k', language: '', fetchFn: f as unknown as typeof fetch });
+    const form = (f.mock.calls[0] as unknown as [string, RequestInit])[1].body as FormData;
+    expect(form.get('language')).toBeNull();
+  });
+
   it('maps thrown fetch to kind network', async () => {
     const f = vi.fn(async () => { throw new Error('ECONNRESET'); });
     await expect(
