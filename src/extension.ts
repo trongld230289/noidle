@@ -5,10 +5,11 @@ import { Segmenter } from './segmenter';
 import { listAudioDevices } from './devices';
 import { transcribe, TranscribeError } from './transcriber';
 import { refine, DEFAULT_REFINE_MODEL } from './refiner';
+import { applyHooks, ClaudeSettings } from './claudeHooks';
 import { inject, InjectorApi, Target } from './injector';
 import { audioLevel, pcmToWav } from './wav';
 import * as fs from 'fs';
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
 
@@ -37,6 +38,10 @@ function config() {
   const c = vscode.workspace.getConfiguration('viVoice');
   const typing = c.get<number>('typingDelayMs', 12);
   return {
+    apiKey: (c.get<string>('groqApiKey', '') || '').trim(),
+    voiceResponse: c.get<boolean>('voiceResponse', false),
+    voice: c.get<string>('voice', 'vi-VN-HoaiMyNeural') || 'vi-VN-HoaiMyNeural',
+    voiceRate: c.get<string>('voiceRate', '+0%') || '+0%',
     ffmpegPath: c.get<string>('ffmpegPath', 'ffmpeg') || 'ffmpeg',
     micDevice: c.get<string>('micDevice', '') || undefined,
     typeDelayMs: typing > 0 ? typing : undefined,
@@ -107,29 +112,42 @@ export function activate(ctx: vscode.ExtensionContext): void {
         recorder.dispose();
         recorder = new Recorder(config());
       }
+      if (
+        e.affectsConfiguration('viVoice.voiceResponse') ||
+        e.affectsConfiguration('viVoice.voice') ||
+        e.affectsConfiguration('viVoice.voiceRate') ||
+        e.affectsConfiguration('viVoice.ffmpegPath')
+      ) {
+        void syncClaudeHooks().catch((err) => log(`lỗi đồng bộ hook: ${(err as Error).message}`));
+      }
     }),
   );
 
   async function setApiKey(): Promise<string | undefined> {
     const value = await vscode.window.showInputBox({
-      prompt: 'Groq API key (bắt đầu bằng gsk_). Lấy miễn phí tại console.groq.com/keys',
+      prompt: 'Groq API key (bắt đầu bằng gsk_). Lấy miễn phí tại console.groq.com/keys. Key được lưu vào setting viVoice.groqApiKey.',
       placeHolder: 'gsk_...',
       password: true,
       ignoreFocusOut: true,
     });
     const key = value?.trim();
-    if (key) await ctx.secrets.store(SECRET_KEY, key);
+    if (key) await vscode.workspace.getConfiguration('viVoice').update('groqApiKey', key, vscode.ConfigurationTarget.Global);
     return key || undefined;
   }
 
+  /** Key trong Settings (Ctrl+,) được ưu tiên; không có thì dùng key đã lưu ở SecretStorage từ bản cũ. */
+  async function resolveApiKey(): Promise<string | undefined> {
+    return config().apiKey || (await ctx.secrets.get(SECRET_KEY)) || undefined;
+  }
+
   async function getApiKey(): Promise<string | undefined> {
-    return (await ctx.secrets.get(SECRET_KEY)) ?? setApiKey();
+    return (await resolveApiKey()) ?? setApiKey();
   }
 
   /** Lần đầu cài, chưa có key: chỉ cho người dùng cách lấy và nhập key. */
   async function welcomeIfNoKey(): Promise<void> {
     if (ctx.globalState.get<boolean>(WELCOMED_KEY)) return;
-    if (await ctx.secrets.get(SECRET_KEY)) return;
+    if (await resolveApiKey()) return;
     await ctx.globalState.update(WELCOMED_KEY, true);
     const pick = await vscode.window.showInformationMessage(
       'Vi Voice cần Groq API key (miễn phí) để nhận dạng giọng nói. Lấy key tại console.groq.com/keys rồi nhập vào đây.',
@@ -144,9 +162,68 @@ export function activate(ctx: vscode.ExtensionContext): void {
   }
   void welcomeIfNoKey().catch(() => undefined);
 
+  const claudeSettingsPath = path.join(os.homedir(), '.claude', 'settings.json');
+  const hookScript = path.join(ctx.extensionPath, 'dist', 'claude-hook.js');
+
+  function playerPath(): string {
+    const ff = config().ffmpegPath;
+    if (ff === 'ffmpeg') return 'ffplay';
+    const dir = path.dirname(ff);
+    const ext = path.extname(ff);
+    return path.join(dir, `ffplay${ext}`);
+  }
+
+  /** Ghi hook Stop + UserPromptSubmit vào ~/.claude/settings.json theo setting voiceResponse. */
+  async function syncClaudeHooks(): Promise<void> {
+    const cfg = config();
+    let current: ClaudeSettings = {};
+    try {
+      current = JSON.parse(await fs.promises.readFile(claudeSettingsPath, 'utf8')) as ClaudeSettings;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        log(`không đọc được ${claudeSettingsPath}: ${(err as Error).message}`);
+        return;
+      }
+      if (!cfg.voiceResponse) return;
+    }
+    const next = applyHooks(current, {
+      enabled: cfg.voiceResponse,
+      script: hookScript,
+      voice: cfg.voice,
+      rate: cfg.voiceRate,
+      player: playerPath(),
+    });
+    const before = JSON.stringify(current);
+    const after = JSON.stringify(next);
+    if (before === after) return;
+    await fs.promises.mkdir(path.dirname(claudeSettingsPath), { recursive: true });
+    await fs.promises.writeFile(claudeSettingsPath, JSON.stringify(next, null, 2) + '\n', 'utf8');
+    log(`hook Claude Code: ${cfg.voiceResponse ? 'đã bật' : 'đã tắt'} (${claudeSettingsPath})`);
+    if (cfg.voiceResponse) {
+      void vscode.window.showInformationMessage(
+        'Vi Voice: đã bật đọc câu trả lời của Claude Code. Phiên Claude Code đang mở cần khởi động lại để nhận hook.',
+      );
+    }
+  }
+  void syncClaudeHooks().catch((err) => log(`lỗi đồng bộ hook: ${(err as Error).message}`));
+
+  async function testVoice(): Promise<void> {
+    const cfg = config();
+    const file = path.join(os.tmpdir(), 'vi-voice-test-voice.txt');
+    await fs.promises.writeFile(file, 'Xin chào, đây là giọng đọc của Vi Voice. Xong rồi, đã sửa ba file, test pass hết.', 'utf8');
+    const child = spawn('node', [hookScript, 'play', file, '--voice', cfg.voice, '--rate', cfg.voiceRate, '--player', playerPath()], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    child.on('error', (e) => void vscode.window.showErrorMessage(`Vi Voice: không chạy được node để đọc: ${e.message}`));
+    child.unref();
+    void vscode.window.showInformationMessage(`Vi Voice: đang đọc thử bằng giọng ${cfg.voice}. Không nghe thấy gì thì xem log tại %TEMP%\\vi-voice-tts\\hook.log`);
+  }
+
   /** Gửi một cụm lên Groq và chèn kết quả. Trả về text đã chèn ('' nếu không có). */
   async function deliverSegment(wav: Uint8Array, target: Target, context: string): Promise<string> {
-    const apiKey = await ctx.secrets.get(SECRET_KEY);
+    const apiKey = await resolveApiKey();
     if (!apiKey) return '';
     let text: string;
     const cfg = config();
@@ -298,6 +375,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('viVoice.retry', retry),
     vscode.commands.registerCommand('viVoice.pickMic', pickMic),
     vscode.commands.registerCommand('viVoice.saveLastAudio', saveLastAudio),
+    vscode.commands.registerCommand('viVoice.testVoice', testVoice),
   );
 }
 

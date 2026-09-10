@@ -26,17 +26,15 @@ ffmpeg -version
 
 ## Bước 2: Nhập key vào extension
 
-Có hai cách, chọn một:
+Có ba cách, chọn một:
 
-**Cách 1: bấm F6 lần đầu.** Nếu chưa có key, extension sẽ hiện hộp nhập key ngay. Dán key vào và bấm Enter.
+**Cách 1: Settings.** Bấm `Ctrl+,`, gõ `Vi Voice` vào ô tìm kiếm, dán key vào ô **Groq Api Key**.
 
-**Cách 2: dùng Command Palette.**
+**Cách 2: bấm F6 lần đầu.** Nếu chưa có key, extension sẽ hiện hộp nhập key ngay. Dán key vào và bấm Enter.
 
-1. Bấm `Ctrl+Shift+P`.
-2. Gõ `Vi Voice: Set Groq API Key` và chọn.
-3. Dán key vào hộp nhập, bấm Enter.
+**Cách 3: Command Palette.** Bấm `Ctrl+Shift+P`, chạy `Vi Voice: Set Groq API Key`, dán key, Enter.
 
-Key được lưu trong kho bí mật của VS Code (Windows Credential Manager), không nằm trong `settings.json` và không bị đồng bộ lên tài khoản. Vì vậy bạn sẽ không thấy key trong màn hình Settings (`Ctrl+,`). Muốn đổi key, chạy lại lệnh `Vi Voice: Set Groq API Key`.
+Cả ba cách đều lưu key vào setting `viVoice.groqApiKey` trong `settings.json`. Nếu bạn bật Settings Sync, hãy thêm `viVoice.groqApiKey` vào `settingsSync.ignoredSettings` để key không bị đồng bộ.
 
 Nếu key sai hoặc hết hạn, extension báo lỗi kèm nút **Nhập lại key**.
 
@@ -60,6 +58,17 @@ Thuật ngữ lập trình tiếng Anh như `refactor`, `commit`, `pull request`
 
 Mỗi cụm sau khi nhận dạng được gửi thêm một lượt qua LLM trên Groq để sửa chính tả, dấu thanh, dấu câu và viết hoa. Bước này tốn thêm khoảng nửa giây mỗi cụm. Tắt bằng setting `viVoice.refine` nếu muốn chữ ra ngay.
 
+## Nghe Claude Code trả lời bằng giọng nói
+
+Bật setting `viVoice.voiceResponse`. Extension sẽ:
+
+1. Thêm hai hook vào `~/.claude/settings.json`: một hook dặn Claude kết thúc mỗi câu trả lời bằng một dòng bắt đầu bằng 🔊 tóm tắt ngắn gọn kiểu nói chuyện, một hook đọc dòng đó khi Claude trả lời xong.
+2. Đọc bằng giọng tiếng Việt của Microsoft Edge (miễn phí, cần mạng), phát qua `ffplay` đi kèm ffmpeg.
+
+Phiên Claude Code đang mở cần khởi động lại để nhận hook. Chạy `Vi Voice: Đọc thử giọng` để kiểm tra loa. Đổi giọng nam hoặc nữ bằng `viVoice.voice`, chỉnh tốc độ bằng `viVoice.voiceRate`. Tắt setting thì hook được gỡ khỏi `settings.json`.
+
+Nếu Claude không thêm dòng 🔊, extension đọc khoảng 300 ký tự đầu của câu trả lời, bỏ code và markdown. Lỗi đọc được ghi tại `%TEMP%\vi-voice-tts\hook.log`.
+
 ## Lệnh có sẵn
 
 Mở bằng `Ctrl+Shift+P`, gõ `Vi Voice`:
@@ -71,6 +80,7 @@ Mở bằng `Ctrl+Shift+P`, gõ `Vi Voice`:
 | Vi Voice: Gửi lại audio cuối | Gửi lại cụm vừa lỗi mạng hoặc lỗi server. |
 | Vi Voice: Chọn micro | Liệt kê micro ffmpeg thấy được và chọn một cái. |
 | Vi Voice: Lưu audio cuối ra file (debug) | Ghi lần thu cuối ra file WAV trong thư mục tạm để kiểm tra mic. |
+| Vi Voice: Đọc thử giọng | Đọc một câu mẫu bằng giọng đã chọn để kiểm tra loa. |
 
 ## Cài đặt trong Settings (Ctrl+,)
 
@@ -78,6 +88,10 @@ Gõ `Vi Voice` vào ô tìm kiếm của Settings:
 
 | Setting | Mặc định | Ý nghĩa |
 |---|---|---|
+| `viVoice.groqApiKey` | trống | Groq API key. |
+| `viVoice.voiceResponse` | `false` | Đọc câu trả lời của Claude Code thành tiếng. |
+| `viVoice.voice` | `vi-VN-HoaiMyNeural` | Giọng nữ HoaiMy hoặc giọng nam NamMinh. |
+| `viVoice.voiceRate` | `+0%` | Tốc độ đọc. |
 | `viVoice.ffmpegPath` | `ffmpeg` | Đường dẫn ffmpeg nếu không có trong PATH. |
 | `viVoice.micDevice` | trống | Tên micro. Trống thì lấy micro đầu tiên. Nên đặt bằng lệnh `Vi Voice: Chọn micro`. |
 | `viVoice.typingDelayMs` | `12` | Nghỉ bao nhiêu ms giữa các ký tự khi gõ vào editor. Đặt `0` để chèn nguyên cụm. |

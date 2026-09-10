@@ -2,7 +2,7 @@
   "name": "vi-voice",
   "displayName": "Vi Voice",
   "description": "Gõ tiếng Việt bằng giọng nói vào terminal, Copilot Chat và editor",
-  "version": "1.1.5",
+  "version": "1.2.0",
   "publisher": "trongld",
   "license": "MIT",
   "engines": {
@@ -36,11 +36,43 @@
       {
         "command": "viVoice.saveLastAudio",
         "title": "Vi Voice: Lưu audio cuối ra file (debug)"
+      },
+      {
+        "command": "viVoice.testVoice",
+        "title": "Vi Voice: Đọc thử giọng"
       }
     ],
     "configuration": {
       "title": "Vi Voice",
       "properties": {
+        "viVoice.groqApiKey": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Groq API key (bắt đầu bằng `gsk_`). Lấy miễn phí tại [console.groq.com/keys](https://console.groq.com/keys). Lưu dạng chữ thường trong settings.json; nếu dùng Settings Sync hãy thêm `viVoice.groqApiKey` vào `settingsSync.ignoredSettings`."
+        },
+        "viVoice.voiceResponse": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Đọc câu trả lời của **Claude Code** thành tiếng. Bật lên thì extension tự thêm hook vào `~/.claude/settings.json`; Claude được dặn kết thúc mỗi câu trả lời bằng một dòng 🔊 tóm tắt và chỉ dòng đó được đọc. Cần `node` và `ffplay` (đi kèm ffmpeg) trong PATH."
+        },
+        "viVoice.voice": {
+          "type": "string",
+          "default": "vi-VN-HoaiMyNeural",
+          "enum": [
+            "vi-VN-HoaiMyNeural",
+            "vi-VN-NamMinhNeural"
+          ],
+          "enumDescriptions": [
+            "Giọng nữ",
+            "Giọng nam"
+          ],
+          "description": "Giọng đọc (Microsoft Edge TTS, miễn phí, cần mạng)."
+        },
+        "viVoice.voiceRate": {
+          "type": "string",
+          "default": "+0%",
+          "description": "Tốc độ đọc, ví dụ +20% cho nhanh hơn, -10% cho chậm hơn."
+        },
         "viVoice.ffmpegPath": {
           "type": "string",
           "default": "ffmpeg",
@@ -116,7 +148,9 @@
     ]
   },
   "scripts": {
-    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node20",
+    "build": "npm run build:ext && npm run build:hook",
+    "build:ext": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node20",
+    "build:hook": "esbuild src/hook.ts --bundle --outfile=dist/claude-hook.js --format=cjs --platform=node --target=node20 --external:bufferutil --external:utf-8-validate",
     "watch": "npm run build -- --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -129,5 +163,8 @@
     "esbuild": "^0.24.0",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
+  },
+  "dependencies": {
+    "msedge-tts": "^2.0.7"
   }
 }
