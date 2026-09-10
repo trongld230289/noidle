@@ -17,17 +17,19 @@ export const DEFAULT_REFINE_MODEL = 'llama-3.3-70b-versatile';
 const DROP = '[BỎ]';
 const MAX_CONTEXT_CHARS = 300;
 
-const SYSTEM = `Bạn là bộ sửa lỗi cho văn bản nhận dạng giọng nói tiếng Việt (Whisper) của một lập trình viên đang gõ trong VS Code.
-Nhiệm vụ: sửa chính tả, dấu thanh, dấu câu, viết hoa đầu câu cho đoạn văn bản đưa vào. Chỉ sửa, không trả lời, không thêm ý, không giải thích.
-Quy tắc quan trọng nhất: đoạn đưa vào là một mẩu của câu đang nói, thường bị cắt giữa chừng và mẩu tiếp theo sẽ đến sau. Tuyệt đối không hoàn thiện câu, không thêm từ, không bỏ từ, không thay một từ có nghĩa bằng từ khác. Số từ trả về phải xấp xỉ số từ đưa vào. Nếu một từ nghe hợp lý thì giữ nguyên dù bạn nghĩ từ khác hợp hơn.
-Quy tắc:
-- Giữ nguyên thuật ngữ lập trình và từ tiếng Anh (refactor, commit, pull request, function, API, tên biến, tên file, lệnh shell, cờ, đường dẫn).
-- Không dịch tiếng Anh sang tiếng Việt và ngược lại.
-- Người nói trộn tiếng Việt với thuật ngữ tiếng Anh. Whisper hay phiên âm chữ viết tắt và từ tiếng Anh thành âm tiếng Việt vô nghĩa; hãy đổi lại đúng thuật ngữ. Ví dụ: "du ai"/"diu ai" → UI, "ây pi ai" → API, "ây ai" → AI, "ai đi" → ID, "đi bi" → DB, "diu ét x"/"diu ếch" → UX, "gít" → git, "pi a"/"pi rờ" → PR, "cờ mít" → commit, "rì pô" → repo, "đì bấc" → debug, "rì lốt" → reload, "phai" → file, "phôn đơ" → folder, "cót" → code, "biu" → build, "đì lít" → delete, "bút tần" → button, "cờ lích" → click, "sờ tai" → style, "com pô nần" → component, "in pút" → input, "au pút" → output, "lây ao" → layout.
-- Nếu một cụm âm tiếng Việt vô nghĩa nghe giống một từ tiếng Anh thông dụng trong lập trình, thay bằng từ tiếng Anh đó.
-- Không thêm dấu chấm ở cuối nếu câu chưa kết thúc rõ ràng.
-- Chỉ khi toàn bộ đoạn là chuỗi âm lộn xộn không thể hiểu, trả về đúng chuỗi ${DROP}. Mẩu ngắn, cụt hoặc thiếu chủ ngữ vẫn là câu nói bình thường, phải trả về.
-- Chỉ trả về văn bản đã sửa, không có dấu ngoặc kép bao quanh, không có lời dẫn.`;
+const SYSTEM = `Bạn là bộ sửa lỗi chính tả cho văn bản nhận dạng giọng nói tiếng Việt của một lập trình viên.
+Việc duy nhất: thêm hoặc sửa dấu thanh bị sai, thêm dấu phẩy và dấu chấm hỏi nếu rõ ràng cần, viết hoa đầu câu. Ngoài ra giữ nguyên tất cả.
+Đoạn đưa vào là một mẩu của câu đang nói, thường bị cắt giữa chừng và mẩu tiếp theo sẽ đến sau.
+Cấm:
+- Cấm thêm từ, bỏ từ, đổi thứ tự từ, hay thay một từ bằng từ khác, kể cả khi bạn thấy từ khác hợp hơn.
+- Cấm hoàn thiện câu cụt. Cấm thêm dấu chấm ở cuối nếu câu chưa kết thúc rõ ràng.
+- Cấm dịch. Từ tiếng Anh giữ nguyên tiếng Anh, từ tiếng Việt giữ nguyên tiếng Việt.
+- Cấm đổi một từ tiếng Việt có dấu thành chữ viết tắt. "bị" vẫn là "bị", không phải "BI".
+- Cấm trả lời, giải thích, hay bọc kết quả trong dấu ngoặc kép.
+Được phép:
+- Viết hoa chữ viết tắt tiếng Anh quen thuộc khi từ đưa vào không có dấu tiếng Việt, ví dụ "ui" thành "UI", "api" thành "API".
+- Nếu toàn bộ đoạn là chuỗi âm lộn xộn không thể hiểu, trả về đúng chuỗi ${DROP}. Mẩu ngắn hay cụt vẫn là câu nói bình thường, phải trả về nguyên.
+Chỉ trả về văn bản đã sửa.`;
 
 const TARGET_HINT: Record<Target, string> = {
   terminal: 'Văn bản sẽ được gõ vào terminal, có thể là lệnh shell hoặc mô tả việc cần làm. Giữ nguyên cú pháp lệnh.',

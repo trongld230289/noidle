@@ -21,10 +21,11 @@ const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 const MODEL = 'whisper-large-v3';
 // Gợi ý ngữ cảnh để Whisper giữ nguyên thuật ngữ và chữ viết tắt tiếng Anh thay vì phiên âm
 // (UI thành "du ai", API thành "ây pi ai"). Whisper chỉ đọc ~224 token cuối nên phải ngắn.
+// Viết thành câu tự nhiên: Whisper bắt chước văn phong của prompt, danh sách rời rạc làm nó ra chữ lạ.
 const PROMPT =
-  'Mình sửa UI, gọi API, đọc JSON, viết CSS, HTML, SQL, dùng React hook, TypeScript, Node, ' +
-  'git commit, push, merge branch, tạo PR, chạy unit test, build, deploy, fix bug, refactor function, ' +
-  'config, log, debug, AI, ID, URL, DB, CI, VS Code, Copilot, Claude.';
+  'Mình đang sửa UI và gọi API, đọc JSON, viết CSS với SQL, dùng React hook và TypeScript. ' +
+  'Xong thì git commit, push, tạo pull request, chạy unit test, build rồi deploy. ' +
+  'Có bug thì xem log để debug, refactor function, hỏi Copilot hoặc Claude.';
 
 /**
  * Prompt cho Whisper: thuật ngữ mặc định rồi từ điển của người dùng.
@@ -33,7 +34,7 @@ const PROMPT =
  */
 export function buildPrompt(glossary: string[] = []): string {
   const terms = glossary.map((t) => t.trim()).filter(Boolean);
-  return terms.length ? `${PROMPT} ${terms.join(', ')}.` : PROMPT;
+  return terms.length ? `${PROMPT} Project này có ${terms.join(', ')}.` : PROMPT;
 }
 
 export function postProcess(text: string): string {

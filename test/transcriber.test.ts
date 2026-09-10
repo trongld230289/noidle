@@ -31,7 +31,7 @@ describe('stripHallucinations', () => {
 
 describe('buildPrompt', () => {
   it('appends the user glossary to the base prompt', () => {
-    expect(buildPrompt(['claimNext', ' Vi Voice ', ''])).toBe(`${buildPrompt()} claimNext, Vi Voice.`);
+    expect(buildPrompt(['claimNext', ' Vi Voice ', ''])).toBe(`${buildPrompt()} Project này có claimNext, Vi Voice.`);
     expect(buildPrompt([])).toBe(buildPrompt());
   });
 });

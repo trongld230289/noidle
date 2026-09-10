@@ -72,7 +72,15 @@ interface Session {
 export function activate(ctx: vscode.ExtensionContext): void {
   const status = new StatusBar();
   const out = vscode.window.createOutputChannel('Vi Voice');
-  const log = (msg: string) => out.appendLine(`${new Date().toLocaleTimeString('vi-VN')} ${msg}`);
+  // Ghi thêm ra file để xem lại được sau khi đóng VS Code.
+  const logFile = path.join(ctx.globalStorageUri.fsPath, 'vi-voice.log');
+  fs.promises.mkdir(ctx.globalStorageUri.fsPath, { recursive: true }).catch(() => undefined);
+  const log = (msg: string) => {
+    const line = `${new Date().toLocaleTimeString('vi-VN')} ${msg}`;
+    out.appendLine(line);
+    fs.promises.appendFile(logFile, line + '\n').catch(() => undefined);
+  };
+  log(`--- Vi Voice ${ctx.extension.packageJSON.version} khởi động, log tại ${logFile}`);
   void ensureTerminalSkipShell().catch(() => undefined);
   let recorder = new Recorder(config());
   const api: InjectorApi = {
@@ -180,6 +188,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
   function enqueue(s: Session, pcm: Uint8Array): void {
     s.segments++;
     const wav = pcmToWav(pcm, SAMPLE_RATE, CHANNELS);
+    log(`cụm ${s.segments} (${(Recorder.durationMs(wav) / 1000).toFixed(1)}s) → ${s.target}`);
     s.queue = s.queue
       .then(async () => {
         s.transcript += await deliverSegment(wav, s.target, s.transcript);
@@ -200,7 +209,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
           transcript: '',
           segments: 0,
         };
-        s.segmenter = new Segmenter({ sampleRate: SAMPLE_RATE, silenceMs: 800, minSpeechMs: 400 }, (pcm) => enqueue(s, pcm));
+        s.segmenter = new Segmenter({ sampleRate: SAMPLE_RATE }, (pcm) => enqueue(s, pcm));
         await recorder.start((chunk) => s.segmenter.push(chunk));
         session = s;
         status.set('recording');
