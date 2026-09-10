@@ -41,8 +41,22 @@ interface HookConfig {
   refineModel?: string;
 }
 
-/** Mở mic, nghe một câu, gửi Whisper. Trả về '' nếu im lặng hoặc lỗi. */
+/** Tiếng bíp ngắn báo "nói đi", phát bằng ffplay từ sóng sine, không cần file. */
+function beep(): Promise<void> {
+  return new Promise((resolve) => {
+    const p = spawn(
+      arg('player', 'ffplay'),
+      ['-nodisp', '-autoexit', '-loglevel', 'quiet', '-f', 'lavfi', '-i', 'sine=frequency=880:duration=0.18'],
+      { stdio: 'ignore', windowsHide: true },
+    );
+    p.on('error', () => resolve());
+    p.on('exit', () => resolve());
+  });
+}
+
+/** Mở mic, nghe một câu, gửi Whisper. Trả về '' nếu im lặng hoặc lỗi. Có bíp trước khi nghe. */
 async function listenAndTranscribe(cfg: HookConfig, maxMs: number, label: string): Promise<string> {
+  await beep();
   const t0 = Date.now();
   const wav = await listenOnce({ ffmpegPath: cfg.ffmpegPath || 'ffmpeg', device: cfg.micDevice || undefined, maxMs, log });
   if (!wav) {
@@ -246,7 +260,6 @@ async function modeSpeak(): Promise<void> {
  */
 async function handsFreeTurn(cfg: HookConfig, session: string): Promise<void> {
   const maxMs = Math.max(5, cfg.handsFreeTimeoutSec ?? 20) * 1000;
-  await playNow('Mình nghe.', 'notify', session);
   let heard = await listenAndTranscribe(cfg, maxMs, 'hands-free');
   if (!heard) return;
   if (/^(thôi|thoi|xong|dừng|dung|kết thúc|ket thuc|stop|hết|het)[\s.!]*$/iu.test(heard.trim())) {
@@ -318,14 +331,19 @@ async function voiceChoose(text: string, input: HookInput & { session_id?: strin
   }
   const maxMs = Math.max(3, cfg.approveTimeoutSec ?? 15) * 1000;
   const answers: string[] = [];
-  for (const [qi, q] of questions.entries()) {
-    const labels = (q.options ?? []).map((o) => (o?.label ?? '').trim()).filter(Boolean);
+  for (const q of questions) {
+    // Claude hay tự đánh số trong nhãn ("1. Tra tracking"); bỏ đi để không đọc số hai lần.
+    const labels = (q.options ?? []).map((o) => (o?.label ?? '').trim().replace(/^\d+[.):]\s*/, '')).filter(Boolean);
+    const multi = q.multiSelect ? ' Chọn được nhiều.' : '';
     const spokenOptions = labels.length
-      ? ` Lựa chọn gồm ${labels.map((l, i) => `${i + 1}, ${l}`).join('; ')}. Nói số hoặc tên.`
-      : ' Bạn trả lời tự do.';
-    await playNow(`${qi === 0 ? text : ''} ${q.question}${spokenOptions}`.trim(), 'notify', session);
+      ? ` ${labels.map((l, i) => `${i + 1}, ${l}`).join('. ')}.${multi} Sau tiếng bíp, nói số hoặc tên.`
+      : ' Sau tiếng bíp, bạn trả lời.';
+    await playNow(`${q.question}${spokenOptions}`.trim(), 'notify', session);
     const heard = await listenAndTranscribe(cfg, maxMs, 'chọn');
-    if (!heard) return;
+    if (!heard) {
+      spawnPlay('Mình không nghe thấy, bạn chọn tay nhé.', 'notify', session);
+      return;
+    }
     if (labels.length) {
       const picked = parseChoice(heard, labels);
       if (picked === undefined) {
@@ -364,18 +382,11 @@ async function voiceChoose(text: string, input: HookInput & { session_id?: strin
 async function voiceApprove(text: string, input: HookInput & { session_id?: string }, cfg: HookConfig): Promise<void> {
   const session = input.session_id ?? '';
   const t0 = Date.now();
-  await playNow(`${text} Nói approve hoặc từ chối.`, 'notify', session);
+  await playNow(`${text} Sau tiếng bíp, nói approve hoặc từ chối.`, 'notify', session);
   const maxMs = Math.max(3, cfg.approveTimeoutSec ?? 15) * 1000;
-  const wav = await listenOnce({ ffmpegPath: cfg.ffmpegPath || 'ffmpeg', device: cfg.micDevice || undefined, maxMs, log });
-  if (!wav) {
-    log(`approve: không nghe thấy gì sau ${Date.now() - t0}ms`);
-    return;
-  }
-  let heard = '';
-  try {
-    heard = await transcribe(wav, { apiKey: cfg.apiKey!, glossary: cfg.glossary, language: cfg.language });
-  } catch (err) {
-    log(`approve: whisper lỗi ${(err as Error).message}`);
+  const heard = await listenAndTranscribe(cfg, maxMs, 'approve');
+  if (!heard) {
+    spawnPlay('Mình không nghe thấy, bạn bấm tay nhé.', 'notify', session);
     return;
   }
   const decision = parseApproval(heard);

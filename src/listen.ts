@@ -49,7 +49,8 @@ export async function listenOnce(opts: ListenOptions): Promise<Uint8Array | unde
     };
     // Cụm tối đa dài bằng maxMs để một câu trả lời dài không bị cắt đôi.
     const segmenter = new Segmenter(
-      { sampleRate: SAMPLE_RATE, silenceMs: opts.silenceMs ?? 1200, maxSegmentMs: opts.maxMs, minSpeechMs: 300 },
+      // minSpeechMs thấp để một tiếng "một" hay "ok" ngắn cũng được nhận.
+      { sampleRate: SAMPLE_RATE, silenceMs: opts.silenceMs ?? 1200, maxSegmentMs: opts.maxMs, minSpeechMs: 180 },
       (pcm) => finish(pcm),
     );
     const timer = setTimeout(() => {

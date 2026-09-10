@@ -126,7 +126,7 @@ export interface HookInput {
   cwd?: string;
   tool_name?: string;
   tool_input?: {
-    questions?: { question?: string; header?: string; options?: { label?: string }[] }[];
+    questions?: { question?: string; header?: string; multiSelect?: boolean; options?: { label?: string }[] }[];
     question?: string;
     options?: (string | { label?: string })[];
     [k: string]: unknown;
