@@ -73,16 +73,16 @@ Bật `viVoice.voiceApprove`. Khi Claude Code xin quyền, hook đọc "Workspac
 
 Lệnh nguy hiểm không bao giờ được duyệt bằng giọng, luôn phải bấm tay: xoá file đệ quy, git push, git reset --hard, drop table, sudo, docker prune, sửa file .env hay settings.json. Ai đứng gần mic cũng approve được, nên chỉ bật khi thật sự đang nằm nghe. Để hook dùng được Whisper, extension ghi key Groq cùng cấu hình mic vào file `hook-config.json` trong thư mục globalStorage của extension.
 
-### Hands-free: nói chuyện khép kín, không bấm phím
+### Hands-free: nói chuyện khép kín
 
 Bật `viVoice.handsFree`. Bấm F6 nói yêu cầu đầu tiên như thường. Từ đó:
 
-1. Claude làm xong, hook đọc phần 🔊, rồi nói "mình nghe" và mở mic. Bạn nói yêu cầu tiếp theo, ngắt hơi khoảng một giây là gửi, Claude làm tiếp ngay như nhận prompt mới. Hook đáp "ok" để bạn biết đã nghe được.
+1. Claude làm xong, hook đọc phần 🔊. Loa vừa im thì extension bíp một tiếng và mở mic ngay trong cửa sổ VS Code đang chạy Claude Code (status bar hiện "Claude đang nghe"). Bạn nói yêu cầu tiếp theo, chữ hiện dần trong terminal y như khi bấm F6, xem lại rồi bấm Enter để gửi. Bấm Enter xong mic tự tắt. Bản sau sẽ tự Enter khi bạn ngắt hơi.
 2. Claude cần approve: như mục trên, nếu bật `viVoice.voiceApprove`.
 3. Claude hỏi chọn đáp án: hook đọc câu hỏi và các lựa chọn theo số, bạn nói số hoặc tên lựa chọn, có thể chọn nhiều ("một và ba"), hoặc "tất cả". Hook nhắc lại lựa chọn rồi Claude làm tiếp. Nói "bỏ qua" hoặc không rõ thì hộp thoại hiện để chọn tay.
-4. Im lặng hết giờ (`viVoice.handsFreeTimeoutSec`, mặc định 20 giây) hoặc nói "thôi", "xong", "dừng" thì hook nghỉ, Claude dừng bình thường. Muốn nói tiếp thì bấm F6.
+4. Mic mở mà im lặng quá `viVoice.handsFreeTimeoutSec` (mặc định 20 giây) thì tự tắt. Bấm F6 lúc đang nghe cũng tắt. Muốn nói tiếp thì bấm F6 như thường.
 
-Trong lúc hook đang đọc hoặc đang nghe, Claude Code hiện trạng thái đang chạy hook. Lệnh nói được gửi cho Claude dưới dạng phản hồi của hook chứ không phải prompt gõ tay, nên không hiện thành dòng prompt trong màn hình chat nhưng Claude vẫn làm đúng.
+Hook không tự nghe nữa: khi Claude xong, hook Stop thoát ngay và tiến trình đọc chỉ gửi một tín hiệu qua named pipe cho đúng cửa sổ VS Code (chọn theo thư mục làm việc của phiên Claude Code). Vì vậy câu nói là prompt thật do bạn gõ bằng giọng, hiện trong màn hình chat, sửa được trước khi gửi, và Claude Code không phải chờ hook. Mỗi cửa sổ ghi một file đăng ký trong `%TEMP%i-voice-tts\windows`.
 
 Phiên Claude Code đang mở cần khởi động lại để nhận hook. Chạy `Vi Voice: Đọc thử giọng` để kiểm tra loa. Đổi giọng nam hoặc nữ bằng `viVoice.voice`, chỉnh tốc độ bằng `viVoice.voiceRate`. Tắt setting thì hook được gỡ khỏi `settings.json`.
 
@@ -112,8 +112,8 @@ Gõ `Vi Voice` vào ô tìm kiếm của Settings:
 | `viVoice.voiceNotify` | `true` | Đọc "Workspace X cần approve" hoặc "cần bạn xác nhận câu trả lời" khi Claude Code chờ bạn. |
 | `viVoice.voiceApprove` | `false` | Approve bằng giọng nói sau khi nghe thông báo. |
 | `viVoice.voiceApproveTimeoutSec` | `15` | Chờ bạn nói tối đa bao nhiêu giây khi approve bằng giọng. |
-| `viVoice.handsFree` | `false` | Vòng lặp nói chuyện không bấm phím: tự mở mic sau khi đọc xong, chọn đáp án bằng giọng. |
-| `viVoice.handsFreeTimeoutSec` | `20` | Hands-free: chờ bạn nói tối đa bao nhiêu giây rồi nghỉ. |
+| `viVoice.handsFree` | `false` | Vòng lặp nói chuyện: Claude đọc xong thì bíp và mở mic trong VS Code, bạn nói rồi Enter; chọn đáp án bằng giọng. |
+| `viVoice.handsFreeTimeoutSec` | `20` | Hands-free: mic mở mà im lặng bao nhiêu giây thì tự tắt. |
 | `viVoice.voice` | `vi-VN-HoaiMyNeural` | Giọng Việt HoaiMy hoặc NamMinh đọc tiếng Việt chuẩn nhất; giọng Multilingual như Ava, Andrew tự chuyển giữa tiếng Việt và tiếng Anh trong câu, hợp khi nói nhiều thuật ngữ. |
 | `viVoice.voiceRate` | `+0%` | Tốc độ đọc. |
 | `viVoice.ffmpegPath` | `ffmpeg` | Đường dẫn ffmpeg nếu không có trong PATH. |

@@ -2,7 +2,7 @@
   "name": "vi-voice",
   "displayName": "Vi Voice",
   "description": "Gõ tiếng Việt bằng giọng nói vào terminal, Copilot Chat và editor",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "publisher": "trongld",
   "license": "MIT",
   "engines": {
@@ -73,12 +73,12 @@
         "viVoice.handsFree": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Vòng lặp nói chuyện với Claude Code, không cần bấm phím. Sau khi đọc xong câu trả lời, hook nói **mình nghe** và mở mic: bạn nói yêu cầu tiếp theo, ngắt hơi là gửi. Claude hỏi chọn đáp án thì đọc các lựa chọn và nghe bạn chọn bằng số hoặc tên. Im lặng hết giờ, hoặc nói **thôi**, **xong**, **dừng** thì kết thúc, muốn nói tiếp bấm F6 như thường."
+          "markdownDescription": "Vòng lặp nói chuyện với Claude Code. Claude đọc xong câu trả lời thì extension bíp và mở mic ngay trong cửa sổ này: bạn nói yêu cầu tiếp theo, chữ hiện trong terminal, bấm Enter để gửi (bản sau sẽ tự Enter). Im lặng hết giờ hoặc bấm F6 thì mic tắt. Claude hỏi chọn đáp án thì đọc các lựa chọn và nghe bạn chọn bằng số hoặc tên."
         },
         "viVoice.handsFreeTimeoutSec": {
           "type": "number",
           "default": 20,
-          "description": "Hands-free: sau khi đọc xong, chờ bạn nói tối đa bao nhiêu giây rồi mới nghỉ."
+          "description": "Hands-free: mic mở mà im lặng bao nhiêu giây thì tự tắt."
         },
         "viVoice.voice": {
           "type": "string",
