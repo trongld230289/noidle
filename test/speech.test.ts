@@ -27,6 +27,10 @@ describe('pickSpeech', () => {
     const text = 'Đã sửa `src/a.ts`.\n\n```ts\nconst x = 1;\n```\n\n🔊 Xong rồi, test pass hết.\n';
     expect(pickSpeech(text)).toBe('Xong rồi, test pass hết.');
   });
+  it('reads everything from the marker to the end, flattening lists', () => {
+    const text = 'Bảng chi tiết ở trên.\n\n🔊 Có ba nhóm quyền:\n- Orders, **Agent** full\n- Products, Agent-only\n\nĐã xong.';
+    expect(pickSpeech(text)).toBe('Có ba nhóm quyền: Orders, Agent full Products, Agent-only Đã xong.');
+  });
   it('falls back to prose without code or markdown, cut at a sentence', () => {
     const long = 'Đã sửa xong. '.repeat(40);
     const text = `## Kết quả\n\n- **Sửa** hàm \`a\`\n\n\`\`\`\ncode\n\`\`\`\n\n${long}`;

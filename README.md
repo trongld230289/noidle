@@ -67,7 +67,7 @@ Bật setting `viVoice.voiceResponse`. Extension sẽ:
 
 Phiên Claude Code đang mở cần khởi động lại để nhận hook. Chạy `Vi Voice: Đọc thử giọng` để kiểm tra loa. Đổi giọng nam hoặc nữ bằng `viVoice.voice`, chỉnh tốc độ bằng `viVoice.voiceRate`. Tắt setting thì hook được gỡ khỏi `settings.json`.
 
-Nếu Claude không thêm dòng 🔊, extension đọc khoảng 300 ký tự đầu của câu trả lời, bỏ code và markdown. Lỗi đọc được ghi tại `%TEMP%\vi-voice-tts\hook.log`.
+Mọi thứ từ dòng 🔊 đến hết câu trả lời sẽ được đọc. Claude được dặn viết phần này đủ nghĩa để nghe xong không cần nhìn màn hình: hỏi thông tin thì kể đủ các mục chính, báo cáo việc đã làm thì hai ba câu. Muốn nghe kỹ hơn nữa thì nói "đọc chi tiết". Nếu Claude không thêm dòng 🔊, extension đọc khoảng 300 ký tự đầu của câu trả lời, bỏ code và markdown. Lỗi đọc được ghi tại `%TEMP%\vi-voice-tts\hook.log`.
 
 ## Lệnh có sẵn
 

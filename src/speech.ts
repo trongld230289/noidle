@@ -34,13 +34,14 @@ function joinTextBlocks(content: unknown): string {
  * không có thì đọc phần văn xuôi đầu tiên, bỏ code và markdown, cắt ở ranh giới câu.
  */
 export function pickSpeech(text: string): string {
-  const marked = text
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l.startsWith(SPEAK_MARK))
-    .map((l) => l.slice(SPEAK_MARK.length).trim())
-    .filter(Boolean);
-  if (marked.length) return marked.join(' ');
+  // Từ dòng 🔊 đầu tiên đến hết là phần Claude viết để đọc (có thể nhiều dòng, có danh sách).
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex((l) => l.trim().startsWith(SPEAK_MARK));
+  if (start >= 0) {
+    const block = lines.slice(start).join('\n').split(SPEAK_MARK).join(' ');
+    const spoken = stripMarkdown(block);
+    if (spoken) return spoken;
+  }
 
   const prose = stripMarkdown(text);
   if (prose.length <= MAX_FALLBACK_CHARS) return prose;
@@ -64,9 +65,13 @@ export function stripMarkdown(text: string): string {
     .trim();
 }
 
-/** Hướng dẫn chèn vào mỗi prompt để Claude kết thúc bằng dòng tóm tắt đọc được. */
+/** Hướng dẫn chèn vào mỗi prompt để Claude kết thúc bằng phần đọc được. */
 export const PROMPT_CONTEXT =
-  `Người dùng đang nghe câu trả lời bằng giọng nói qua tai nghe. ` +
-  `Kết thúc mỗi câu trả lời bằng một dòng riêng bắt đầu bằng ${SPEAK_MARK}, ` +
-  `tóm tắt kết quả trong một đến hai câu ngắn bằng tiếng Việt, giọng nói chuyện tự nhiên, ` +
-  `nói rõ đã xong hay còn cần gì ở người dùng. Dòng này không chứa code, đường dẫn, tên file hay ký hiệu markdown.`;
+  `Người dùng đang nghe câu trả lời bằng giọng nói qua tai nghe và thường không nhìn màn hình. ` +
+  `Kết thúc mỗi câu trả lời bằng một phần riêng bắt đầu bằng ${SPEAK_MARK} ở đầu dòng; mọi thứ từ đó đến hết câu trả lời sẽ được đọc thành tiếng. ` +
+  `Phần này phải đủ nghĩa để người nghe hiểu trọn câu trả lời mà không cần đọc phần trên: ` +
+  `nói kết luận, các ý chính, số liệu quan trọng, và điều gì đang cần ở người dùng. ` +
+  `Nếu người dùng hỏi thông tin (liệt kê, số liệu, giải thích, so sánh) thì kể đủ các mục chính bằng lời nói, kiểu "gồm a, b và c", thường ba đến tám câu. ` +
+  `Nếu chỉ là báo cáo việc bạn vừa làm thì hai đến ba câu: đã làm gì, kết quả ra sao, còn cần gì. ` +
+  `Viết bằng tiếng Việt, giọng nói chuyện tự nhiên như đang kể cho đồng nghiệp nghe. ` +
+  `Không chứa code, đường dẫn, tên file, bảng, gạch đầu dòng hay ký hiệu markdown; số liệu ngắn thì đọc bằng chữ, ví dụ "ba mươi chín quyền".`;
