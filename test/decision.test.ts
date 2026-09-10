@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseApproval, isDangerous, parseChoice } from '../src/decision';
+import { parseApproval, isDangerous, parseChoice, parseVoiceCommand } from '../src/decision';
 
 describe('parseChoice', () => {
   const labels = ['Lưới tuần kiểu bảng tính', 'Dòng thời gian kiểu lịch', 'Nhật ký kiểu chat'];
@@ -57,5 +57,21 @@ describe('isDangerous', () => {
   it('flags edits to secrets and settings files', () => {
     expect(isDangerous('Write', { file_path: 'C:/app/.env' })).toBe(true);
     expect(isDangerous('Edit', { file_path: '/home/u/.claude/settings.json' })).toBe(true);
+  });
+});
+
+describe('parseVoiceCommand', () => {
+  it('gửi ở cuối câu: bỏ từ đó, lệnh send', () => {
+    expect(parseVoiceCommand('sửa lỗi này gửi')).toEqual({ command: 'send', text: 'sửa lỗi này' });
+    expect(parseVoiceCommand('Gửi đi.')).toEqual({ command: 'send', text: '' });
+    expect(parseVoiceCommand('chạy test, send')).toEqual({ command: 'send', text: 'chạy test' });
+  });
+  it('chỉ một từ huỷ/thôi/dừng: lệnh cancel', () => {
+    for (const w of ['huỷ', 'Hủy.', 'thôi', 'bỏ', 'dừng', 'xong']) expect(parseVoiceCommand(w).command).toBe('cancel');
+  });
+  it('câu thường: không lệnh, giữ nguyên chữ', () => {
+    expect(parseVoiceCommand('gửi email cho khách')).toEqual({ text: 'gửi email cho khách' });
+    expect(parseVoiceCommand('thôi không cần refactor')).toEqual({ text: 'thôi không cần refactor' });
+    expect(parseVoiceCommand('đọc lại bản gửi')).toEqual({ command: 'send', text: 'đọc lại bản' });
   });
 });

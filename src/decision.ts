@@ -20,6 +20,25 @@ const ALLOW = [
   'approve', 'approved', 'dong y', 'cho phep', 'duyet', 'ok', 'okay', 'oke', 'yes', 'lam di', 'chay di', 'tiep di', 'tiep tuc', 'duoc', 'ung', 'lam tiep',
 ];
 
+export interface VoiceCommand {
+  command?: 'send' | 'cancel';
+  /** Chữ còn lại sau khi bỏ từ lệnh. */
+  text: string;
+}
+
+/**
+ * Lệnh nói trong hands-free, xét trên chữ Whisper thô của một cụm: "gửi" hoặc "send" ở cuối cụm thì gửi ngay
+ * (phần trước đó vẫn được chèn); cụm chỉ là "huỷ", "thôi", "dừng"... thì tắt mic, không gửi.
+ * Không dùng \b vì JS không coi chữ có dấu là ký tự từ.
+ */
+export function parseVoiceCommand(raw: string): VoiceCommand {
+  const text = raw.trim();
+  if (/^(huỷ|hủy|huy|thôi|thoi|bỏ|bo|dừng|dung|xong)[\s.!]*$/iu.test(text)) return { command: 'cancel', text: '' };
+  const m = /^(.*?)(?:^|[\s,.]+)(gửi đi|gửi|gui di|gui|send)[\s.!]*$/iu.exec(text);
+  if (m) return { command: 'send', text: m[1].trim() };
+  return { text };
+}
+
 /** Từ câu người dùng nói, trả về allow, deny, hoặc undefined nếu không rõ. Từ chối được ưu tiên khi lẫn cả hai. */
 export function parseApproval(text: string): Approval | undefined {
   const t = strip(text);
