@@ -80,6 +80,16 @@
           "default": 20,
           "description": "Hands-free: mic mở mà im lặng bao nhiêu giây thì tự tắt."
         },
+        "viVoice.handsFreeAutoSend": {
+          "type": "boolean",
+          "default": true,
+          "description": "Hands-free: nói xong, ngắt hơi đủ lâu thì tự bấm Enter (cần ít nhất ba từ). Tắt thì chỉ nói \"gửi\" mới gửi."
+        },
+        "viVoice.handsFreeSendDelaySec": {
+          "type": "number",
+          "default": 2.5,
+          "description": "Hands-free: im lặng bao nhiêu giây sau câu cuối thì tự gửi."
+        },
         "viVoice.voice": {
           "type": "string",
           "default": "vi-VN-HoaiMyNeural",

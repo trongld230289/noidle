@@ -4,6 +4,7 @@ import { Recorder, SAMPLE_RATE, CHANNELS } from './recorder';
 import { Segmenter } from './segmenter';
 import { listAudioDevices } from './devices';
 import { transcribe, TranscribeError } from './transcriber';
+import { parseVoiceCommand } from './decision';
 import { refine, DEFAULT_REFINE_MODEL } from './refiner';
 import { applyHooks, ClaudeSettings } from './claudeHooks';
 import { inject, InjectorApi, Target } from './injector';
@@ -19,6 +20,8 @@ const WELCOMED_KEY = 'viVoice.welcomed';
 const GROQ_KEYS_URL = 'https://console.groq.com/keys';
 const MAX_RECORD_MS = 120_000;
 const MIN_RECORD_MS = 500;
+/** Hands-free: tổng chữ ít hơn chừng này từ thì không tự gửi, tránh gửi nhầm tiếng động hay một từ lẻ. */
+const AUTO_SEND_MIN_WORDS = 3;
 
 /** Gửi Ctrl+V vào cửa sổ đang focus bằng SendKeys của Windows. */
 function sendCtrlV(): Promise<void> {
@@ -48,6 +51,8 @@ function config() {
     approveTimeoutSec: c.get<number>('voiceApproveTimeoutSec', 15),
     handsFree: c.get<boolean>('handsFree', false),
     handsFreeTimeoutSec: c.get<number>('handsFreeTimeoutSec', 20),
+    handsFreeAutoSend: c.get<boolean>('handsFreeAutoSend', true),
+    handsFreeSendDelaySec: c.get<number>('handsFreeSendDelaySec', 2.5),
     ffmpegPath: c.get<string>('ffmpegPath', 'ffmpeg') || 'ffmpeg',
     micDevice: c.get<string>('micDevice', '') || undefined,
     typeDelayMs: typing > 0 ? typing : undefined,
@@ -84,6 +89,11 @@ interface Session {
   segments: number;
   auto: boolean;
   idleTimer?: NodeJS.Timeout;
+  /** Hands-free: hẹn giờ tự gửi sau cụm cuối. */
+  sendTimer?: NodeJS.Timeout;
+  /** Người dùng vừa nói "gửi": gửi ngay khi cụm này chèn xong. */
+  sendNow?: boolean;
+  finishing?: boolean;
 }
 
 export function activate(ctx: vscode.ExtensionContext): void {
@@ -110,6 +120,8 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   let session: Session | undefined;
   let busy = false;
+  // Đang nghe một câu cho hook (approve / chọn đáp án); F6 và tín hiệu listen bị bỏ qua trong lúc này.
+  let asking = false;
   // Hàng đợi chèn chữ của phiên gần nhất. Phiên mới nối vào sau để chữ không chen nhau
   // khi người dùng bấm F6 lại lúc cụm cuối của phiên trước còn đang gửi.
   let lastQueue: Promise<void> = Promise.resolve();
@@ -253,7 +265,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
   }
 
   /** Gửi một cụm lên Groq và chèn kết quả. Trả về text đã chèn ('' nếu không có). */
-  async function deliverSegment(wav: Uint8Array, target: Target, context: string): Promise<string> {
+  async function deliverSegment(wav: Uint8Array, target: Target, context: string, s?: Session): Promise<string> {
     const apiKey = await resolveApiKey();
     if (!apiKey) return '';
     let text: string;
@@ -281,6 +293,21 @@ export function activate(ctx: vscode.ExtensionContext): void {
     }
     log(`sau lọc (${Date.now() - t0}ms): ${JSON.stringify(text)}`);
     if (!text) return '';
+    if (s?.auto) {
+      // Lệnh nói xét trên chữ thô, trước khi LLM có thể sửa mất từ "gửi".
+      const cmd = parseVoiceCommand(text);
+      if (cmd.command === 'cancel') {
+        log('hands-free: nghe lệnh huỷ');
+        void finishAuto(s, false);
+        return '';
+      }
+      if (cmd.command === 'send') {
+        log('hands-free: nghe lệnh gửi');
+        s.sendNow = true;
+        text = cmd.text;
+        if (!text) return '';
+      }
+    }
     if (cfg.refine) {
       const t1 = Date.now();
       text = await refine(text, { apiKey, target, context, model: cfg.refineModel, glossary: cfg.glossary });
@@ -307,19 +334,70 @@ export function activate(ctx: vscode.ExtensionContext): void {
   }
 
   function enqueue(s: Session, pcm: Uint8Array): void {
-    if (s.auto) armIdle(s);
+    if (s.auto) {
+      armIdle(s);
+      clearTimeout(s.sendTimer); // có cụm mới thì chưa gửi
+    }
     s.segments++;
     const wav = pcmToWav(pcm, SAMPLE_RATE, CHANNELS);
     log(`cụm ${s.segments} (${(Recorder.durationMs(wav) / 1000).toFixed(1)}s) → ${s.target}`);
     s.queue = s.queue
       .then(async () => {
-        s.transcript += await deliverSegment(wav, s.target, s.transcript);
+        s.transcript += await deliverSegment(wav, s.target, s.transcript, s);
+        if (s.auto && !s.finishing) {
+          if (s.sendNow) void finishAuto(s, true);
+          else armSend(s);
+        }
       })
       .catch(() => undefined);
   }
 
+  /** Hands-free: cụm cuối chèn xong, im lặng thêm handsFreeSendDelaySec và đã đủ từ thì tự gửi. */
+  function armSend(s: Session): void {
+    clearTimeout(s.sendTimer);
+    const cfg = config();
+    if (!cfg.handsFreeAutoSend) return;
+    s.sendTimer = setTimeout(() => {
+      if (session !== s) return;
+      const words = countWords(s.transcript);
+      if (words < AUTO_SEND_MIN_WORDS) {
+        log(`hands-free: mới ${words} từ, chưa tự gửi`);
+        return;
+      }
+      void finishAuto(s, true);
+    }, Math.max(0.5, cfg.handsFreeSendDelaySec) * 1000);
+  }
+
+  function countWords(text: string): number {
+    return text.trim().split(/\s+/).filter(Boolean).length;
+  }
+
+  /** Kết thúc session hands-free: tắt mic, chờ chữ chèn xong, rồi gửi Enter vào terminal nếu send. */
+  async function finishAuto(s: Session, send: boolean): Promise<void> {
+    if (session !== s || s.finishing) return;
+    s.finishing = true;
+    clearTimeout(s.sendTimer);
+    await toggle();
+    if (session === s) {
+      // toggle đang bận nên chưa tắt được; không gửi khi mic còn mở.
+      s.finishing = false;
+      return;
+    }
+    await lastQueue;
+    if (!send) {
+      log('hands-free: tắt mic, không gửi');
+      return;
+    }
+    if (!countWords(s.transcript)) {
+      log('hands-free: không có chữ, không gửi');
+      return;
+    }
+    vscode.window.activeTerminal?.sendText('', true);
+    log(`hands-free: đã gửi Enter (${countWords(s.transcript)} từ)`);
+  }
+
   async function toggle(args?: { target?: Target; auto?: boolean }): Promise<void> {
-    if (busy) return;
+    if (busy || asking) return;
     busy = true;
     try {
       if (!session) {
@@ -343,6 +421,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       clearTimeout(maxTimer);
       const s = session;
       clearTimeout(s.idleTimer);
+      clearTimeout(s.sendTimer);
       session = undefined;
       const audio = await recorder.stop();
       lastAudio = audio;
@@ -425,15 +504,74 @@ export function activate(ctx: vscode.ExtensionContext): void {
     });
   }
 
-  /** Tín hiệu từ hook Claude Code: listen = Claude vừa đọc xong, mở mic; submitted = người dùng đã gửi, tắt mic. */
-  async function onSignal(s: Signal): Promise<void> {
+  /**
+   * Nghe một câu cho hook (approve, chọn đáp án): bíp, mở mic, lấy cụm tiếng nói đầu tiên, gửi Whisper (không qua LLM).
+   * Trả '' nếu mic đang bận, không ai nói trong timeoutMs, hoặc lỗi; hook sẽ để hộp thoại hiện như thường.
+   */
+  async function askOnce(timeoutMs: number): Promise<string> {
+    if (session || asking) {
+      log('ask: mic đang bận, bỏ qua');
+      return '';
+    }
+    const apiKey = await resolveApiKey();
+    if (!apiKey) return '';
+    asking = true;
+    status.set('listening');
+    try {
+      await beep();
+      const t0 = Date.now();
+      const wav = await new Promise<Uint8Array | undefined>((resolve) => {
+        let done = false;
+        let timer: NodeJS.Timeout | undefined;
+        const finish = (v?: Uint8Array) => {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          resolve(v);
+        };
+        // minSpeechMs thấp để một tiếng "một" hay "ok" ngắn cũng được nhận; ngắt hơi 1.2s là xong câu.
+        const seg = new Segmenter(
+          { sampleRate: SAMPLE_RATE, silenceMs: 1200, maxSegmentMs: timeoutMs, minSpeechMs: 180 },
+          (pcm) => finish(pcmToWav(pcm, SAMPLE_RATE, CHANNELS)),
+        );
+        timer = setTimeout(() => finish(undefined), timeoutMs);
+        recorder.start((chunk) => seg.push(chunk)).catch((err: Error) => {
+          log(`ask: không mở được mic: ${err.message}`);
+          finish(undefined);
+        });
+      });
+      if (recorder.recording) await recorder.stop();
+      if (!wav) {
+        log(`ask: không nghe thấy gì sau ${Date.now() - t0}ms`);
+        return '';
+      }
+      status.set('transcribing');
+      const cfg = config();
+      const heard = await transcribe(wav, { apiKey, glossary: cfg.glossary, language: cfg.language });
+      log(`ask: nghe ${JSON.stringify(heard)} (${Date.now() - t0}ms)`);
+      return heard;
+    } catch (err) {
+      log(`ask lỗi: ${(err as Error).message}`);
+      return '';
+    } finally {
+      asking = false;
+      status.set('idle');
+    }
+  }
+
+  /**
+   * Tín hiệu từ hook Claude Code: listen = Claude vừa đọc xong, mở mic; submitted = người dùng đã gửi, tắt mic;
+   * ask = nghe một câu và trả chữ về cho hook.
+   */
+  async function onSignal(s: Signal): Promise<string | void> {
     log(`tín hiệu ${s.event} (session ${s.session || '-'})`);
+    if (s.event === 'ask') return askOnce(Math.max(3, s.timeoutSec ?? 15) * 1000);
     if (s.event === 'submitted') {
       if (session?.auto) await toggle();
       return;
     }
     if (!config().handsFree) return;
-    if (session) {
+    if (session || asking) {
       log('hands-free: mic đang bật sẵn, bỏ qua');
       return;
     }
@@ -446,7 +584,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
   }
 
   const pipe = pipeName(process.pid);
-  const server = startServer(pipe, (s) => void onSignal(s).catch((err) => log(`lỗi tín hiệu: ${(err as Error).message}`)));
+  const server = startServer(pipe, (s) => onSignal(s).catch((err) => log(`lỗi tín hiệu: ${(err as Error).message}`)));
   const registerWindow = () => {
     const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
     try {
