@@ -73,23 +73,39 @@ export const PROMPT_CONTEXT =
   `nói kết luận, các ý chính, số liệu quan trọng, và điều gì đang cần ở người dùng. ` +
   `Nếu người dùng hỏi thông tin (liệt kê, số liệu, giải thích, so sánh) thì kể đủ các mục chính bằng lời nói, kiểu "gồm a, b và c", thường ba đến tám câu. ` +
   `Nếu chỉ là báo cáo việc bạn vừa làm thì hai đến ba câu: đã làm gì, kết quả ra sao, còn cần gì. ` +
+  `Câu đầu tiên của phần này thật ngắn, dưới mười hai từ, nêu ngay kết luận, vì nó được đọc lên trước tiên. ` +
   `Viết bằng tiếng Việt, giọng nói chuyện tự nhiên như đang kể cho đồng nghiệp nghe. ` +
   `Không chứa code, đường dẫn, tên file, bảng, gạch đầu dòng hay ký hiệu markdown; số liệu ngắn thì đọc bằng chữ, ví dụ "ba mươi chín quyền".`;
 
 /**
- * Tách thành khối ~2 câu hoặc ~220 ký tự. Edge tổng hợp trọn yêu cầu rồi mới gửi, nên đoạn dài chờ
- * hơn 10 giây; nhưng gọi quá nhiều yêu cầu dồn dập thì Edge chặn tạm, nên không tách nhỏ hơn nữa.
+ * Tách thành khối để phát dần. Edge tổng hợp gần bằng tốc độ đọc thật và chỉ gửi khi xong cả yêu cầu,
+ * nên khối đầu phải thật ngắn (một mệnh đề, tối đa ~firstMax ký tự) để nghe được sau vài giây;
+ * các khối sau ~2 câu hoặc ~maxChars ký tự vì gọi quá nhiều yêu cầu dồn dập thì Edge chặn tạm.
  */
-export function splitSentences(text: string, maxChars = 220): string[] {
+export function splitSentences(text: string, maxChars = 220, firstMax = 90): string[] {
   const sentences = text
     .replace(/\s+/g, ' ')
     .split(/(?<=[.!?…])\s+/u)
     .map((x) => x.trim())
     .filter(Boolean);
-  const out: string[] = [];
+  if (sentences.length === 0) return [];
+
+  // Khối đầu: câu đầu, nếu dài thì cắt ở dấu phẩy/chấm phẩy gần nhất trước firstMax.
+  let first = sentences[0];
+  let rest = sentences.slice(1);
+  if (first.length > firstMax) {
+    const head = first.slice(0, firstMax);
+    const cut = Math.max(head.lastIndexOf(', '), head.lastIndexOf('; '), head.lastIndexOf(': '));
+    if (cut > 20) {
+      rest = [first.slice(cut + 1).trim(), ...rest];
+      first = first.slice(0, cut + 1).trim();
+    }
+  }
+
+  const out: string[] = [first];
   let cur = '';
   let count = 0;
-  for (const s of sentences) {
+  for (const s of rest) {
     if (cur && (count >= 2 || cur.length + 1 + s.length > maxChars)) {
       out.push(cur);
       cur = '';
@@ -101,4 +117,3 @@ export function splitSentences(text: string, maxChars = 220): string[] {
   if (cur) out.push(cur);
   return out;
 }
-

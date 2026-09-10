@@ -77,9 +77,16 @@ describe('applyHooks', () => {
 });
 
 describe('splitSentences', () => {
-  it('groups two sentences per chunk and respects the char limit', () => {
+  it('keeps the first sentence alone, then groups two sentences per chunk within the char limit', () => {
     const text = 'Một. Hai. Ba. Bốn dài ' + 'x'.repeat(230) + '. Năm.';
-    expect(splitSentences(text)).toEqual(['Một. Hai.', 'Ba.', 'Bốn dài ' + 'x'.repeat(230) + '.', 'Năm.']);
+    expect(splitSentences(text)).toEqual(['Một.', 'Hai. Ba.', 'Bốn dài ' + 'x'.repeat(230) + '.', 'Năm.']);
+  });
+  it('cuts a long first sentence at a comma so the first chunk is short', () => {
+    const text = 'App có mười một trang chính trên thanh menu, gồm Orders, Rates, Exceptions, Customers, Accounts, Products, Contacts, Invoices, Billings, Users và Settings. Xong.';
+    const chunks = splitSentences(text);
+    expect(chunks[0].length).toBeLessThanOrEqual(90);
+    expect(chunks[0].endsWith(',')).toBe(true);
+    expect(chunks.join(' ')).toBe(text);
   });
   it('returns a single chunk for short text', () => {
     expect(splitSentences('  Xong rồi,  test pass. ')).toEqual(['Xong rồi, test pass.']);
