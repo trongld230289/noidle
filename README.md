@@ -82,7 +82,7 @@ Bật `viVoice.handsFree`. Bấm F6 nói yêu cầu đầu tiên như thường.
 3. Claude hỏi chọn đáp án: hook đọc câu hỏi và các lựa chọn theo số, bạn nói số hoặc tên lựa chọn, có thể chọn nhiều ("một và ba"), hoặc "tất cả". Hook nhắc lại lựa chọn rồi Claude làm tiếp. Nói "bỏ qua" hoặc không rõ thì hộp thoại hiện để chọn tay.
 4. Mic mở mà im lặng quá `viVoice.handsFreeTimeoutSec` (mặc định 20 giây) thì tự tắt. Bấm F6 lúc đang nghe cũng tắt. Muốn nói tiếp thì bấm F6 như thường.
 
-Hook không tự nghe nữa: khi Claude xong, hook Stop thoát ngay và tiến trình đọc chỉ gửi một tín hiệu qua named pipe cho đúng cửa sổ VS Code (chọn theo thư mục làm việc của phiên Claude Code). Vì vậy câu nói là prompt thật do bạn gõ bằng giọng, hiện trong màn hình chat, sửa được trước khi gửi, và Claude Code không phải chờ hook. Mỗi cửa sổ ghi một file đăng ký trong `%TEMP%i-voice-tts\windows`.
+Hook không tự nghe nữa: khi Claude xong, hook Stop thoát ngay và tiến trình đọc chỉ gửi một tín hiệu qua named pipe cho đúng cửa sổ VS Code (chọn theo thư mục làm việc của phiên Claude Code). Vì vậy câu nói là prompt thật do bạn gõ bằng giọng, hiện trong màn hình chat, sửa được trước khi gửi, và Claude Code không phải chờ hook. Mỗi cửa sổ ghi một file đăng ký trong `%TEMP%\vi-voice-tts\windows`.
 
 Phiên Claude Code đang mở cần khởi động lại để nhận hook. Chạy `Vi Voice: Đọc thử giọng` để kiểm tra loa. Đổi giọng nam hoặc nữ bằng `viVoice.voice`, chỉnh tốc độ bằng `viVoice.voiceRate`. Tắt setting thì hook được gỡ khỏi `settings.json`.
 
