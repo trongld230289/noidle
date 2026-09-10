@@ -8,6 +8,8 @@ export interface HookOptions {
   script: string;
   voice: string;
   rate: string;
+  /** Đọc thông báo khi Claude cần approve hoặc có câu hỏi. */
+  notify: boolean;
   /** Đường dẫn ffplay (hoặc 'ffplay' để tìm trong PATH). */
   player: string;
 }
@@ -30,13 +32,26 @@ export interface ClaudeSettings {
 const q = (s: string) => `"${s.replace(/\\/g, '/')}"`;
 
 /** Lệnh hook. Đường dẫn dùng dấu / để không phải escape trong JSON và chạy được cả cmd lẫn bash. */
-export function hookCommands(o: HookOptions): { Stop: string; UserPromptSubmit: string } {
+export function hookCommands(o: HookOptions): { Stop: string; UserPromptSubmit: string; Notify: string } {
   const base = `node ${q(o.script)}`;
+  const voiceArgs = `--voice ${o.voice} --rate "${o.rate}" --player ${q(o.player)}`;
   return {
-    Stop: `${base} speak --voice ${o.voice} --rate "${o.rate}" --player ${q(o.player)}`,
+    Stop: `${base} speak ${voiceArgs}`,
     UserPromptSubmit: `${base} prompt`,
+    Notify: `${base} notify ${voiceArgs}`,
   };
 }
+
+/**
+ * Sự kiện cần báo bằng giọng. PermissionRequest bắn ngay lúc hộp thoại xin quyền hiện và có tên tool,
+ * còn Notification permission_prompt chỉ bắn sau ~6 giây nên không dùng để khỏi báo hai lần.
+ * elicitation_dialog là form của MCP server chờ người dùng.
+ */
+export const NOTIFY_EVENTS: { event: string; matcher?: string }[] = [
+  { event: 'PermissionRequest' },
+  { event: 'PreToolUse', matcher: 'AskUserQuestion' },
+  { event: 'Notification', matcher: 'elicitation_dialog' },
+];
 
 function isOurs(h: HookCommand): boolean {
   return typeof h.command === 'string' && h.command.includes(HOOK_MARK) && h.command.includes('vi-voice');
@@ -57,6 +72,13 @@ export function applyHooks(settings: ClaudeSettings, o: HookOptions): ClaudeSett
     const cmd = hookCommands(o);
     for (const event of ['Stop', 'UserPromptSubmit'] as const) {
       hooks[event] = [...(hooks[event] ?? []), { hooks: [{ type: 'command', command: cmd[event] }] }];
+    }
+    if (o.notify) {
+      for (const { event, matcher } of NOTIFY_EVENTS) {
+        const group: HookGroup = { hooks: [{ type: 'command', command: cmd.Notify }] };
+        if (matcher) group.matcher = matcher;
+        hooks[event] = [...(hooks[event] ?? []), group];
+      }
     }
   }
   if (Object.keys(hooks).length === 0) delete out.hooks;

@@ -117,3 +117,47 @@ export function splitSentences(text: string, maxChars = 220, firstMax = 90): str
   if (cur) out.push(cur);
   return out;
 }
+
+export interface HookInput {
+  hook_event_name?: string;
+  notification_type?: string;
+  message?: string;
+  title?: string;
+  cwd?: string;
+  tool_name?: string;
+  tool_input?: { questions?: { question?: string; header?: string }[]; question?: string; [k: string]: unknown };
+}
+
+/** Tên workspace để đọc: thư mục cuối của cwd, bỏ dấu gạch cho dễ nghe. */
+export function workspaceName(cwd?: string): string {
+  const base = (cwd ?? '').replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? '';
+  return base.replace(/[-_.]+/g, ' ').trim() || 'không tên';
+}
+
+/**
+ * Câu ngắn để đọc khi Claude Code cần người dùng: xin quyền, đặt câu hỏi, hoặc đang chờ.
+ * Trả về '' nếu sự kiện không cần báo.
+ */
+export function announcement(input: HookInput): string {
+  const ws = workspaceName(input.cwd);
+  const event = input.hook_event_name ?? '';
+  if (event === 'PreToolUse' && input.tool_name === 'AskUserQuestion') {
+    const q = (input.tool_input?.questions?.[0]?.question ?? input.tool_input?.question)?.trim();
+    const short = q && q.length > 140 ? q.slice(0, 140).replace(/\s+\S*$/, '') + '…' : q;
+    return short ? `Workspace ${ws} có câu hỏi: ${short}` : `Workspace ${ws} có câu hỏi.`;
+  }
+  if (event === 'PermissionRequest') {
+    return `Workspace ${ws} cần approve${input.tool_name ? ` lệnh ${input.tool_name}` : ''}.`;
+  }
+  if (event === 'Notification') {
+    const type = input.notification_type ?? '';
+    const msg = input.message ?? '';
+    if (type === 'permission_prompt' || /permission/i.test(msg)) {
+      const tool = /to use (\w+)/i.exec(msg)?.[1];
+      return `Workspace ${ws} cần approve${tool ? ` lệnh ${tool}` : ''}.`;
+    }
+    if (type === 'idle_prompt' || /waiting for your input/i.test(msg)) return `Workspace ${ws} đang chờ bạn.`;
+    if (type === 'elicitation_dialog') return `Workspace ${ws} có câu hỏi.`;
+  }
+  return '';
+}

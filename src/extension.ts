@@ -42,6 +42,7 @@ function config() {
     voiceResponse: c.get<boolean>('voiceResponse', false),
     voice: c.get<string>('voice', 'vi-VN-HoaiMyNeural') || 'vi-VN-HoaiMyNeural',
     voiceRate: c.get<string>('voiceRate', '+0%') || '+0%',
+    voiceNotify: c.get<boolean>('voiceNotify', true),
     ffmpegPath: c.get<string>('ffmpegPath', 'ffmpeg') || 'ffmpeg',
     micDevice: c.get<string>('micDevice', '') || undefined,
     typeDelayMs: typing > 0 ? typing : undefined,
@@ -116,6 +117,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
         e.affectsConfiguration('viVoice.voiceResponse') ||
         e.affectsConfiguration('viVoice.voice') ||
         e.affectsConfiguration('viVoice.voiceRate') ||
+        e.affectsConfiguration('viVoice.voiceNotify') ||
         e.affectsConfiguration('viVoice.ffmpegPath')
       ) {
         void syncClaudeHooks().catch((err) => log(`lỗi đồng bộ hook: ${(err as Error).message}`));
@@ -191,6 +193,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       script: hookScript,
       voice: cfg.voice,
       rate: cfg.voiceRate,
+      notify: cfg.voiceNotify,
       player: playerPath(),
     });
     const before = JSON.stringify(current);

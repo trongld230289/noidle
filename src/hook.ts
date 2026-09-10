@@ -3,14 +3,17 @@
  *   prompt                    UserPromptSubmit: in hướng dẫn để Claude kết thúc bằng dòng 🔊.
  *   speak [--voice] [--rate] [--player]
  *                             Stop: đọc transcript, chọn câu cần đọc, rồi tách tiến trình `play` và thoát ngay.
- *   play <textfile> [...]     Tổng hợp giọng bằng Edge TTS, phát bằng ffplay. Tắt lượt đọc trước nếu còn.
+ *   play <textfile> [...]     Tổng hợp giọng bằng Edge TTS, phát bằng ffplay. Tắt lượt đọc trước nếu còn;
+ *                             có --queue thì chờ lượt trước đọc xong rồi mới phát.
+ *   notify [--voice] ...      Notification / PermissionRequest / PreToolUse(AskUserQuestion): đọc một câu ngắn
+ *                             "Workspace X cần approve" hoặc "có câu hỏi", xếp sau lượt đang đọc.
  */
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
-import { lastAssistantText, pickSpeech, PROMPT_CONTEXT, splitSentences } from './speech';
+import { lastAssistantText, pickSpeech, PROMPT_CONTEXT, splitSentences, announcement, HookInput } from './speech';
 
 const DEFAULT_VOICE = 'vi-VN-HoaiMyNeural';
 const WORK_DIR = path.join(os.tmpdir(), 'vi-voice-tts');
@@ -40,6 +43,34 @@ function readStdin(): Promise<string> {
     process.stdin.on('error', () => resolve(data));
     setTimeout(() => resolve(data), 3000);
   });
+}
+
+function readPids(): { node?: number; player?: number } {
+  try {
+    return JSON.parse(fs.readFileSync(PID_FILE, 'utf8')) as { node?: number; player?: number };
+  } catch {
+    return {};
+  }
+}
+
+function alive(pid?: number): boolean {
+  if (!pid || pid === process.pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Chờ lượt đọc trước kết thúc (tối đa maxMs) để thông báo không cắt ngang câu trả lời đang đọc. */
+async function waitPrevious(maxMs = 90_000): Promise<void> {
+  const t0 = Date.now();
+  while (Date.now() - t0 < maxMs) {
+    const prev = readPids();
+    if (!alive(prev.node) && !alive(prev.player)) return;
+    await new Promise((r) => setTimeout(r, 300));
+  }
 }
 
 function killPrevious(): void {
@@ -77,16 +108,26 @@ async function modeSpeak(): Promise<void> {
   }
   const text = pickSpeech(lastAssistantText(transcript));
   if (!text) return;
+  spawnPlay(text, false);
+}
+
+/** Tách tiến trình phát rồi thoát ngay để Claude Code không phải chờ. */
+function spawnPlay(text: string, queue: boolean): void {
   fs.mkdirSync(WORK_DIR, { recursive: true });
-  const file = path.join(WORK_DIR, `say-${Date.now()}.txt`);
+  const file = path.join(WORK_DIR, `say-${Date.now()}-${process.pid}.txt`);
   fs.writeFileSync(file, text, 'utf8');
-  const child = spawn(
-    process.execPath,
-    [__filename, 'play', file, '--voice', arg('voice', DEFAULT_VOICE), '--rate', arg('rate', '+0%'), '--player', arg('player', 'ffplay')],
-    { detached: true, stdio: 'ignore', windowsHide: true },
-  );
+  const args = [__filename, 'play', file, '--voice', arg('voice', DEFAULT_VOICE), '--rate', arg('rate', '+0%'), '--player', arg('player', 'ffplay')];
+  if (queue) args.push('--queue');
+  const child = spawn(process.execPath, args, { detached: true, stdio: 'ignore', windowsHide: true });
   child.unref();
-  log(`speak → play pid ${child.pid}: ${JSON.stringify(text)}`);
+  log(`${queue ? 'notify' : 'speak'} → play pid ${child.pid}: ${JSON.stringify(text)}`);
+}
+
+async function modeNotify(): Promise<void> {
+  const input = JSON.parse((await readStdin()) || '{}') as HookInput;
+  const text = announcement(input);
+  log(`notify ${input.hook_event_name ?? '?'} ${input.notification_type ?? input.tool_name ?? ''}: ${JSON.stringify(text)}`);
+  if (text) spawnPlay(text, true);
 }
 
 async function synthOnce(voice: string, rate: string, text: string): Promise<Buffer> {
@@ -125,7 +166,8 @@ async function modePlay(): Promise<void> {
   const text = fs.readFileSync(file, 'utf8').trim();
   if (!text) return;
   fs.mkdirSync(WORK_DIR, { recursive: true });
-  killPrevious();
+  if (process.argv.includes('--queue')) await waitPrevious();
+  else killPrevious();
   fs.writeFileSync(PID_FILE, JSON.stringify({ node: process.pid }));
   const t0 = Date.now();
   const voice = arg('voice', DEFAULT_VOICE);
@@ -173,7 +215,8 @@ async function main(): Promise<void> {
   if (mode === 'prompt') return modePrompt();
   if (mode === 'speak') return modeSpeak();
   if (mode === 'play') return modePlay();
-  process.stderr.write('usage: claude-hook.js prompt | speak | play <file>\n');
+  if (mode === 'notify') return modeNotify();
+  process.stderr.write('usage: claude-hook.js prompt | speak | notify | play <file>\n');
   process.exitCode = 2;
 }
 

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { lastAssistantText, pickSpeech, stripMarkdown } from '../src/speech';
 import { applyHooks, hookCommands } from '../src/claudeHooks';
-import { splitSentences } from '../src/speech';
+import { splitSentences, announcement, workspaceName } from '../src/speech';
 
 const line = (o: unknown) => JSON.stringify(o);
 
@@ -48,7 +48,7 @@ describe('pickSpeech', () => {
 });
 
 describe('applyHooks', () => {
-  const opts = { enabled: true, script: 'C:\\ext\\trongld.vi-voice-1.2.0\\dist\\claude-hook.js', voice: 'vi-VN-HoaiMyNeural', rate: '+0%', player: 'ffplay' };
+  const opts = { enabled: true, script: 'C:\\ext\\trongld.vi-voice-1.2.0\\dist\\claude-hook.js', voice: 'vi-VN-HoaiMyNeural', rate: '+0%', player: 'ffplay', notify: true };
 
   it('adds Stop and UserPromptSubmit hooks and keeps existing hooks', () => {
     const settings = { model: 'x', hooks: { Stop: [{ hooks: [{ type: 'command', command: 'node other.js' }] }] } };
@@ -59,6 +59,17 @@ describe('applyHooks', () => {
     expect(out.hooks!.Stop[1].hooks![0].command).toBe(hookCommands(opts).Stop);
     expect(out.hooks!.UserPromptSubmit[0].hooks![0].command).toBe(hookCommands(opts).UserPromptSubmit);
     expect(hookCommands(opts).Stop).toContain('"C:/ext/trongld.vi-voice-1.2.0/dist/claude-hook.js" speak --voice vi-VN-HoaiMyNeural');
+  });
+
+  it('registers notify hooks with matchers when notify is on, none when off', () => {
+    const on = applyHooks({}, opts);
+    expect(on.hooks!.Notification[0].matcher).toBe('elicitation_dialog');
+    expect(on.hooks!.PreToolUse[0].matcher).toBe('AskUserQuestion');
+    expect(on.hooks!.PermissionRequest[0].hooks![0].command).toContain(' notify ');
+    const off = applyHooks({}, { ...opts, notify: false });
+    expect(off.hooks!.Notification).toBeUndefined();
+    expect(off.hooks!.PreToolUse).toBeUndefined();
+    expect(off.hooks!.Stop).toHaveLength(1);
   });
 
   it('replaces an older Vi Voice hook instead of duplicating it', () => {
@@ -90,5 +101,29 @@ describe('splitSentences', () => {
   });
   it('returns a single chunk for short text', () => {
     expect(splitSentences('  Xong rồi,  test pass. ')).toEqual(['Xong rồi, test pass.']);
+  });
+});
+
+describe('announcement', () => {
+  it('names the workspace from cwd', () => {
+    expect(workspaceName('D:\\Project\\vi-voice')).toBe('vi voice');
+    expect(workspaceName('/home/u/SHIPNGO-BE/')).toBe('SHIPNGO BE');
+    expect(workspaceName('')).toBe('không tên');
+  });
+  it('announces permission prompts with the tool name', () => {
+    expect(announcement({ hook_event_name: 'Notification', notification_type: 'permission_prompt', message: 'Claude needs your permission to use Bash', cwd: 'D:\\abc' }))
+      .toBe('Workspace abc cần approve lệnh Bash.');
+    expect(announcement({ hook_event_name: 'PermissionRequest', tool_name: 'Edit', cwd: '/x/123' })).toBe('Workspace 123 cần approve lệnh Edit.');
+  });
+  it('announces questions with the first question text', () => {
+    expect(announcement({ hook_event_name: 'PreToolUse', tool_name: 'AskUserQuestion', cwd: '/x/123', tool_input: { questions: [{ question: 'Dùng thư viện nào?' }] } }))
+      .toBe('Workspace 123 có câu hỏi: Dùng thư viện nào?');
+    expect(announcement({ hook_event_name: 'PreToolUse', tool_name: 'AskUserQuestion', cwd: '/x/123', tool_input: { question: 'Chọn A hay B?' } }))
+      .toBe('Workspace 123 có câu hỏi: Chọn A hay B?');
+  });
+  it('announces idle waiting and ignores other notifications', () => {
+    expect(announcement({ hook_event_name: 'Notification', notification_type: 'idle_prompt', cwd: '/x/abc' })).toBe('Workspace abc đang chờ bạn.');
+    expect(announcement({ hook_event_name: 'Notification', notification_type: 'auth_success', cwd: '/x/abc' })).toBe('');
+    expect(announcement({ hook_event_name: 'PreToolUse', tool_name: 'Bash', cwd: '/x/abc' })).toBe('');
   });
 });

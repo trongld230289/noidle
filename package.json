@@ -2,7 +2,7 @@
   "name": "vi-voice",
   "displayName": "Vi Voice",
   "description": "Gõ tiếng Việt bằng giọng nói vào terminal, Copilot Chat và editor",
-  "version": "1.2.3",
+  "version": "1.3.0",
   "publisher": "trongld",
   "license": "MIT",
   "engines": {
@@ -54,6 +54,11 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Đọc câu trả lời của **Claude Code** thành tiếng. Bật lên thì extension tự thêm hook vào `~/.claude/settings.json`; Claude được dặn kết thúc mỗi câu trả lời bằng một dòng 🔊 tóm tắt và chỉ dòng đó được đọc. Cần `node` và `ffplay` (đi kèm ffmpeg) trong PATH."
+        },
+        "viVoice.voiceNotify": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Khi bật Voice Response: đọc một câu ngắn lúc Claude Code cần approve, có câu hỏi, hoặc đang chờ bạn, kèm tên workspace. Ví dụ: Workspace abc cần approve lệnh Bash. Giúp biết cửa sổ nào đang chờ khi chạy nhiều workspace."
         },
         "viVoice.voice": {
           "type": "string",
