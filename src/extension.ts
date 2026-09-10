@@ -12,6 +12,8 @@ import * as os from 'os';
 import * as path from 'path';
 
 const SECRET_KEY = 'viVoice.groqApiKey';
+const WELCOMED_KEY = 'viVoice.welcomed';
+const GROQ_KEYS_URL = 'https://console.groq.com/keys';
 const MAX_RECORD_MS = 120_000;
 const MIN_RECORD_MS = 500;
 
@@ -93,6 +95,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
   async function setApiKey(): Promise<string | undefined> {
     const value = await vscode.window.showInputBox({
       prompt: 'Groq API key (bắt đầu bằng gsk_). Lấy miễn phí tại console.groq.com/keys',
+      placeHolder: 'gsk_...',
       password: true,
       ignoreFocusOut: true,
     });
@@ -104,6 +107,24 @@ export function activate(ctx: vscode.ExtensionContext): void {
   async function getApiKey(): Promise<string | undefined> {
     return (await ctx.secrets.get(SECRET_KEY)) ?? setApiKey();
   }
+
+  /** Lần đầu cài, chưa có key: chỉ cho người dùng cách lấy và nhập key. */
+  async function welcomeIfNoKey(): Promise<void> {
+    if (ctx.globalState.get<boolean>(WELCOMED_KEY)) return;
+    if (await ctx.secrets.get(SECRET_KEY)) return;
+    await ctx.globalState.update(WELCOMED_KEY, true);
+    const pick = await vscode.window.showInformationMessage(
+      'Vi Voice cần Groq API key (miễn phí) để nhận dạng giọng nói. Lấy key tại console.groq.com/keys rồi nhập vào đây.',
+      'Nhập key',
+      'Lấy key miễn phí',
+    );
+    if (pick === 'Nhập key') await setApiKey();
+    else if (pick === 'Lấy key miễn phí') {
+      await vscode.env.openExternal(vscode.Uri.parse(GROQ_KEYS_URL));
+      await setApiKey();
+    }
+  }
+  void welcomeIfNoKey().catch(() => undefined);
 
   /** Gửi một cụm lên Groq và chèn kết quả. Trả về text đã chèn ('' nếu không có). */
   async function deliverSegment(wav: Uint8Array, target: Target, context: string): Promise<string> {
