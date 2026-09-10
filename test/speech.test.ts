@@ -117,6 +117,9 @@ describe('announcement', () => {
       .toBe('Workspace 123 cần bạn xác nhận câu trả lời.');
     expect(announcement({ hook_event_name: 'Notification', notification_type: 'elicitation_dialog', cwd: '/x/123' })).toBe('Workspace 123 cần bạn xác nhận câu trả lời.');
   });
+  it('does not announce the permission step of AskUserQuestion twice', () => {
+    expect(announcement({ hook_event_name: 'PermissionRequest', tool_name: 'AskUserQuestion', cwd: '/x/abc' })).toBe('');
+  });
   it('ignores other events', () => {
     expect(announcement({ hook_event_name: 'Notification', notification_type: 'idle_prompt', cwd: '/x/abc' })).toBe('');
     expect(announcement({ hook_event_name: 'PreToolUse', tool_name: 'Bash', cwd: '/x/abc' })).toBe('');

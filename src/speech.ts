@@ -147,7 +147,8 @@ export function announcement(input: HookInput): string {
   const ws = workspaceName(input.cwd);
   const event = input.hook_event_name ?? '';
   if (event === 'PreToolUse' && input.tool_name === 'AskUserQuestion') return `Workspace ${ws} cần bạn xác nhận câu trả lời.`;
-  if (event === 'PermissionRequest') return `Workspace ${ws} cần approve.`;
+  // Tool đặt câu hỏi cũng đi qua bước xin quyền; PreToolUse đã báo rồi nên không báo lần hai.
+  if (event === 'PermissionRequest') return input.tool_name === 'AskUserQuestion' ? '' : `Workspace ${ws} cần approve.`;
   if (event === 'Notification') {
     const type = input.notification_type ?? '';
     if (type === 'permission_prompt') return `Workspace ${ws} cần approve.`;
