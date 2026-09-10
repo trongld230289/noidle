@@ -93,7 +93,7 @@ Gõ `Vi Voice` vào ô tìm kiếm của Settings:
 | `viVoice.groqApiKey` | trống | Groq API key. |
 | `viVoice.voiceResponse` | `false` | Đọc câu trả lời của Claude Code thành tiếng. |
 | `viVoice.voiceNotify` | `true` | Đọc "Workspace X cần approve" hoặc "cần bạn xác nhận câu trả lời" khi Claude Code chờ bạn. |
-| `viVoice.voice` | `vi-VN-HoaiMyNeural` | Giọng nữ HoaiMy hoặc giọng nam NamMinh. |
+| `viVoice.voice` | `vi-VN-HoaiMyNeural` | Giọng Việt HoaiMy hoặc NamMinh đọc tiếng Việt chuẩn nhất; giọng Multilingual như Ava, Andrew tự chuyển giữa tiếng Việt và tiếng Anh trong câu, hợp khi nói nhiều thuật ngữ. |
 | `viVoice.voiceRate` | `+0%` | Tốc độ đọc. |
 | `viVoice.ffmpegPath` | `ffmpeg` | Đường dẫn ffmpeg nếu không có trong PATH. |
 | `viVoice.micDevice` | trống | Tên micro. Trống thì lấy micro đầu tiên. Nên đặt bằng lệnh `Vi Voice: Chọn micro`. |

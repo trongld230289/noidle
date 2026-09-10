@@ -2,7 +2,7 @@
   "name": "vi-voice",
   "displayName": "Vi Voice",
   "description": "Gõ tiếng Việt bằng giọng nói vào terminal, Copilot Chat và editor",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "publisher": "trongld",
   "license": "MIT",
   "engines": {
@@ -65,13 +65,21 @@
           "default": "vi-VN-HoaiMyNeural",
           "enum": [
             "vi-VN-HoaiMyNeural",
-            "vi-VN-NamMinhNeural"
+            "vi-VN-NamMinhNeural",
+            "en-US-AvaMultilingualNeural",
+            "en-US-EmmaMultilingualNeural",
+            "en-US-AndrewMultilingualNeural",
+            "en-US-BrianMultilingualNeural"
           ],
           "enumDescriptions": [
-            "Giọng nữ",
-            "Giọng nam"
+            "Giọng nữ tiếng Việt chuẩn nhất, nhưng đọc từ tiếng Anh theo âm Việt.",
+            "Giọng nam tiếng Việt, cũng đọc tiếng Anh theo âm Việt.",
+            "Nữ, đa ngôn ngữ: tự chuyển giữa tiếng Việt và tiếng Anh trong câu, tiếng Việt hơi lơ lớ.",
+            "Nữ, đa ngôn ngữ, giọng trầm hơn Ava.",
+            "Nam, đa ngôn ngữ: tự chuyển giữa tiếng Việt và tiếng Anh trong câu.",
+            "Nam, đa ngôn ngữ, giọng Anh Anh."
           ],
-          "description": "Giọng đọc (Microsoft Edge TTS, miễn phí, cần mạng)."
+          "description": "Giọng đọc (Microsoft Edge TTS, miễn phí, cần mạng). Giọng vi-VN đọc tiếng Việt chuẩn nhất; giọng Multilingual đọc trộn Việt Anh tự nhiên hơn."
         },
         "viVoice.voiceRate": {
           "type": "string",
