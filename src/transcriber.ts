@@ -24,8 +24,12 @@ const PROMPT =
 
 const MAX_CONTEXT_CHARS = 150;
 
+export function contextTail(context?: string): string {
+  return (context ?? '').trim().slice(-MAX_CONTEXT_CHARS);
+}
+
 export function buildPrompt(context?: string): string {
-  const tail = (context ?? '').trim().slice(-MAX_CONTEXT_CHARS);
+  const tail = contextTail(context);
   return tail ? `${PROMPT} ${tail}` : PROMPT;
 }
 
@@ -63,7 +67,8 @@ export async function transcribe(audio: Uint8Array, opts: TranscribeOptions): Pr
   if (!res.ok) throw new TranscribeError('server', `Groq trả lỗi HTTP ${res.status}`);
 
   const data = (await res.json()) as GroqVerbose;
-  return postProcess(stripHallucinations(joinConfidentSegments(data)));
+  const raw = stripHallucinations(joinConfidentSegments(data));
+  return postProcess(stripContextEcho(raw, contextTail(opts.context)));
 }
 
 interface GroqSegment {
@@ -125,4 +130,53 @@ export function stripHallucinations(text: string): string {
     prev = n;
   }
   return kept.join(' ');
+}
+
+function words(text: string): string[] {
+  return text.split(/\s+/u).filter(Boolean);
+}
+
+function normalizeWord(w: string): string {
+  return w.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+/**
+ * Whisper hay chép lại đoạn cuối của prompt (chữ đã nhận ở cụm trước) vào kết quả.
+ * Tìm đoạn dài nhất trong text khớp (>= 80% từ, đúng thứ tự) với context rồi bỏ đi.
+ * Đoạn >= 4 từ bị bỏ ở bất kỳ vị trí nào; đoạn 2-3 từ chỉ bị bỏ khi nằm ở đầu text
+ * và khớp đúng đuôi của context (Whisper nối tiếp prompt).
+ */
+export function stripContextEcho(text: string, context: string): string {
+  const tokens = words(text);
+  const ctx = words(context).map(normalizeWord).filter(Boolean);
+  if (tokens.length === 0 || ctx.length === 0) return text;
+
+  // Căn tham lam: mỗi từ của text tìm lần xuất hiện tiếp theo trong context.
+  const at: number[] = new Array(tokens.length).fill(-1);
+  let j = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    const w = normalizeWord(tokens[i]);
+    if (!w) continue;
+    const k = ctx.indexOf(w, j);
+    if (k >= 0) {
+      at[i] = k;
+      j = k + 1;
+    }
+  }
+
+  let best: { start: number; end: number } | undefined;
+  for (let start = 0; start < tokens.length; start++) {
+    if (at[start] < 0) continue;
+    let hit = 0;
+    for (let end = start; end < tokens.length; end++) {
+      if (at[end] >= 0) hit++;
+      const len = end - start + 1;
+      if (at[end] >= 0 && hit / len >= 0.8 && (!best || len > best.end - best.start + 1)) best = { start, end };
+    }
+  }
+  if (!best) return text;
+  const len = best.end - best.start + 1;
+  const continuesPrompt = best.start === 0 && at[best.end] === ctx.length - 1;
+  if (len < 4 && !(continuesPrompt && len >= 2)) return text;
+  return [...tokens.slice(0, best.start), ...tokens.slice(best.end + 1)].join(' ');
 }

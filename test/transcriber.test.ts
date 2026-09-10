@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { transcribe, postProcess, buildPrompt, stripHallucinations } from '../src/transcriber';
+import { transcribe, postProcess, buildPrompt, stripHallucinations, stripContextEcho } from '../src/transcriber';
 
 function fakeFetch(status: number, body: unknown) {
   return vi.fn(async () =>
@@ -89,5 +89,25 @@ describe('transcribe', () => {
   it('returns empty string when Groq gives no text', async () => {
     const f = fakeFetch(200, {});
     await expect(transcribe(audio, { apiKey: 'k', fetchFn: f as unknown as typeof fetch })).resolves.toBe('');
+  });
+});
+
+describe('stripContextEcho', () => {
+  it('drops a sentence Whisper copied from the previous transcript', () => {
+    const ctx = 'Cần improve gì nữa ko, khi mình thấy tiếng Việt';
+    expect(stripContextEcho('Cần improve gì nữa cơ khi mình thấy tiếng Việt, rồi chạy test', ctx)).toBe('rồi chạy test');
+    expect(stripContextEcho('Cần improve gì nữa ko, khi mình thấy tiếng Việt', ctx)).toBe('');
+  });
+  it('drops a leading word overlap with the context tail', () => {
+    expect(stripContextEcho('hàm claimNext rồi chạy test', 'giờ refactor hàm claimNext')).toBe('rồi chạy test');
+  });
+  it('drops an echo that follows a hallucinated prefix (real sample)', () => {
+    const ctx = 'Cần improve gì nữa ko, khi mình thấy tiếng Việt,';
+    const raw = 'Cách sử dụng vệ tên sân vô sinh đại hội cho expense of the game Cần improve gì nữa cơ khi mình thấy tiếng Việt,';
+    expect(stripContextEcho(raw, ctx)).toBe('Cách sử dụng vệ tên sân vô sinh đại hội cho expense of the game');
+  });
+  it('keeps text that only shares one or two words', () => {
+    expect(stripContextEcho('test lại lần nữa', 'chạy test')).toBe('test lại lần nữa');
+    expect(stripContextEcho('sửa hàm này', '')).toBe('sửa hàm này');
   });
 });

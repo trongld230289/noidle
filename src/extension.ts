@@ -4,6 +4,7 @@ import { Recorder, SAMPLE_RATE, CHANNELS } from './recorder';
 import { Segmenter } from './segmenter';
 import { listAudioDevices } from './devices';
 import { transcribe, TranscribeError } from './transcriber';
+import { refine, DEFAULT_REFINE_MODEL } from './refiner';
 import { inject, InjectorApi, Target } from './injector';
 import { audioLevel, pcmToWav } from './wav';
 import * as fs from 'fs';
@@ -39,6 +40,8 @@ function config() {
     ffmpegPath: c.get<string>('ffmpegPath', 'ffmpeg') || 'ffmpeg',
     micDevice: c.get<string>('micDevice', '') || undefined,
     typeDelayMs: typing > 0 ? typing : undefined,
+    refine: c.get<boolean>('refine', true),
+    refineModel: c.get<string>('refineModel', DEFAULT_REFINE_MODEL) || DEFAULT_REFINE_MODEL,
   };
 }
 
@@ -146,6 +149,9 @@ export function activate(ctx: vscode.ExtensionContext): void {
       return '';
     }
     if (!text) return '';
+    const cfg = config();
+    if (cfg.refine) text = await refine(text, { apiKey, target, context, model: cfg.refineModel });
+    if (!text) return '';
     const piece = (context ? ' ' : '') + text;
     const used = await inject(target, piece, api, { typeDelayMs: config().typeDelayMs });
     if (used === 'clipboard') {
@@ -177,7 +183,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
           transcript: '',
           segments: 0,
         };
-        s.segmenter = new Segmenter({ sampleRate: SAMPLE_RATE }, (pcm) => enqueue(s, pcm));
+        s.segmenter = new Segmenter({ sampleRate: SAMPLE_RATE, silenceMs: 800, minSpeechMs: 400 }, (pcm) => enqueue(s, pcm));
         await recorder.start((chunk) => s.segmenter.push(chunk));
         session = s;
         status.set('recording');

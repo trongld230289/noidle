@@ -58,6 +58,8 @@ Chữ được chèn theo nơi đang focus:
 
 Thuật ngữ lập trình tiếng Anh như `refactor`, `commit`, `pull request`, `unit test` được giữ nguyên, không bị dịch sang tiếng Việt.
 
+Mỗi cụm sau khi nhận dạng được gửi thêm một lượt qua LLM trên Groq để sửa chính tả, dấu thanh, dấu câu và viết hoa. Bước này tốn thêm khoảng nửa giây mỗi cụm. Tắt bằng setting `viVoice.refine` nếu muốn chữ ra ngay.
+
 ## Lệnh có sẵn
 
 Mở bằng `Ctrl+Shift+P`, gõ `Vi Voice`:
@@ -79,6 +81,8 @@ Gõ `Vi Voice` vào ô tìm kiếm của Settings:
 | `viVoice.ffmpegPath` | `ffmpeg` | Đường dẫn ffmpeg nếu không có trong PATH. |
 | `viVoice.micDevice` | trống | Tên micro. Trống thì lấy micro đầu tiên. Nên đặt bằng lệnh `Vi Voice: Chọn micro`. |
 | `viVoice.typingDelayMs` | `12` | Nghỉ bao nhiêu ms giữa các ký tự khi gõ vào editor. Đặt `0` để chèn nguyên cụm. |
+| `viVoice.refine` | `true` | Sửa câu bằng LLM sau khi nhận dạng. |
+| `viVoice.refineModel` | `llama-3.3-70b-versatile` | Model Groq dùng để sửa câu. `llama-3.1-8b-instant` nhanh hơn nhưng kém hơn. |
 
 Phím tắt mặc định là **F6**. Đổi phím trong `File > Preferences > Keyboard Shortcuts`, tìm `viVoice.toggle`. Lần đầu chạy, extension tự thêm `viVoice.toggle` vào `terminal.integrated.commandsToSkipShell` để phím tắt hoạt động trong terminal.
 
