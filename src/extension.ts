@@ -43,6 +43,8 @@ function config() {
     voice: c.get<string>('voice', 'vi-VN-HoaiMyNeural') || 'vi-VN-HoaiMyNeural',
     voiceRate: c.get<string>('voiceRate', '+0%') || '+0%',
     voiceNotify: c.get<boolean>('voiceNotify', true),
+    voiceApprove: c.get<boolean>('voiceApprove', false),
+    approveTimeoutSec: c.get<number>('voiceApproveTimeoutSec', 15),
     ffmpegPath: c.get<string>('ffmpegPath', 'ffmpeg') || 'ffmpeg',
     micDevice: c.get<string>('micDevice', '') || undefined,
     typeDelayMs: typing > 0 ? typing : undefined,
@@ -121,6 +123,9 @@ export function activate(ctx: vscode.ExtensionContext): void {
         e.affectsConfiguration('viVoice.ffmpegPath')
       ) {
         void syncClaudeHooks().catch((err) => log(`lỗi đồng bộ hook: ${(err as Error).message}`));
+      } else if (e.affectsConfiguration('viVoice')) {
+        // Key, mic, từ điển, approve bằng giọng: hook đọc từ file cấu hình nên chỉ cần ghi lại file.
+        void writeHookConfig().catch((err) => log(`lỗi ghi hook-config: ${(err as Error).message}`));
       }
     }),
   );
@@ -166,6 +171,23 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   const claudeSettingsPath = path.join(os.homedir(), '.claude', 'settings.json');
   const hookScript = path.join(ctx.extensionPath, 'dist', 'claude-hook.js');
+  const hookConfigPath = path.join(ctx.globalStorageUri.fsPath, 'hook-config.json');
+
+  /** Ghi cấu hình cho hook: key Groq, mic, ffmpeg, từ điển, approve bằng giọng. */
+  async function writeHookConfig(): Promise<void> {
+    const cfg = config();
+    const data = {
+      apiKey: (await resolveApiKey()) ?? '',
+      ffmpegPath: cfg.ffmpegPath,
+      micDevice: cfg.micDevice ?? '',
+      glossary: cfg.glossary,
+      language: cfg.language,
+      voiceApprove: cfg.voiceApprove,
+      approveTimeoutSec: cfg.approveTimeoutSec,
+    };
+    await fs.promises.mkdir(path.dirname(hookConfigPath), { recursive: true });
+    await fs.promises.writeFile(hookConfigPath, JSON.stringify(data, null, 2), 'utf8');
+  }
 
   function playerPath(): string {
     const ff = config().ffmpegPath;
@@ -188,6 +210,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       }
       if (!cfg.voiceResponse) return;
     }
+    await writeHookConfig();
     const next = applyHooks(current, {
       enabled: cfg.voiceResponse,
       script: hookScript,
@@ -195,6 +218,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       rate: cfg.voiceRate,
       notify: cfg.voiceNotify,
       player: playerPath(),
+      config: hookConfigPath,
     });
     const before = JSON.stringify(current);
     const after = JSON.stringify(next);

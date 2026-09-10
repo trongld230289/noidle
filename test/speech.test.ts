@@ -66,6 +66,10 @@ describe('applyHooks', () => {
     expect(on.hooks!.Notification[0].matcher).toBe('elicitation_dialog');
     expect(on.hooks!.PreToolUse[0].matcher).toBe('AskUserQuestion');
     expect(on.hooks!.PermissionRequest[0].hooks![0].command).toContain(' notify ');
+    expect(on.hooks!.PermissionRequest[0].hooks![0].timeout).toBe(120);
+    const withCfg = hookCommands({ ...opts, config: 'C:\\cfg\\hook-config.json' });
+    expect(withCfg.Notify).toContain('--config "C:/cfg/hook-config.json"');
+    expect(withCfg.Stop).toContain('--config "C:/cfg/hook-config.json"');
     const off = applyHooks({}, { ...opts, notify: false });
     expect(off.hooks!.Notification).toBeUndefined();
     expect(off.hooks!.PreToolUse).toBeUndefined();

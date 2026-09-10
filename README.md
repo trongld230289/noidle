@@ -67,6 +67,12 @@ Bật setting `viVoice.voiceResponse`. Extension sẽ:
 
 Khi Claude Code cần bạn approve một lệnh hoặc chờ bạn chọn câu trả lời, extension đọc một câu ngắn kèm tên workspace: "Workspace shipngo cần approve" hoặc "Workspace vi voice cần bạn xác nhận câu trả lời". Chạy nhiều cửa sổ cùng lúc vẫn biết cửa sổ nào đang chờ. Mọi lượt đọc xếp hàng theo thứ tự đến, không chồng tiếng; chỉ khi cùng một phiên có câu trả lời mới thì câu cũ của phiên đó bị cắt. Tắt bằng `viVoice.voiceNotify`.
 
+### Approve bằng giọng nói
+
+Bật `viVoice.voiceApprove`. Khi Claude Code xin quyền, hook đọc "Workspace X cần approve, nói approve hoặc từ chối" rồi mở mic nghe tối đa 15 giây. Nói "approve", "đồng ý", "ok" thì lệnh được duyệt; "từ chối", "không", "dừng" thì bị chặn; im lặng hoặc không rõ thì hộp thoại hiện như thường để bấm tay. Hook xác nhận lại bằng giọng "đã approve" hoặc "đã từ chối".
+
+Lệnh nguy hiểm không bao giờ được duyệt bằng giọng, luôn phải bấm tay: xoá file đệ quy, git push, git reset --hard, drop table, sudo, docker prune, sửa file .env hay settings.json. Ai đứng gần mic cũng approve được, nên chỉ bật khi thật sự đang nằm nghe. Để hook dùng được Whisper, extension ghi key Groq cùng cấu hình mic vào file `hook-config.json` trong thư mục globalStorage của extension.
+
 Phiên Claude Code đang mở cần khởi động lại để nhận hook. Chạy `Vi Voice: Đọc thử giọng` để kiểm tra loa. Đổi giọng nam hoặc nữ bằng `viVoice.voice`, chỉnh tốc độ bằng `viVoice.voiceRate`. Tắt setting thì hook được gỡ khỏi `settings.json`.
 
 Mọi thứ từ dòng 🔊 đến hết câu trả lời sẽ được đọc. Claude được dặn viết phần này đủ nghĩa để nghe xong không cần nhìn màn hình: hỏi thông tin thì kể đủ các mục chính, báo cáo việc đã làm thì hai ba câu. Muốn nghe kỹ hơn nữa thì nói "đọc chi tiết". Nếu Claude không thêm dòng 🔊, extension đọc khoảng 300 ký tự đầu của câu trả lời, bỏ code và markdown. Lỗi đọc được ghi tại `%TEMP%\vi-voice-tts\hook.log`.
@@ -93,6 +99,8 @@ Gõ `Vi Voice` vào ô tìm kiếm của Settings:
 | `viVoice.groqApiKey` | trống | Groq API key. |
 | `viVoice.voiceResponse` | `false` | Đọc câu trả lời của Claude Code thành tiếng. |
 | `viVoice.voiceNotify` | `true` | Đọc "Workspace X cần approve" hoặc "cần bạn xác nhận câu trả lời" khi Claude Code chờ bạn. |
+| `viVoice.voiceApprove` | `false` | Approve bằng giọng nói sau khi nghe thông báo. |
+| `viVoice.voiceApproveTimeoutSec` | `15` | Chờ bạn nói tối đa bao nhiêu giây khi approve bằng giọng. |
 | `viVoice.voice` | `vi-VN-HoaiMyNeural` | Giọng Việt HoaiMy hoặc NamMinh đọc tiếng Việt chuẩn nhất; giọng Multilingual như Ava, Andrew tự chuyển giữa tiếng Việt và tiếng Anh trong câu, hợp khi nói nhiều thuật ngữ. |
 | `viVoice.voiceRate` | `+0%` | Tốc độ đọc. |
 | `viVoice.ffmpegPath` | `ffmpeg` | Đường dẫn ffmpeg nếu không có trong PATH. |

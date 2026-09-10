@@ -12,6 +12,8 @@ export interface HookOptions {
   notify: boolean;
   /** Đường dẫn ffplay (hoặc 'ffplay' để tìm trong PATH). */
   player: string;
+  /** File cấu hình JSON extension ghi ra cho hook (key, mic, ffmpeg...). */
+  config?: string;
 }
 
 interface HookCommand {
@@ -34,7 +36,7 @@ const q = (s: string) => `"${s.replace(/\\/g, '/')}"`;
 /** Lệnh hook. Đường dẫn dùng dấu / để không phải escape trong JSON và chạy được cả cmd lẫn bash. */
 export function hookCommands(o: HookOptions): { Stop: string; UserPromptSubmit: string; Notify: string } {
   const base = `node ${q(o.script)}`;
-  const voiceArgs = `--voice ${o.voice} --rate "${o.rate}" --player ${q(o.player)}`;
+  const voiceArgs = `--voice ${o.voice} --rate "${o.rate}" --player ${q(o.player)}` + (o.config ? ` --config ${q(o.config)}` : '');
   return {
     Stop: `${base} speak ${voiceArgs}`,
     UserPromptSubmit: `${base} prompt`,
@@ -47,8 +49,9 @@ export function hookCommands(o: HookOptions): { Stop: string; UserPromptSubmit: 
  * còn Notification permission_prompt chỉ bắn sau ~6 giây nên không dùng để khỏi báo hai lần.
  * elicitation_dialog là form của MCP server chờ người dùng.
  */
-export const NOTIFY_EVENTS: { event: string; matcher?: string }[] = [
-  { event: 'PermissionRequest' },
+export const NOTIFY_EVENTS: { event: string; matcher?: string; timeout?: number }[] = [
+  // Approve bằng giọng: đọc thông báo rồi nghe vài chục giây, nên nới timeout.
+  { event: 'PermissionRequest', timeout: 120 },
   { event: 'PreToolUse', matcher: 'AskUserQuestion' },
   { event: 'Notification', matcher: 'elicitation_dialog' },
 ];
@@ -74,8 +77,10 @@ export function applyHooks(settings: ClaudeSettings, o: HookOptions): ClaudeSett
       hooks[event] = [...(hooks[event] ?? []), { hooks: [{ type: 'command', command: cmd[event] }] }];
     }
     if (o.notify) {
-      for (const { event, matcher } of NOTIFY_EVENTS) {
-        const group: HookGroup = { hooks: [{ type: 'command', command: cmd.Notify }] };
+      for (const { event, matcher, timeout } of NOTIFY_EVENTS) {
+        const hook: HookCommand = { type: 'command', command: cmd.Notify };
+        if (timeout) hook.timeout = timeout;
+        const group: HookGroup = { hooks: [hook] };
         if (matcher) group.matcher = matcher;
         hooks[event] = [...(hooks[event] ?? []), group];
       }

@@ -15,8 +15,33 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
 import { lastAssistantText, pickSpeech, PROMPT_CONTEXT, splitSentences, announcement, HookInput } from './speech';
+import { listenOnce } from './listen';
+import { transcribe } from './transcriber';
+import { parseApproval, isDangerous } from './decision';
 
 const DEFAULT_VOICE = 'vi-VN-HoaiMyNeural';
+
+/** Cấu hình extension ghi ra file cho hook (đường dẫn qua --config). */
+interface HookConfig {
+  apiKey?: string;
+  ffmpegPath?: string;
+  micDevice?: string;
+  glossary?: string[];
+  language?: string;
+  voiceApprove?: boolean;
+  approveTimeoutSec?: number;
+}
+
+function loadConfig(): HookConfig {
+  const p = arg('config', '');
+  if (!p) return {};
+  try {
+    return JSON.parse(fs.readFileSync(p, 'utf8')) as HookConfig;
+  } catch (err) {
+    log(`không đọc được config ${p}: ${(err as Error).message}`);
+    return {};
+  }
+}
 const WORK_DIR = path.join(os.tmpdir(), 'vi-voice-tts');
 const QUEUE_DIR = path.join(WORK_DIR, 'queue');
 const LOG_FILE = path.join(WORK_DIR, 'hook.log');
@@ -194,7 +219,88 @@ async function modeNotify(): Promise<void> {
   const input = JSON.parse((await readStdin()) || '{}') as HookInput & { session_id?: string };
   const text = announcement(input);
   log(`notify ${input.hook_event_name ?? '?'} ${input.notification_type ?? input.tool_name ?? ''}: ${JSON.stringify(text)}`);
-  if (text) spawnPlay(text, 'notify', input.session_id ?? '');
+  if (!text) return;
+  const cfg = loadConfig();
+  if (input.hook_event_name === 'PermissionRequest' && cfg.voiceApprove && cfg.apiKey) {
+    if (isDangerous(input.tool_name, input.tool_input)) {
+      spawnPlay(`${text} Lệnh này thuộc loại nguy hiểm, bạn bấm tay nhé.`, 'notify', input.session_id ?? '');
+      return;
+    }
+    await voiceApprove(text, input, cfg);
+    return;
+  }
+  spawnPlay(text, 'notify', input.session_id ?? '');
+}
+
+/**
+ * Approve bằng giọng: đọc thông báo (chờ đọc xong), mở mic nghe một câu, hỏi Whisper,
+ * rồi trả quyết định cho Claude Code. Không rõ hoặc im lặng thì không trả gì, hộp thoại hiện như thường.
+ */
+async function voiceApprove(text: string, input: HookInput & { session_id?: string }, cfg: HookConfig): Promise<void> {
+  const session = input.session_id ?? '';
+  const t0 = Date.now();
+  await playNow(`${text} Nói approve hoặc từ chối.`, 'notify', session);
+  const maxMs = Math.max(3, cfg.approveTimeoutSec ?? 15) * 1000;
+  const wav = await listenOnce({ ffmpegPath: cfg.ffmpegPath || 'ffmpeg', device: cfg.micDevice || undefined, maxMs, log });
+  if (!wav) {
+    log(`approve: không nghe thấy gì sau ${Date.now() - t0}ms`);
+    return;
+  }
+  let heard = '';
+  try {
+    heard = await transcribe(wav, { apiKey: cfg.apiKey!, glossary: cfg.glossary, language: cfg.language });
+  } catch (err) {
+    log(`approve: whisper lỗi ${(err as Error).message}`);
+    return;
+  }
+  const decision = parseApproval(heard);
+  log(`approve: nghe ${JSON.stringify(heard)} → ${decision ?? 'không rõ'} (${Date.now() - t0}ms)`);
+  if (!decision) {
+    spawnPlay('Mình không rõ, bạn bấm tay nhé.', 'notify', session);
+    return;
+  }
+  spawnPlay(decision === 'allow' ? 'Đã approve.' : 'Đã từ chối.', 'notify', session);
+  process.stdout.write(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PermissionRequest',
+        permissionDecision: decision,
+        permissionDecisionReason: `Người dùng ${decision === 'allow' ? 'approve' : 'từ chối'} bằng giọng nói: "${heard}"`,
+      },
+    }),
+  );
+}
+
+/** Debug: `listen --config <cfg> [--seconds N]` mở mic, in ra chữ nghe được và quyết định approve tương ứng. */
+async function modeListen(): Promise<void> {
+  const cfg = loadConfig();
+  const maxMs = Number(arg('seconds', '8')) * 1000;
+  process.stdout.write(`Đang nghe ${maxMs / 1000}s... nói "approve" hoặc "từ chối"\n`);
+  const t0 = Date.now();
+  const wav = await listenOnce({ ffmpegPath: cfg.ffmpegPath || 'ffmpeg', device: cfg.micDevice || undefined, maxMs, log: (m) => process.stdout.write(m + '\n') });
+  if (!wav) {
+    process.stdout.write(`Không nghe thấy gì (${Date.now() - t0}ms)\n`);
+    return;
+  }
+  process.stdout.write(`Thu được ${((wav.byteLength - 44) / 32000).toFixed(1)}s tiếng nói sau ${Date.now() - t0}ms\n`);
+  if (!cfg.apiKey) {
+    process.stdout.write('Không có apiKey trong config nên không gửi Whisper.\n');
+    return;
+  }
+  const heard = await transcribe(wav, { apiKey: cfg.apiKey, glossary: cfg.glossary, language: cfg.language });
+  process.stdout.write(`Nghe: ${JSON.stringify(heard)} → ${parseApproval(heard) ?? 'không rõ'} (${Date.now() - t0}ms)\n`);
+}
+
+/** Phát ngay trong tiến trình này và chờ phát xong (vẫn xếp hàng chung). */
+async function playNow(text: string, kind: Ticket['kind'], session: string): Promise<void> {
+  const ticket = takeTicket(kind, session);
+  await waitTurn(ticket);
+  await playText(text, ticket);
+  try {
+    fs.unlinkSync(ticketPath(ticket));
+  } catch {
+    /* bỏ qua */
+  }
 }
 
 async function synthOnce(voice: string, rate: string, text: string): Promise<Buffer> {
@@ -237,6 +343,16 @@ async function modePlay(): Promise<void> {
   const session = arg('session', '-');
   const ticket = takeTicket(kind, session === '-' ? '' : session);
   await waitTurn(ticket);
+  await playText(text, ticket);
+  try {
+    fs.unlinkSync(file);
+  } catch {
+    /* bỏ qua */
+  }
+}
+
+/** Tổng hợp từng khối và đưa vào ffplay; trả về khi phát xong hoặc bị cắt. */
+async function playText(text: string, ticket: string): Promise<void> {
   const t0 = Date.now();
   const voice = arg('voice', DEFAULT_VOICE);
   const rate = arg('rate', '+0%');
@@ -271,11 +387,6 @@ async function modePlay(): Promise<void> {
   player.stdin.end();
   await new Promise<void>((r) => (stopped ? r() : player.on('exit', () => r())));
   log(`phát xong sau ${Date.now() - t0}ms`);
-  try {
-    fs.unlinkSync(file);
-  } catch {
-    /* bỏ qua */
-  }
 }
 
 async function main(): Promise<void> {
@@ -284,7 +395,8 @@ async function main(): Promise<void> {
   if (mode === 'speak') return modeSpeak();
   if (mode === 'play') return modePlay();
   if (mode === 'notify') return modeNotify();
-  process.stderr.write('usage: claude-hook.js prompt | speak | notify | play <file>\n');
+  if (mode === 'listen') return modeListen();
+  process.stderr.write('usage: claude-hook.js prompt | speak | notify | listen | play <file>\n');
   process.exitCode = 2;
 }
 
