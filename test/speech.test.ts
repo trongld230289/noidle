@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { lastAssistantText, pickSpeech, stripMarkdown } from '../src/speech';
 import { applyHooks, hookCommands } from '../src/claudeHooks';
+import { splitSentences } from '../src/speech';
 
 const line = (o: unknown) => JSON.stringify(o);
 
@@ -72,5 +73,15 @@ describe('applyHooks', () => {
     const off = applyHooks(on, { ...opts, enabled: false });
     expect(off.hooks).toEqual({ PostToolUse: [{ hooks: [{ type: 'command', command: 'node keep.js' }] }] });
     expect(applyHooks(applyHooks({}, opts), { ...opts, enabled: false })).toEqual({});
+  });
+});
+
+describe('splitSentences', () => {
+  it('groups two sentences per chunk and respects the char limit', () => {
+    const text = 'Một. Hai. Ba. Bốn dài ' + 'x'.repeat(230) + '. Năm.';
+    expect(splitSentences(text)).toEqual(['Một. Hai.', 'Ba.', 'Bốn dài ' + 'x'.repeat(230) + '.', 'Năm.']);
+  });
+  it('returns a single chunk for short text', () => {
+    expect(splitSentences('  Xong rồi,  test pass. ')).toEqual(['Xong rồi, test pass.']);
   });
 });

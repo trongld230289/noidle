@@ -75,3 +75,30 @@ export const PROMPT_CONTEXT =
   `Nếu chỉ là báo cáo việc bạn vừa làm thì hai đến ba câu: đã làm gì, kết quả ra sao, còn cần gì. ` +
   `Viết bằng tiếng Việt, giọng nói chuyện tự nhiên như đang kể cho đồng nghiệp nghe. ` +
   `Không chứa code, đường dẫn, tên file, bảng, gạch đầu dòng hay ký hiệu markdown; số liệu ngắn thì đọc bằng chữ, ví dụ "ba mươi chín quyền".`;
+
+/**
+ * Tách thành khối ~2 câu hoặc ~220 ký tự. Edge tổng hợp trọn yêu cầu rồi mới gửi, nên đoạn dài chờ
+ * hơn 10 giây; nhưng gọi quá nhiều yêu cầu dồn dập thì Edge chặn tạm, nên không tách nhỏ hơn nữa.
+ */
+export function splitSentences(text: string, maxChars = 220): string[] {
+  const sentences = text
+    .replace(/\s+/g, ' ')
+    .split(/(?<=[.!?…])\s+/u)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  const out: string[] = [];
+  let cur = '';
+  let count = 0;
+  for (const s of sentences) {
+    if (cur && (count >= 2 || cur.length + 1 + s.length > maxChars)) {
+      out.push(cur);
+      cur = '';
+      count = 0;
+    }
+    cur = cur ? `${cur} ${s}` : s;
+    count++;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
