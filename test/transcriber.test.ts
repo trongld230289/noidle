@@ -30,15 +30,9 @@ describe('stripHallucinations', () => {
 });
 
 describe('buildPrompt', () => {
-  it('appends the tail of previous transcript to the base prompt', () => {
-    const base = buildPrompt();
-    expect(buildPrompt('xin chào')).toBe(`${base} xin chào`);
-    const long = 'a'.repeat(300);
-    expect(buildPrompt(long).endsWith('a'.repeat(100))).toBe(true);
-    expect(buildPrompt(long).length).toBe(base.length + 1 + 100);
-  });
-  it('lists the user glossary before the context tail', () => {
-    expect(buildPrompt('xin chào', ['claimNext', ' Vi Voice ', ''])).toBe(`${buildPrompt()} claimNext, Vi Voice. xin chào`);
+  it('appends the user glossary to the base prompt', () => {
+    expect(buildPrompt(['claimNext', ' Vi Voice ', ''])).toBe(`${buildPrompt()} claimNext, Vi Voice.`);
+    expect(buildPrompt([])).toBe(buildPrompt());
   });
 });
 
@@ -68,6 +62,20 @@ describe('transcribe', () => {
     await expect(
       transcribe(audio, { apiKey: 'k', fetchFn: f as unknown as typeof fetch }),
     ).rejects.toMatchObject({ name: 'TranscribeError', kind });
+  });
+
+  it('does not use previous transcript as prompt, so a repeated sentence survives', async () => {
+    const f = fakeFetch(200, { text: 'sửa hàm claimNext rồi chạy test' });
+    const text = await transcribe(audio, { apiKey: 'k', fetchFn: f as unknown as typeof fetch });
+    expect(text).toBe('sửa hàm claimNext rồi chạy test');
+    const form = (f.mock.calls[0] as unknown as [string, RequestInit])[1].body as FormData;
+    expect(form.get('prompt')).toBe(buildPrompt());
+  });
+
+  it('drops the prompt sentence when Whisper echoes it on silence', async () => {
+    const f = fakeFetch(200, { text: `${buildPrompt()} rồi chạy test` });
+    const text = await transcribe(audio, { apiKey: 'k', fetchFn: f as unknown as typeof fetch });
+    expect(text).toBe('rồi chạy test');
   });
 
   it('maps thrown fetch to kind network', async () => {

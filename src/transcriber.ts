@@ -11,8 +11,6 @@ export interface TranscribeOptions {
   apiKey: string;
   fetchFn?: typeof fetch;
   timeoutMs?: number;
-  /** Chữ đã nhận ở các cụm trước, để Whisper nối câu đúng. */
-  context?: string;
   /** Thuật ngữ riêng của người dùng, đưa vào prompt để Whisper viết đúng. */
   glossary?: string[];
   /** Nhận chữ thô của Whisper trước khi lọc, để ghi log. */
@@ -28,18 +26,14 @@ const PROMPT =
   'git commit, push, merge branch, tạo PR, chạy unit test, build, deploy, fix bug, refactor function, ' +
   'config, log, debug, AI, ID, URL, DB, CI, VS Code, Copilot, Claude.';
 
-const MAX_CONTEXT_CHARS = 100;
-
-export function contextTail(context?: string): string {
-  return (context ?? '').trim().slice(-MAX_CONTEXT_CHARS);
-}
-
-/** Prompt cho Whisper: thuật ngữ mặc định, từ điển của người dùng, rồi đuôi chữ đã nhận. */
-export function buildPrompt(context?: string, glossary: string[] = []): string {
+/**
+ * Prompt cho Whisper: thuật ngữ mặc định rồi từ điển của người dùng.
+ * Cố ý không đưa chữ đã nhận vào: Whisper hay chép prompt vào kết quả, và khi người dùng
+ * xoá đi nói lại đúng câu đó thì bộ lọc echo sẽ xoá mất câu thật. Nối ý đã có LLM lo.
+ */
+export function buildPrompt(glossary: string[] = []): string {
   const terms = glossary.map((t) => t.trim()).filter(Boolean);
-  const head = terms.length ? `${PROMPT} ${terms.join(', ')}.` : PROMPT;
-  const tail = contextTail(context);
-  return tail ? `${head} ${tail}` : head;
+  return terms.length ? `${PROMPT} ${terms.join(', ')}.` : PROMPT;
 }
 
 export function postProcess(text: string): string {
@@ -53,7 +47,8 @@ export async function transcribe(audio: Uint8Array, opts: TranscribeOptions): Pr
   form.append('model', MODEL);
   form.append('language', 'vi');
   form.append('response_format', 'verbose_json');
-  form.append('prompt', buildPrompt(opts.context, opts.glossary));
+  const prompt = buildPrompt(opts.glossary);
+  form.append('prompt', prompt);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 30_000);
@@ -78,7 +73,8 @@ export async function transcribe(audio: Uint8Array, opts: TranscribeOptions): Pr
   const data = (await res.json()) as GroqVerbose;
   opts.onRaw?.(data.text ?? '');
   const raw = stripHallucinations(joinConfidentSegments(data));
-  return postProcess(stripContextEcho(raw, contextTail(opts.context)));
+  // Lúc im lặng Whisper có thể chép nguyên câu prompt ra; bỏ phần đó.
+  return postProcess(stripContextEcho(raw, prompt));
 }
 
 interface GroqSegment {
@@ -151,7 +147,7 @@ function normalizeWord(w: string): string {
 }
 
 /**
- * Whisper hay chép lại đoạn cuối của prompt (chữ đã nhận ở cụm trước) vào kết quả.
+ * Whisper hay chép lại đoạn cuối của prompt vào kết quả.
  * Tìm đoạn dài nhất trong text khớp (>= 80% từ, đúng thứ tự) với context rồi bỏ đi.
  * Đoạn >= 4 từ bị bỏ ở bất kỳ vị trí nào; đoạn 2-3 từ chỉ bị bỏ khi nằm ở đầu text
  * và khớp đúng đuôi của context (Whisper nối tiếp prompt).

@@ -85,6 +85,9 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   let session: Session | undefined;
   let busy = false;
+  // Hàng đợi chèn chữ của phiên gần nhất. Phiên mới nối vào sau để chữ không chen nhau
+  // khi người dùng bấm F6 lại lúc cụm cuối của phiên trước còn đang gửi.
+  let lastQueue: Promise<void> = Promise.resolve();
   let lastAudio: Uint8Array | undefined; // toàn bộ lần ghi cuối (debug)
   let failed: { wav: Uint8Array; target: Target; context: string } | undefined; // cụm gửi lỗi, để retry
   let maxTimer: NodeJS.Timeout | undefined;
@@ -142,7 +145,6 @@ export function activate(ctx: vscode.ExtensionContext): void {
     try {
       text = await transcribe(wav, {
         apiKey,
-        context,
         glossary: cfg.glossary,
         onRaw: (raw) => log(`whisper thô: ${JSON.stringify(raw)}`),
       });
@@ -194,7 +196,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
         const s: Session = {
           target: args?.target ?? 'clipboard',
           segmenter: undefined as unknown as Segmenter,
-          queue: Promise.resolve(),
+          queue: lastQueue,
           transcript: '',
           segments: 0,
         };
@@ -212,7 +214,6 @@ export function activate(ctx: vscode.ExtensionContext): void {
       lastAudio = audio;
       s.segmenter.flush();
       status.set('transcribing');
-      await s.queue;
       if (s.segments === 0 && Recorder.durationMs(audio) >= MIN_RECORD_MS) {
         const level = audioLevel(audio);
         void vscode.window.showWarningMessage(
@@ -220,7 +221,10 @@ export function activate(ctx: vscode.ExtensionContext): void {
             'Kiểm tra mic trong Windows Settings > Sound > Input, hoặc chạy lệnh "Vi Voice: Chọn micro".',
         );
       }
-      status.set('idle');
+      // Không chờ các cụm cuối gửi xong: người dùng có thể bấm F6 nói tiếp ngay.
+      lastQueue = s.queue.then(() => {
+        if (!session) status.set('idle');
+      });
     } catch (err) {
       session = undefined;
       status.set('idle');

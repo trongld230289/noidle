@@ -55,7 +55,9 @@ export async function refine(text: string, opts: RefineOptions): Promise<string>
   const user =
     `${TARGET_HINT[opts.target]}\n` +
     (terms.length ? `Thuật ngữ người dùng hay nói, giữ đúng chính tả: ${terms.join(', ')}\n` : '') +
-    (context ? `Chữ đã nhận trước đó (chỉ để tham khảo, không sửa, không lặp lại): ${context}\n` : '') +
+    (context
+      ? `Chữ đã nhận trước đó, chỉ để tham khảo cách nối câu, không đưa vào kết quả. Nếu đoạn cần sửa trùng với chữ này thì người nói đang nhắc lại, vẫn sửa và trả về bình thường: ${context}\n`
+      : '') +
     `Đoạn cần sửa:\n${text}`;
 
   const controller = new AbortController();
