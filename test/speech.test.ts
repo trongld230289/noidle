@@ -68,7 +68,7 @@ describe('applyHooks', () => {
     expect(on.hooks!.PermissionRequest[0].hooks![0].command).toContain(' notify ');
     expect(on.hooks!.PermissionRequest[0].hooks![0].timeout).toBe(120);
     expect(on.hooks!.PreToolUse[0].hooks![0].timeout).toBe(180);
-    expect(on.hooks!.Stop[0].hooks![0].timeout).toBe(300);
+    expect(on.hooks!.Stop[0].hooks![0].timeout).toBe(60); // Stop không còn chờ mic
     const withCfg = hookCommands({ ...opts, config: 'C:\\cfg\\hook-config.json' });
     expect(withCfg.Notify).toContain('--config "C:/cfg/hook-config.json"');
     expect(withCfg.Stop).toContain('--config "C:/cfg/hook-config.json"');

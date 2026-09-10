@@ -75,8 +75,8 @@ export function applyHooks(settings: ClaudeSettings, o: HookOptions): ClaudeSett
     const cmd = hookCommands(o);
     for (const event of ['Stop', 'UserPromptSubmit'] as const) {
       const hook: HookCommand = { type: 'command', command: cmd[event] };
-      // Stop: hands-free đọc câu trả lời (có thể dài) rồi nghe lệnh tiếp, nên nới timeout.
-      if (event === 'Stop') hook.timeout = 300;
+      // Stop: đọc câu trả lời được tách sang tiến trình play, hook chỉ chờ tách xong; 60s là dư.
+      if (event === 'Stop') hook.timeout = 60;
       hooks[event] = [...(hooks[event] ?? []), { hooks: [hook] }];
     }
     if (o.notify) {

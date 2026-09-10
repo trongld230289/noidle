@@ -1,11 +1,14 @@
 /**
  * Hook cho Claude Code, đóng gói thành dist/claude-hook.js. Ba chế độ:
  *   prompt                    UserPromptSubmit: in hướng dẫn để Claude kết thúc bằng dòng 🔊.
+ *   prompt                    ...rồi báo extension (tín hiệu submitted) là người dùng đã gửi, để tắt mic hands-free.
  *   speak [--voice] [--rate] [--player]
  *                             Stop: đọc transcript, chọn câu cần đọc, rồi tách tiến trình `play` và thoát ngay.
- *   play <textfile> --kind speak|notify --session <id>
+ *                             Hands-free: play xong thì báo extension mở mic (tín hiệu listen), hook không tự nghe.
+ *   play <textfile> --kind speak|notify --session <id> [--listen <cwd>]
  *                             Tổng hợp giọng bằng Edge TTS, phát bằng ffplay. Xếp hàng theo thứ tự đến;
  *                             câu trả lời mới của cùng một phiên thì cắt câu trả lời cũ của phiên đó.
+ *                             Có --listen thì phát xong gửi tín hiệu listen cho cửa sổ VS Code của cwd đó.
  *   notify [--voice] ...      Notification / PermissionRequest / PreToolUse(AskUserQuestion): đọc một câu ngắn
  *                             "Workspace X cần approve" hoặc "cần bạn xác nhận câu trả lời", xếp sau lượt đang đọc.
  *                             Có --config với voiceApprove/handsFree thì mở mic nghe và trả quyết định.
@@ -21,7 +24,7 @@ import { lastAssistantText, pickSpeech, PROMPT_CONTEXT, splitSentences, announce
 import { listenOnce } from './listen';
 import { transcribe } from './transcriber';
 import { parseApproval, isDangerous, parseChoice } from './decision';
-import { refine } from './refiner';
+import { signalWindow } from './signal';
 
 const DEFAULT_VOICE = 'vi-VN-HoaiMyNeural';
 
@@ -227,16 +230,23 @@ async function modePrompt(): Promise<void> {
   process.stdout.write(
     JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: PROMPT_CONTEXT } }),
   );
+  // Người dùng vừa gửi prompt: bảo extension tắt mic hands-free nếu đang mở. Không có cửa sổ thì thôi.
+  const input = JSON.parse((await readStdin()) || '{}') as { session_id?: string; cwd?: string };
+  const cwd = input.cwd || process.cwd();
+  await signalWindow({ event: 'submitted', session: input.session_id ?? '', cwd }, undefined, log);
 }
 
 async function modeSpeak(): Promise<void> {
-  const input = JSON.parse((await readStdin()) || '{}') as { transcript_path?: string; stop_hook_active?: boolean; session_id?: string };
+  const input = JSON.parse((await readStdin()) || '{}') as {
+    transcript_path?: string;
+    stop_hook_active?: boolean;
+    session_id?: string;
+    cwd?: string;
+  };
   if (!input.transcript_path) return;
+  // Một hook khác vừa chặn Stop và Claude làm tiếp: không đọc lại để khỏi lặp.
+  if (input.stop_hook_active) return;
   const cfg = loadConfig();
-  const handsFree = !!(cfg.handsFree && cfg.apiKey);
-  // stop_hook_active: Claude vừa làm tiếp theo lệnh nói của người dùng. Không hands-free thì thôi để khỏi lặp vô hạn;
-  // hands-free thì đây chính là vòng lặp mong muốn, nó tự kết thúc khi người dùng im lặng.
-  if (input.stop_hook_active && !handsFree) return;
   let transcript: string;
   try {
     transcript = fs.readFileSync(input.transcript_path, 'utf8');
@@ -246,52 +256,21 @@ async function modeSpeak(): Promise<void> {
   }
   const text = pickSpeech(lastAssistantText(transcript));
   const session = input.session_id ?? '';
-  if (!handsFree) {
-    if (text) spawnPlay(text, 'speak', session);
-    return;
-  }
-  if (text) await playNow(text, 'speak', session);
-  await handsFreeTurn(cfg, session);
+  // Hands-free: extension mở mic sau khi loa phát xong. Tiến trình play gửi tín hiệu listen khi xong;
+  // không có gì để đọc thì gửi ngay từ đây.
+  const listenCwd = cfg.handsFree ? input.cwd || process.cwd() : undefined;
+  if (text) spawnPlay(text, 'speak', session, listenCwd);
+  else if (listenCwd) await signalWindow({ event: 'listen', session, cwd: listenCwd }, undefined, log);
 }
 
-/**
- * Hands-free: sau khi đọc xong, mở mic nghe lệnh tiếp theo. Có lệnh thì chặn Claude dừng và đưa lệnh làm lý do,
- * Claude sẽ làm tiếp như nhận prompt mới. Im lặng, hoặc nói "thôi", "xong", "dừng" thì để Claude dừng bình thường.
- */
-async function handsFreeTurn(cfg: HookConfig, session: string): Promise<void> {
-  const maxMs = Math.max(5, cfg.handsFreeTimeoutSec ?? 20) * 1000;
-  let heard = await listenAndTranscribe(cfg, maxMs, 'hands-free');
-  if (!heard) return;
-  if (/^(thôi|thoi|xong|dừng|dung|kết thúc|ket thuc|stop|hết|het)[\s.!]*$/iu.test(heard.trim())) {
-    spawnPlay('Ok, tạm nghỉ.', 'notify', session);
-    return;
-  }
-  if (cfg.refine !== false) {
-    try {
-      heard = await refine(heard, { apiKey: cfg.apiKey!, target: 'chat', model: cfg.refineModel, glossary: cfg.glossary });
-    } catch {
-      /* dùng chữ thô */
-    }
-  }
-  spawnPlay('Ok.', 'notify', session);
-  log(`hands-free → lệnh: ${JSON.stringify(heard)}`);
-  process.stdout.write(
-    JSON.stringify({
-      decision: 'block',
-      reason:
-        `Người dùng vừa nói tiếp bằng giọng (hands-free): "${heard}". ` +
-        `Hãy coi đây là prompt mới và làm theo. Kết thúc câu trả lời bằng phần 🔊 như thường lệ.`,
-    }),
-  );
-}
-
-/** Tách tiến trình phát rồi thoát ngay để Claude Code không phải chờ. */
-function spawnPlay(text: string, kind: Ticket['kind'], session: string): void {
+/** Tách tiến trình phát rồi thoát ngay để Claude Code không phải chờ. listenCwd: phát xong thì báo extension mở mic. */
+function spawnPlay(text: string, kind: Ticket['kind'], session: string, listenCwd?: string): void {
   fs.mkdirSync(WORK_DIR, { recursive: true });
   const file = path.join(WORK_DIR, `say-${Date.now()}-${process.pid}.txt`);
   fs.writeFileSync(file, text, 'utf8');
   const args = [__filename, 'play', file, '--voice', arg('voice', DEFAULT_VOICE), '--rate', arg('rate', '+0%'), '--player', arg('player', 'ffplay')];
   args.push('--kind', kind, '--session', session || '-');
+  if (listenCwd) args.push('--listen', listenCwd);
   const child = spawn(process.execPath, args, { detached: true, stdio: 'ignore', windowsHide: true });
   child.unref();
   log(`${kind} → play pid ${child.pid}: ${JSON.stringify(text)}`);
@@ -512,6 +491,9 @@ async function modePlay(): Promise<void> {
   } catch {
     /* bỏ qua */
   }
+  // Hands-free: loa vừa im, giờ mới bảo extension mở mic để không nghe nhầm giọng Claude.
+  const listenCwd = arg('listen', '');
+  if (listenCwd) await signalWindow({ event: 'listen', session: session === '-' ? '' : session, cwd: listenCwd }, undefined, log);
 }
 
 /** Tổng hợp từng khối và đưa vào ffplay; trả về khi phát xong hoặc bị cắt. */
