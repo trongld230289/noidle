@@ -125,7 +125,12 @@ export interface HookInput {
   title?: string;
   cwd?: string;
   tool_name?: string;
-  tool_input?: { questions?: { question?: string; header?: string }[]; question?: string; [k: string]: unknown };
+  tool_input?: {
+    questions?: { question?: string; header?: string; options?: { label?: string }[] }[];
+    question?: string;
+    options?: (string | { label?: string })[];
+    [k: string]: unknown;
+  };
 }
 
 /** Tên workspace để đọc: thư mục cuối của cwd, bỏ dấu gạch cho dễ nghe. */
@@ -135,29 +140,18 @@ export function workspaceName(cwd?: string): string {
 }
 
 /**
- * Câu ngắn để đọc khi Claude Code cần người dùng: xin quyền, đặt câu hỏi, hoặc đang chờ.
- * Trả về '' nếu sự kiện không cần báo.
+ * Câu ngắn để đọc khi Claude Code cần người dùng. Cố ý đơn giản: chỉ tên workspace và việc cần làm,
+ * vì người nghe đang làm nhiều cửa sổ, chỉ cần biết quay về đâu. Trả về '' nếu sự kiện không cần báo.
  */
 export function announcement(input: HookInput): string {
   const ws = workspaceName(input.cwd);
   const event = input.hook_event_name ?? '';
-  if (event === 'PreToolUse' && input.tool_name === 'AskUserQuestion') {
-    const q = (input.tool_input?.questions?.[0]?.question ?? input.tool_input?.question)?.trim();
-    const short = q && q.length > 140 ? q.slice(0, 140).replace(/\s+\S*$/, '') + '…' : q;
-    return short ? `Workspace ${ws} có câu hỏi: ${short}` : `Workspace ${ws} có câu hỏi.`;
-  }
-  if (event === 'PermissionRequest') {
-    return `Workspace ${ws} cần approve${input.tool_name ? ` lệnh ${input.tool_name}` : ''}.`;
-  }
+  if (event === 'PreToolUse' && input.tool_name === 'AskUserQuestion') return `Workspace ${ws} cần bạn xác nhận câu trả lời.`;
+  if (event === 'PermissionRequest') return `Workspace ${ws} cần approve.`;
   if (event === 'Notification') {
     const type = input.notification_type ?? '';
-    const msg = input.message ?? '';
-    if (type === 'permission_prompt' || /permission/i.test(msg)) {
-      const tool = /to use (\w+)/i.exec(msg)?.[1];
-      return `Workspace ${ws} cần approve${tool ? ` lệnh ${tool}` : ''}.`;
-    }
-    if (type === 'idle_prompt' || /waiting for your input/i.test(msg)) return `Workspace ${ws} đang chờ bạn.`;
-    if (type === 'elicitation_dialog') return `Workspace ${ws} có câu hỏi.`;
+    if (type === 'permission_prompt') return `Workspace ${ws} cần approve.`;
+    if (type === 'elicitation_dialog') return `Workspace ${ws} cần bạn xác nhận câu trả lời.`;
   }
   return '';
 }

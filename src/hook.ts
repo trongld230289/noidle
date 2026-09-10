@@ -3,8 +3,9 @@
  *   prompt                    UserPromptSubmit: in hướng dẫn để Claude kết thúc bằng dòng 🔊.
  *   speak [--voice] [--rate] [--player]
  *                             Stop: đọc transcript, chọn câu cần đọc, rồi tách tiến trình `play` và thoát ngay.
- *   play <textfile> [...]     Tổng hợp giọng bằng Edge TTS, phát bằng ffplay. Tắt lượt đọc trước nếu còn;
- *                             có --queue thì chờ lượt trước đọc xong rồi mới phát.
+ *   play <textfile> --kind speak|notify --session <id>
+ *                             Tổng hợp giọng bằng Edge TTS, phát bằng ffplay. Xếp hàng theo thứ tự đến;
+ *                             câu trả lời mới của cùng một phiên thì cắt câu trả lời cũ của phiên đó.
  *   notify [--voice] ...      Notification / PermissionRequest / PreToolUse(AskUserQuestion): đọc một câu ngắn
  *                             "Workspace X cần approve" hoặc "có câu hỏi", xếp sau lượt đang đọc.
  */
@@ -17,7 +18,7 @@ import { lastAssistantText, pickSpeech, PROMPT_CONTEXT, splitSentences, announce
 
 const DEFAULT_VOICE = 'vi-VN-HoaiMyNeural';
 const WORK_DIR = path.join(os.tmpdir(), 'vi-voice-tts');
-const PID_FILE = path.join(WORK_DIR, 'playing.json');
+const QUEUE_DIR = path.join(WORK_DIR, 'queue');
 const LOG_FILE = path.join(WORK_DIR, 'hook.log');
 
 function arg(name: string, fallback: string): string {
@@ -37,24 +38,60 @@ function log(msg: string): void {
 function readStdin(): Promise<string> {
   return new Promise((resolve) => {
     let data = '';
+    // Timer phòng hờ phải unref, không thì nó giữ tiến trình sống thêm 3s và Claude Code phải chờ theo.
+    const timer = setTimeout(() => resolve(data), 3000);
+    timer.unref();
+    const done = () => {
+      clearTimeout(timer);
+      resolve(data);
+    };
     process.stdin.setEncoding('utf8');
     process.stdin.on('data', (d) => (data += d));
-    process.stdin.on('end', () => resolve(data));
-    process.stdin.on('error', () => resolve(data));
-    setTimeout(() => resolve(data), 3000);
+    process.stdin.on('end', done);
+    process.stdin.on('error', done);
   });
 }
 
-function readPids(): { node?: number; player?: number } {
+interface Ticket {
+  pid: number;
+  player?: number;
+  kind: 'speak' | 'notify';
+  session: string;
+}
+
+/**
+ * Hàng đợi phát: mỗi tiến trình play ghi một vé vào QUEUE_DIR, tên vé bắt đầu bằng thời điểm tạo
+ * nên sắp theo tên là theo thứ tự đến. Vé của tiến trình đã chết bị dọn. Ai đứng đầu hàng thì phát.
+ */
+function ticketPath(file: string): string {
+  return path.join(QUEUE_DIR, file);
+}
+
+function listTickets(): { file: string; t: Ticket }[] {
+  let files: string[] = [];
   try {
-    return JSON.parse(fs.readFileSync(PID_FILE, 'utf8')) as { node?: number; player?: number };
+    files = fs.readdirSync(QUEUE_DIR).filter((f) => f.endsWith('.json')).sort();
   } catch {
-    return {};
+    return [];
   }
+  const out: { file: string; t: Ticket }[] = [];
+  for (const file of files) {
+    try {
+      const t = JSON.parse(fs.readFileSync(ticketPath(file), 'utf8')) as Ticket;
+      if (t.pid !== process.pid && !alive(t.pid)) {
+        fs.unlinkSync(ticketPath(file));
+        continue;
+      }
+      out.push({ file, t });
+    } catch {
+      /* vé hỏng hoặc vừa bị xoá */
+    }
+  }
+  return out;
 }
 
 function alive(pid?: number): boolean {
-  if (!pid || pid === process.pid) return false;
+  if (!pid) return false;
   try {
     process.kill(pid, 0);
     return true;
@@ -63,30 +100,60 @@ function alive(pid?: number): boolean {
   }
 }
 
-/** Chờ lượt đọc trước kết thúc (tối đa maxMs) để thông báo không cắt ngang câu trả lời đang đọc. */
-async function waitPrevious(maxMs = 90_000): Promise<void> {
-  const t0 = Date.now();
-  while (Date.now() - t0 < maxMs) {
-    const prev = readPids();
-    if (!alive(prev.node) && !alive(prev.player)) return;
-    await new Promise((r) => setTimeout(r, 300));
+function kill(pid?: number): void {
+  if (!pid || pid === process.pid) return;
+  try {
+    process.kill(pid);
+  } catch {
+    /* đã thoát */
   }
 }
 
-function killPrevious(): void {
-  try {
-    const prev = JSON.parse(fs.readFileSync(PID_FILE, 'utf8')) as { node?: number; player?: number };
-    for (const pid of [prev.player, prev.node]) {
-      if (pid && pid !== process.pid) {
+/** Ghi vé của mình. Câu trả lời mới của cùng một phiên thì cắt câu trả lời cũ của phiên đó. */
+function takeTicket(kind: Ticket['kind'], session: string): string {
+  fs.mkdirSync(QUEUE_DIR, { recursive: true });
+  if (kind === 'speak' && session) {
+    for (const { file, t } of listTickets()) {
+      if (t.kind === 'speak' && t.session === session) {
+        kill(t.player);
+        kill(t.pid);
         try {
-          process.kill(pid);
+          fs.unlinkSync(ticketPath(file));
         } catch {
-          /* đã thoát */
+          /* bỏ qua */
         }
       }
     }
+  }
+  const file = `${String(Date.now()).padStart(15, '0')}-${process.pid}.json`;
+  const t: Ticket = { pid: process.pid, kind, session };
+  fs.writeFileSync(ticketPath(file), JSON.stringify(t));
+  process.on('exit', () => {
+    try {
+      fs.unlinkSync(ticketPath(file));
+    } catch {
+      /* đã xoá */
+    }
+  });
+  return file;
+}
+
+function updateTicket(file: string, patch: Partial<Ticket>): void {
+  try {
+    const t = JSON.parse(fs.readFileSync(ticketPath(file), 'utf8')) as Ticket;
+    fs.writeFileSync(ticketPath(file), JSON.stringify({ ...t, ...patch }));
   } catch {
-    /* chưa có */
+    /* vé đã bị cắt */
+  }
+}
+
+/** Chờ đến lượt mình (vé đứng đầu hàng). Quá maxMs thì phát luôn để không kẹt mãi. */
+async function waitTurn(file: string, maxMs = 5 * 60_000): Promise<void> {
+  const t0 = Date.now();
+  while (Date.now() - t0 < maxMs) {
+    const first = listTickets()[0];
+    if (!first || first.file === file) return;
+    await new Promise((r) => setTimeout(r, 250));
   }
 }
 
@@ -97,7 +164,7 @@ async function modePrompt(): Promise<void> {
 }
 
 async function modeSpeak(): Promise<void> {
-  const input = JSON.parse((await readStdin()) || '{}') as { transcript_path?: string; stop_hook_active?: boolean };
+  const input = JSON.parse((await readStdin()) || '{}') as { transcript_path?: string; stop_hook_active?: boolean; session_id?: string };
   if (input.stop_hook_active || !input.transcript_path) return;
   let transcript: string;
   try {
@@ -108,26 +175,26 @@ async function modeSpeak(): Promise<void> {
   }
   const text = pickSpeech(lastAssistantText(transcript));
   if (!text) return;
-  spawnPlay(text, false);
+  spawnPlay(text, 'speak', input.session_id ?? '');
 }
 
 /** Tách tiến trình phát rồi thoát ngay để Claude Code không phải chờ. */
-function spawnPlay(text: string, queue: boolean): void {
+function spawnPlay(text: string, kind: Ticket['kind'], session: string): void {
   fs.mkdirSync(WORK_DIR, { recursive: true });
   const file = path.join(WORK_DIR, `say-${Date.now()}-${process.pid}.txt`);
   fs.writeFileSync(file, text, 'utf8');
   const args = [__filename, 'play', file, '--voice', arg('voice', DEFAULT_VOICE), '--rate', arg('rate', '+0%'), '--player', arg('player', 'ffplay')];
-  if (queue) args.push('--queue');
+  args.push('--kind', kind, '--session', session || '-');
   const child = spawn(process.execPath, args, { detached: true, stdio: 'ignore', windowsHide: true });
   child.unref();
-  log(`${queue ? 'notify' : 'speak'} → play pid ${child.pid}: ${JSON.stringify(text)}`);
+  log(`${kind} → play pid ${child.pid}: ${JSON.stringify(text)}`);
 }
 
 async function modeNotify(): Promise<void> {
-  const input = JSON.parse((await readStdin()) || '{}') as HookInput;
+  const input = JSON.parse((await readStdin()) || '{}') as HookInput & { session_id?: string };
   const text = announcement(input);
   log(`notify ${input.hook_event_name ?? '?'} ${input.notification_type ?? input.tool_name ?? ''}: ${JSON.stringify(text)}`);
-  if (text) spawnPlay(text, true);
+  if (text) spawnPlay(text, 'notify', input.session_id ?? '');
 }
 
 async function synthOnce(voice: string, rate: string, text: string): Promise<Buffer> {
@@ -166,9 +233,10 @@ async function modePlay(): Promise<void> {
   const text = fs.readFileSync(file, 'utf8').trim();
   if (!text) return;
   fs.mkdirSync(WORK_DIR, { recursive: true });
-  if (process.argv.includes('--queue')) await waitPrevious();
-  else killPrevious();
-  fs.writeFileSync(PID_FILE, JSON.stringify({ node: process.pid }));
+  const kind = (arg('kind', 'speak') === 'notify' ? 'notify' : 'speak') as Ticket['kind'];
+  const session = arg('session', '-');
+  const ticket = takeTicket(kind, session === '-' ? '' : session);
+  await waitTurn(ticket);
   const t0 = Date.now();
   const voice = arg('voice', DEFAULT_VOICE);
   const rate = arg('rate', '+0%');
@@ -178,7 +246,7 @@ async function modePlay(): Promise<void> {
     ['-nodisp', '-autoexit', '-loglevel', 'quiet', '-f', 'mp3', '-i', 'pipe:0'],
     { stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true },
   );
-  fs.writeFileSync(PID_FILE, JSON.stringify({ node: process.pid, player: player.pid }));
+  updateTicket(ticket, { player: player.pid });
   let stopped = false;
   player.stdin.on('error', () => undefined); // ffplay bị tắt giữa chừng thì bỏ qua EPIPE
   player.on('error', (e) => {

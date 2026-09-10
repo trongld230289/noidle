@@ -110,20 +110,15 @@ describe('announcement', () => {
     expect(workspaceName('/home/u/SHIPNGO-BE/')).toBe('SHIPNGO BE');
     expect(workspaceName('')).toBe('không tên');
   });
-  it('announces permission prompts with the tool name', () => {
-    expect(announcement({ hook_event_name: 'Notification', notification_type: 'permission_prompt', message: 'Claude needs your permission to use Bash', cwd: 'D:\\abc' }))
-      .toBe('Workspace abc cần approve lệnh Bash.');
-    expect(announcement({ hook_event_name: 'PermissionRequest', tool_name: 'Edit', cwd: '/x/123' })).toBe('Workspace 123 cần approve lệnh Edit.');
-  });
-  it('announces questions with the first question text', () => {
+  it('keeps announcements simple: workspace plus what is needed', () => {
+    expect(announcement({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', cwd: 'D:\\abc' })).toBe('Workspace abc cần approve.');
+    expect(announcement({ hook_event_name: 'Notification', notification_type: 'permission_prompt', cwd: '/x/abc' })).toBe('Workspace abc cần approve.');
     expect(announcement({ hook_event_name: 'PreToolUse', tool_name: 'AskUserQuestion', cwd: '/x/123', tool_input: { questions: [{ question: 'Dùng thư viện nào?' }] } }))
-      .toBe('Workspace 123 có câu hỏi: Dùng thư viện nào?');
-    expect(announcement({ hook_event_name: 'PreToolUse', tool_name: 'AskUserQuestion', cwd: '/x/123', tool_input: { question: 'Chọn A hay B?' } }))
-      .toBe('Workspace 123 có câu hỏi: Chọn A hay B?');
+      .toBe('Workspace 123 cần bạn xác nhận câu trả lời.');
+    expect(announcement({ hook_event_name: 'Notification', notification_type: 'elicitation_dialog', cwd: '/x/123' })).toBe('Workspace 123 cần bạn xác nhận câu trả lời.');
   });
-  it('announces idle waiting and ignores other notifications', () => {
-    expect(announcement({ hook_event_name: 'Notification', notification_type: 'idle_prompt', cwd: '/x/abc' })).toBe('Workspace abc đang chờ bạn.');
-    expect(announcement({ hook_event_name: 'Notification', notification_type: 'auth_success', cwd: '/x/abc' })).toBe('');
+  it('ignores other events', () => {
+    expect(announcement({ hook_event_name: 'Notification', notification_type: 'idle_prompt', cwd: '/x/abc' })).toBe('');
     expect(announcement({ hook_event_name: 'PreToolUse', tool_name: 'Bash', cwd: '/x/abc' })).toBe('');
   });
 });

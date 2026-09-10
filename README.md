@@ -65,7 +65,7 @@ Bật setting `viVoice.voiceResponse`. Extension sẽ:
 1. Thêm hai hook vào `~/.claude/settings.json`: một hook dặn Claude kết thúc mỗi câu trả lời bằng một dòng bắt đầu bằng 🔊 tóm tắt ngắn gọn kiểu nói chuyện, một hook đọc dòng đó khi Claude trả lời xong.
 2. Đọc bằng giọng tiếng Việt của Microsoft Edge (miễn phí, cần mạng), phát qua `ffplay` đi kèm ffmpeg.
 
-Khi Claude Code cần bạn approve một lệnh, đặt câu hỏi, hoặc đứng chờ, extension đọc một câu ngắn kèm tên workspace, ví dụ "Workspace shipngo cần approve lệnh Bash" hay "Workspace vi voice có câu hỏi: dùng thư viện nào?". Chạy nhiều cửa sổ cùng lúc vẫn biết cửa sổ nào đang chờ. Thông báo xếp sau lượt đọc đang phát, không cắt ngang. Tắt bằng `viVoice.voiceNotify`.
+Khi Claude Code cần bạn approve một lệnh hoặc chờ bạn chọn câu trả lời, extension đọc một câu ngắn kèm tên workspace: "Workspace shipngo cần approve" hoặc "Workspace vi voice cần bạn xác nhận câu trả lời". Chạy nhiều cửa sổ cùng lúc vẫn biết cửa sổ nào đang chờ. Mọi lượt đọc xếp hàng theo thứ tự đến, không chồng tiếng; chỉ khi cùng một phiên có câu trả lời mới thì câu cũ của phiên đó bị cắt. Tắt bằng `viVoice.voiceNotify`.
 
 Phiên Claude Code đang mở cần khởi động lại để nhận hook. Chạy `Vi Voice: Đọc thử giọng` để kiểm tra loa. Đổi giọng nam hoặc nữ bằng `viVoice.voice`, chỉnh tốc độ bằng `viVoice.voiceRate`. Tắt setting thì hook được gỡ khỏi `settings.json`.
 
@@ -92,7 +92,7 @@ Gõ `Vi Voice` vào ô tìm kiếm của Settings:
 |---|---|---|
 | `viVoice.groqApiKey` | trống | Groq API key. |
 | `viVoice.voiceResponse` | `false` | Đọc câu trả lời của Claude Code thành tiếng. |
-| `viVoice.voiceNotify` | `true` | Đọc "Workspace X cần approve" hoặc "có câu hỏi" khi Claude Code chờ bạn. |
+| `viVoice.voiceNotify` | `true` | Đọc "Workspace X cần approve" hoặc "cần bạn xác nhận câu trả lời" khi Claude Code chờ bạn. |
 | `viVoice.voice` | `vi-VN-HoaiMyNeural` | Giọng nữ HoaiMy hoặc giọng nam NamMinh. |
 | `viVoice.voiceRate` | `+0%` | Tốc độ đọc. |
 | `viVoice.ffmpegPath` | `ffmpeg` | Đường dẫn ffmpeg nếu không có trong PATH. |
