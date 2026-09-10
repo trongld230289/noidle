@@ -30,6 +30,44 @@ export function parseApproval(text: string): Approval | undefined {
   return undefined;
 }
 
+const NUMBER_WORDS: Record<string, number> = {
+  mot: 1, nhat: 1, hai: 2, nhi: 2, ba: 3, bon: 4, tu: 4, nam: 5, sau: 6, bay: 7, tam: 8, chin: 9,
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
+  a: 1, b: 2, c: 3, d: 4, e: 5,
+};
+// So trên chữ còn dấu: bỏ dấu thì "thời gian" thành "thoi" và bị hiểu là "thôi".
+const SKIP_RE = /(^|\s)(bỏ qua|bo qua|không chọn|khong chon|thôi|huỷ|hủy|skip|cancel|để sau|de sau)(\s|$)/iu;
+
+/**
+ * Từ câu người dùng nói, tìm các lựa chọn được chọn (chỉ số bắt đầu từ 0) trong danh sách nhãn.
+ * Hiểu số ("một", "2", "thứ ba"), chữ cái ("b"), "tất cả", hoặc nhắc lại tên lựa chọn.
+ * Trả về [] nếu người dùng bảo bỏ qua, undefined nếu không hiểu.
+ */
+export function parseChoice(text: string, labels: string[]): number[] | undefined {
+  const t = strip(text);
+  if (!t) return undefined;
+  if (SKIP_RE.test(text.normalize('NFC').toLowerCase().replace(/[.,!?]/g, ' '))) return [];
+  if (/(^|\s)(tat ca|ca hai|ca ba|all)(\s|$)/.test(t)) return labels.map((_, i) => i);
+
+  const picked = new Set<number>();
+  // Nhắc tên lựa chọn: ưu tiên vì rõ nghĩa hơn số.
+  labels.forEach((label, i) => {
+    const words = strip(label).split(' ').filter((w) => w.length > 1);
+    if (!words.length) return;
+    const hit = words.filter((w) => new RegExp(`(^|\\s)${w}(\\s|$)`).test(t)).length;
+    // Trùng hết, hoặc trùng ít nhất 2 từ và từ nửa nhãn trở lên ("kiểu chat" đủ để nhận "Nhật ký kiểu chat").
+    if (hit === words.length || (hit >= 2 && hit >= Math.ceil(words.length / 2))) picked.add(i);
+  });
+  if (picked.size) return [...picked].sort();
+
+  // Số hoặc chữ cái: "chọn 2", "một và ba", "thứ hai", "b".
+  for (const tok of t.split(' ')) {
+    const n = /^\d+$/.test(tok) ? Number(tok) : NUMBER_WORDS[tok];
+    if (n && n >= 1 && n <= labels.length) picked.add(n - 1);
+  }
+  return picked.size ? [...picked].sort() : undefined;
+}
+
 // Lệnh không bao giờ được duyệt bằng giọng, luôn phải bấm tay.
 const DANGEROUS_COMMAND = [
   /\brm\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\b/i, // rm -rf

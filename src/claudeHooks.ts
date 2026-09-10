@@ -52,7 +52,7 @@ export function hookCommands(o: HookOptions): { Stop: string; UserPromptSubmit: 
 export const NOTIFY_EVENTS: { event: string; matcher?: string; timeout?: number }[] = [
   // Approve bằng giọng: đọc thông báo rồi nghe vài chục giây, nên nới timeout.
   { event: 'PermissionRequest', timeout: 120 },
-  { event: 'PreToolUse', matcher: 'AskUserQuestion' },
+  { event: 'PreToolUse', matcher: 'AskUserQuestion', timeout: 180 },
   { event: 'Notification', matcher: 'elicitation_dialog' },
 ];
 
@@ -74,7 +74,10 @@ export function applyHooks(settings: ClaudeSettings, o: HookOptions): ClaudeSett
   if (o.enabled) {
     const cmd = hookCommands(o);
     for (const event of ['Stop', 'UserPromptSubmit'] as const) {
-      hooks[event] = [...(hooks[event] ?? []), { hooks: [{ type: 'command', command: cmd[event] }] }];
+      const hook: HookCommand = { type: 'command', command: cmd[event] };
+      // Stop: hands-free đọc câu trả lời (có thể dài) rồi nghe lệnh tiếp, nên nới timeout.
+      if (event === 'Stop') hook.timeout = 300;
+      hooks[event] = [...(hooks[event] ?? []), { hooks: [hook] }];
     }
     if (o.notify) {
       for (const { event, matcher, timeout } of NOTIFY_EVENTS) {

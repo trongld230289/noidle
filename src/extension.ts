@@ -45,6 +45,8 @@ function config() {
     voiceNotify: c.get<boolean>('voiceNotify', true),
     voiceApprove: c.get<boolean>('voiceApprove', false),
     approveTimeoutSec: c.get<number>('voiceApproveTimeoutSec', 15),
+    handsFree: c.get<boolean>('handsFree', false),
+    handsFreeTimeoutSec: c.get<number>('handsFreeTimeoutSec', 20),
     ffmpegPath: c.get<string>('ffmpegPath', 'ffmpeg') || 'ffmpeg',
     micDevice: c.get<string>('micDevice', '') || undefined,
     typeDelayMs: typing > 0 ? typing : undefined,
@@ -184,6 +186,10 @@ export function activate(ctx: vscode.ExtensionContext): void {
       language: cfg.language,
       voiceApprove: cfg.voiceApprove,
       approveTimeoutSec: cfg.approveTimeoutSec,
+      handsFree: cfg.handsFree,
+      handsFreeTimeoutSec: cfg.handsFreeTimeoutSec,
+      refine: cfg.refine,
+      refineModel: cfg.refineModel,
     };
     await fs.promises.mkdir(path.dirname(hookConfigPath), { recursive: true });
     await fs.promises.writeFile(hookConfigPath, JSON.stringify(data, null, 2), 'utf8');

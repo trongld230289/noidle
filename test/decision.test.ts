@@ -1,5 +1,27 @@
 import { describe, it, expect } from 'vitest';
-import { parseApproval, isDangerous } from '../src/decision';
+import { parseApproval, isDangerous, parseChoice } from '../src/decision';
+
+describe('parseChoice', () => {
+  const labels = ['Lưới tuần kiểu bảng tính', 'Dòng thời gian kiểu lịch', 'Nhật ký kiểu chat'];
+  it('understands numbers, number words and letters', () => {
+    expect(parseChoice('chọn 2', labels)).toEqual([1]);
+    expect(parseChoice('lựa chọn thứ ba', labels)).toEqual([2]);
+    expect(parseChoice('một và ba', labels)).toEqual([0, 2]);
+    expect(parseChoice('b', labels)).toEqual([1]);
+    expect(parseChoice('chọn số 5', labels)).toBeUndefined();
+  });
+  it('matches option labels by name, with or without diacritics', () => {
+    expect(parseChoice('lấy cái kiểu chat đi', labels)).toEqual([2]);
+    expect(parseChoice('luoi tuan kieu bang tinh', labels)).toEqual([0]);
+    expect(parseChoice('dòng thời gian kiểu lịch với nhật ký kiểu chat', labels)).toEqual([1, 2]);
+  });
+  it('handles all, skip and nonsense', () => {
+    expect(parseChoice('tất cả', labels)).toEqual([0, 1, 2]);
+    expect(parseChoice('thôi bỏ qua', labels)).toEqual([]);
+    expect(parseChoice('hôm nay trời đẹp', labels)).toBeUndefined();
+    expect(parseChoice('', labels)).toBeUndefined();
+  });
+});
 
 describe('parseApproval', () => {
   it('recognises approvals in Vietnamese and English, with or without diacritics', () => {

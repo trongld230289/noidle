@@ -7,17 +7,21 @@
  *                             Tổng hợp giọng bằng Edge TTS, phát bằng ffplay. Xếp hàng theo thứ tự đến;
  *                             câu trả lời mới của cùng một phiên thì cắt câu trả lời cũ của phiên đó.
  *   notify [--voice] ...      Notification / PermissionRequest / PreToolUse(AskUserQuestion): đọc một câu ngắn
- *                             "Workspace X cần approve" hoặc "có câu hỏi", xếp sau lượt đang đọc.
+ *                             "Workspace X cần approve" hoặc "cần bạn xác nhận câu trả lời", xếp sau lượt đang đọc.
+ *                             Có --config với voiceApprove/handsFree thì mở mic nghe và trả quyết định.
+ *   listen --config <cfg>     Debug: nghe một câu, in chữ nghe được.
  */
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { spawn } from 'child_process';
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
 import { lastAssistantText, pickSpeech, PROMPT_CONTEXT, splitSentences, announcement, HookInput } from './speech';
 import { listenOnce } from './listen';
 import { transcribe } from './transcriber';
-import { parseApproval, isDangerous } from './decision';
+import { parseApproval, isDangerous, parseChoice } from './decision';
+import { refine } from './refiner';
 
 const DEFAULT_VOICE = 'vi-VN-HoaiMyNeural';
 
@@ -30,6 +34,29 @@ interface HookConfig {
   language?: string;
   voiceApprove?: boolean;
   approveTimeoutSec?: number;
+  /** Vòng lặp nói chuyện: chọn đáp án bằng giọng, và tự mở mic sau khi đọc xong câu trả lời. */
+  handsFree?: boolean;
+  handsFreeTimeoutSec?: number;
+  refine?: boolean;
+  refineModel?: string;
+}
+
+/** Mở mic, nghe một câu, gửi Whisper. Trả về '' nếu im lặng hoặc lỗi. */
+async function listenAndTranscribe(cfg: HookConfig, maxMs: number, label: string): Promise<string> {
+  const t0 = Date.now();
+  const wav = await listenOnce({ ffmpegPath: cfg.ffmpegPath || 'ffmpeg', device: cfg.micDevice || undefined, maxMs, log });
+  if (!wav) {
+    log(`${label}: không nghe thấy gì sau ${Date.now() - t0}ms`);
+    return '';
+  }
+  try {
+    const heard = await transcribe(wav, { apiKey: cfg.apiKey!, glossary: cfg.glossary, language: cfg.language });
+    log(`${label}: nghe ${JSON.stringify(heard)} (${Date.now() - t0}ms)`);
+    return heard;
+  } catch (err) {
+    log(`${label}: whisper lỗi ${(err as Error).message}`);
+    return '';
+  }
 }
 
 function loadConfig(): HookConfig {
@@ -190,7 +217,12 @@ async function modePrompt(): Promise<void> {
 
 async function modeSpeak(): Promise<void> {
   const input = JSON.parse((await readStdin()) || '{}') as { transcript_path?: string; stop_hook_active?: boolean; session_id?: string };
-  if (input.stop_hook_active || !input.transcript_path) return;
+  if (!input.transcript_path) return;
+  const cfg = loadConfig();
+  const handsFree = !!(cfg.handsFree && cfg.apiKey);
+  // stop_hook_active: Claude vừa làm tiếp theo lệnh nói của người dùng. Không hands-free thì thôi để khỏi lặp vô hạn;
+  // hands-free thì đây chính là vòng lặp mong muốn, nó tự kết thúc khi người dùng im lặng.
+  if (input.stop_hook_active && !handsFree) return;
   let transcript: string;
   try {
     transcript = fs.readFileSync(input.transcript_path, 'utf8');
@@ -199,8 +231,45 @@ async function modeSpeak(): Promise<void> {
     return;
   }
   const text = pickSpeech(lastAssistantText(transcript));
-  if (!text) return;
-  spawnPlay(text, 'speak', input.session_id ?? '');
+  const session = input.session_id ?? '';
+  if (!handsFree) {
+    if (text) spawnPlay(text, 'speak', session);
+    return;
+  }
+  if (text) await playNow(text, 'speak', session);
+  await handsFreeTurn(cfg, session);
+}
+
+/**
+ * Hands-free: sau khi đọc xong, mở mic nghe lệnh tiếp theo. Có lệnh thì chặn Claude dừng và đưa lệnh làm lý do,
+ * Claude sẽ làm tiếp như nhận prompt mới. Im lặng, hoặc nói "thôi", "xong", "dừng" thì để Claude dừng bình thường.
+ */
+async function handsFreeTurn(cfg: HookConfig, session: string): Promise<void> {
+  const maxMs = Math.max(5, cfg.handsFreeTimeoutSec ?? 20) * 1000;
+  await playNow('Mình nghe.', 'notify', session);
+  let heard = await listenAndTranscribe(cfg, maxMs, 'hands-free');
+  if (!heard) return;
+  if (/^(thôi|thoi|xong|dừng|dung|kết thúc|ket thuc|stop|hết|het)[\s.!]*$/iu.test(heard.trim())) {
+    spawnPlay('Ok, tạm nghỉ.', 'notify', session);
+    return;
+  }
+  if (cfg.refine !== false) {
+    try {
+      heard = await refine(heard, { apiKey: cfg.apiKey!, target: 'chat', model: cfg.refineModel, glossary: cfg.glossary });
+    } catch {
+      /* dùng chữ thô */
+    }
+  }
+  spawnPlay('Ok.', 'notify', session);
+  log(`hands-free → lệnh: ${JSON.stringify(heard)}`);
+  process.stdout.write(
+    JSON.stringify({
+      decision: 'block',
+      reason:
+        `Người dùng vừa nói tiếp bằng giọng (hands-free): "${heard}". ` +
+        `Hãy coi đây là prompt mới và làm theo. Kết thúc câu trả lời bằng phần 🔊 như thường lệ.`,
+    }),
+  );
 }
 
 /** Tách tiến trình phát rồi thoát ngay để Claude Code không phải chờ. */
@@ -229,7 +298,63 @@ async function modeNotify(): Promise<void> {
     await voiceApprove(text, input, cfg);
     return;
   }
+  if (input.hook_event_name === 'PreToolUse' && input.tool_name === 'AskUserQuestion' && cfg.handsFree && cfg.apiKey) {
+    await voiceChoose(text, input, cfg);
+    return;
+  }
   spawnPlay(text, 'notify', input.session_id ?? '');
+}
+
+/**
+ * Chọn đáp án bằng giọng: đọc câu hỏi và các lựa chọn, nghe, hiểu số hoặc tên lựa chọn,
+ * rồi chặn tool đặt câu hỏi với lý do chứa câu trả lời để Claude làm tiếp. Không rõ thì để hộp thoại hiện.
+ */
+async function voiceChoose(text: string, input: HookInput & { session_id?: string }, cfg: HookConfig): Promise<void> {
+  const session = input.session_id ?? '';
+  const questions = (input.tool_input?.questions ?? []).filter((q) => q?.question);
+  if (!questions.length) {
+    spawnPlay(text, 'notify', session);
+    return;
+  }
+  const maxMs = Math.max(3, cfg.approveTimeoutSec ?? 15) * 1000;
+  const answers: string[] = [];
+  for (const [qi, q] of questions.entries()) {
+    const labels = (q.options ?? []).map((o) => (o?.label ?? '').trim()).filter(Boolean);
+    const spokenOptions = labels.length
+      ? ` Lựa chọn gồm ${labels.map((l, i) => `${i + 1}, ${l}`).join('; ')}. Nói số hoặc tên.`
+      : ' Bạn trả lời tự do.';
+    await playNow(`${qi === 0 ? text : ''} ${q.question}${spokenOptions}`.trim(), 'notify', session);
+    const heard = await listenAndTranscribe(cfg, maxMs, 'chọn');
+    if (!heard) return;
+    if (labels.length) {
+      const picked = parseChoice(heard, labels);
+      if (picked === undefined) {
+        spawnPlay('Mình không rõ, bạn chọn tay nhé.', 'notify', session);
+        return;
+      }
+      if (picked.length === 0) {
+        spawnPlay('Ok, bạn chọn tay nhé.', 'notify', session);
+        return;
+      }
+      const chosen = picked.map((i) => labels[i]);
+      answers.push(`Câu hỏi "${q.question}": chọn ${chosen.map((c) => `"${c}"`).join(' và ')}`);
+      await playNow(`Chọn ${chosen.join(' và ')}.`, 'notify', session);
+    } else {
+      answers.push(`Câu hỏi "${q.question}": trả lời "${heard}"`);
+    }
+  }
+  log(`chọn → ${answers.join(' | ')}`);
+  process.stdout.write(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason:
+          `Người dùng đã trả lời bằng giọng nói, không cần hỏi lại. ${answers.join('. ')}. ` +
+          `Hãy làm tiếp theo lựa chọn này.`,
+      },
+    }),
+  );
 }
 
 /**
@@ -320,12 +445,39 @@ async function synthOnce(voice: string, rate: string, text: string): Promise<Buf
   return Buffer.concat(chunks);
 }
 
+const CACHE_DIR = path.join(WORK_DIR, 'cache');
+const CACHE_MAX_CHARS = 60;
+
+/** Câu ngắn cố định ("Mình nghe.", "Đã approve.") được cache ra đĩa để phát tức thì thay vì chờ Edge 3 giây. */
+function cachePath(voice: string, rate: string, text: string): string {
+  const key = crypto.createHash('sha1').update(`${voice}|${rate}|${text}`).digest('hex');
+  return path.join(CACHE_DIR, `${key}.mp3`);
+}
+
 /** Edge thỉnh thoảng đóng kết nối không trả audio (bị chặn tạm khi gọi dồn dập); thử lại với giãn cách tăng dần. */
 async function synth(voice: string, rate: string, text: string): Promise<Buffer> {
+  const cacheable = text.length <= CACHE_MAX_CHARS;
+  const file = cachePath(voice, rate, text);
+  if (cacheable) {
+    try {
+      return fs.readFileSync(file);
+    } catch {
+      /* chưa có */
+    }
+  }
   const waits = [1500, 4000];
   for (let attempt = 0; ; attempt++) {
     try {
-      return await synthOnce(voice, rate, text);
+      const audio = await synthOnce(voice, rate, text);
+      if (cacheable && audio.length > 0) {
+        try {
+          fs.mkdirSync(CACHE_DIR, { recursive: true });
+          fs.writeFileSync(file, audio);
+        } catch {
+          /* bỏ qua */
+        }
+      }
+      return audio;
     } catch (err) {
       if (attempt >= waits.length) throw err;
       log(`tts lỗi, thử lại sau ${waits[attempt]}ms: ${(err as Error).message}`);
