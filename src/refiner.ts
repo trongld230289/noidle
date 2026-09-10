@@ -53,7 +53,7 @@ export function cleanReply(reply: string, input: string): string {
 const norm = (w: string) =>
   w
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
     .replace(/đ/gi, 'd')
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, '');
