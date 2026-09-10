@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { refine, cleanReply } from '../src/refiner';
+import { refine, cleanReply, keepsMostWords } from '../src/refiner';
 
 function fakeFetch(status: number, content: string) {
   return vi.fn(async () =>
@@ -20,6 +20,20 @@ describe('cleanReply', () => {
   it('falls back to input when reply is empty or suspiciously long', () => {
     expect(cleanReply('', 'giữ nguyên')).toBe('giữ nguyên');
     expect(cleanReply('a'.repeat(200), 'ngắn')).toBe('ngắn');
+  });
+});
+
+describe('keepsMostWords', () => {
+  it('accepts diacritic fixes and phonetic merges', () => {
+    expect(keepsMostWords('du ai tạo label moi', 'UI tạo label mới')).toBe(true);
+    expect(keepsMostWords('sua ham claimNext', 'Sửa hàm claimNext.')).toBe(true);
+  });
+  it('rejects rewrites that drop or replace most words', () => {
+    expect(keepsMostWords('impact không', 'bug')).toBe(false);
+    expect(keepsMostWords('có bị', 'có bị bug hay không nhỉ')).toBe(false);
+  });
+  it('cleanReply falls back to input on such rewrites', () => {
+    expect(cleanReply('bug', 'impact không')).toBe('impact không');
   });
 });
 

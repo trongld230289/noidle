@@ -19,13 +19,14 @@ const MAX_CONTEXT_CHARS = 300;
 
 const SYSTEM = `Bạn là bộ sửa lỗi cho văn bản nhận dạng giọng nói tiếng Việt (Whisper) của một lập trình viên đang gõ trong VS Code.
 Nhiệm vụ: sửa chính tả, dấu thanh, dấu câu, viết hoa đầu câu cho đoạn văn bản đưa vào. Chỉ sửa, không trả lời, không thêm ý, không giải thích.
+Quy tắc quan trọng nhất: đoạn đưa vào là một mẩu của câu đang nói, thường bị cắt giữa chừng và mẩu tiếp theo sẽ đến sau. Tuyệt đối không hoàn thiện câu, không thêm từ, không bỏ từ, không thay một từ có nghĩa bằng từ khác. Số từ trả về phải xấp xỉ số từ đưa vào. Nếu một từ nghe hợp lý thì giữ nguyên dù bạn nghĩ từ khác hợp hơn.
 Quy tắc:
 - Giữ nguyên thuật ngữ lập trình và từ tiếng Anh (refactor, commit, pull request, function, API, tên biến, tên file, lệnh shell, cờ, đường dẫn).
 - Không dịch tiếng Anh sang tiếng Việt và ngược lại.
 - Người nói trộn tiếng Việt với thuật ngữ tiếng Anh. Whisper hay phiên âm chữ viết tắt và từ tiếng Anh thành âm tiếng Việt vô nghĩa; hãy đổi lại đúng thuật ngữ. Ví dụ: "du ai"/"diu ai" → UI, "ây pi ai" → API, "ây ai" → AI, "ai đi" → ID, "đi bi" → DB, "diu ét x"/"diu ếch" → UX, "gít" → git, "pi a"/"pi rờ" → PR, "cờ mít" → commit, "rì pô" → repo, "đì bấc" → debug, "rì lốt" → reload, "phai" → file, "phôn đơ" → folder, "cót" → code, "biu" → build, "đì lít" → delete, "bút tần" → button, "cờ lích" → click, "sờ tai" → style, "com pô nần" → component, "in pút" → input, "au pút" → output, "lây ao" → layout.
 - Nếu một cụm âm tiếng Việt vô nghĩa nghe giống một từ tiếng Anh thông dụng trong lập trình, thay bằng từ tiếng Anh đó.
 - Không thêm dấu chấm ở cuối nếu câu chưa kết thúc rõ ràng.
-- Nếu đoạn văn bản là chuỗi vô nghĩa do nhận dạng sai (không thành câu, lộn xộn), trả về đúng chuỗi ${DROP}.
+- Chỉ khi toàn bộ đoạn là chuỗi âm lộn xộn không thể hiểu, trả về đúng chuỗi ${DROP}. Mẩu ngắn, cụt hoặc thiếu chủ ngữ vẫn là câu nói bình thường, phải trả về.
 - Chỉ trả về văn bản đã sửa, không có dấu ngoặc kép bao quanh, không có lời dẫn.`;
 
 const TARGET_HINT: Record<Target, string> = {
@@ -44,7 +45,32 @@ export function cleanReply(reply: string, input: string): string {
   }
   if (!out) return input;
   if (out.length > input.length * 2 + 40) return input;
+  if (!keepsMostWords(input, out)) return input;
   return out;
+}
+
+// So sánh không dấu để "sua ham" và "sửa hàm" tính là cùng từ.
+const norm = (w: string) =>
+  w
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/đ/gi, 'd')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '');
+
+/**
+ * LLM chỉ được sửa, không được viết lại. Nếu quá nửa số từ của input biến mất khỏi output
+ * (ví dụ "impact không" thành "bug"), coi như LLM bịa và giữ input.
+ * Cho phép chênh vì LLM hợp nhất phiên âm ("du ai" thành "UI") và thêm dấu.
+ */
+export function keepsMostWords(input: string, output: string): boolean {
+  const inWords = input.split(/\s+/u).map(norm).filter(Boolean);
+  if (inWords.length === 0) return true;
+  const outSet = new Set(output.split(/\s+/u).map(norm).filter(Boolean));
+  const kept = inWords.filter((w) => outSet.has(w)).length;
+  const outCount = outSet.size;
+  if (outCount > inWords.length + 2) return false; // thêm từ = hoàn thiện câu
+  return kept / inWords.length >= 0.5;
 }
 
 /** Sửa chính tả và dấu câu bằng LLM trên Groq. Lỗi gì cũng trả về text gốc. */

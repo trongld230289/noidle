@@ -2,7 +2,7 @@
   "name": "vi-voice",
   "displayName": "Vi Voice",
   "description": "Gõ tiếng Việt bằng giọng nói vào terminal, Copilot Chat và editor",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "publisher": "trongld",
   "license": "MIT",
   "engines": {
