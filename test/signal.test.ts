@@ -12,6 +12,8 @@ import {
   sendSignal,
   signalWindow,
   pipeName,
+  askSignal,
+  askWindow,
   WindowEntry,
 } from '../src/signal';
 
@@ -67,7 +69,7 @@ describe('server/client', () => {
   it('gửi một dòng JSON qua pipe và nhận được', async () => {
     const pipe = testPipe();
     const got: unknown[] = [];
-    const server = startServer(pipe, (s) => got.push(s));
+    const server = startServer(pipe, (s) => void got.push(s));
     await new Promise((r) => server.once('listening', r));
     expect(await sendSignal(pipe, { event: 'listen', session: 's1', cwd: 'D:/x' })).toBe(true);
     await new Promise((r) => setTimeout(r, 50));
@@ -81,7 +83,7 @@ describe('server/client', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vi-voice-sig-'));
     const pipe = testPipe();
     const got: unknown[] = [];
-    const server = startServer(pipe, (s) => got.push(s));
+    const server = startServer(pipe, (s) => void got.push(s));
     await new Promise((r) => server.once('listening', r));
     writeRegistry({ pid: 1, pipe, folders: ['D:/live'] }, dir);
     writeRegistry({ pid: 2, pipe: testPipe(), folders: ['D:/dead'] }, dir);
@@ -91,6 +93,30 @@ describe('server/client', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(got.length).toBe(1);
     expect(readRegistry(dir).map((e) => e.pid)).toEqual([1]);
+    server.close();
+  });
+});
+
+describe('ask', () => {
+  it('parseSignal nhận ask kèm timeoutSec', () => {
+    expect(parseSignal('{"event":"ask","session":"s","cwd":"D:/x","timeoutSec":7}')).toEqual({ event: 'ask', session: 's', cwd: 'D:/x', timeoutSec: 7 });
+  });
+  it('server trả lời heard, client nhận được; pipe chết thì undefined', async () => {
+    const pipe = testPipe();
+    const server = startServer(pipe, async (s) => (s.event === 'ask' ? `nghe ${s.timeoutSec}` : undefined));
+    await new Promise((r) => server.once('listening', r));
+    expect(await askSignal(pipe, { event: 'ask', session: '', cwd: 'D:/x', timeoutSec: 7 }, 2000)).toBe('nghe 7');
+    expect(await askSignal(testPipe(), { event: 'ask', session: '', cwd: 'D:/x' }, 500)).toBeUndefined();
+    server.close();
+  });
+  it('askWindow chọn cửa sổ theo cwd', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vi-voice-ask-'));
+    const pipe = testPipe();
+    const server = startServer(pipe, async () => 'đồng ý');
+    await new Promise((r) => server.once('listening', r));
+    writeRegistry({ pid: 5, pipe, folders: ['D:/live'] }, dir);
+    expect(await askWindow({ event: 'ask', session: '', cwd: 'D:/live/x', timeoutSec: 1 }, dir)).toBe('đồng ý');
+    expect(await askWindow({ event: 'ask', session: '', cwd: 'D:/none', timeoutSec: 1 }, dir)).toBeUndefined();
     server.close();
   });
 });
