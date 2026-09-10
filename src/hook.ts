@@ -231,7 +231,12 @@ async function modePrompt(): Promise<void> {
     JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: PROMPT_CONTEXT } }),
   );
   // Người dùng vừa gửi prompt: bảo extension tắt mic hands-free nếu đang mở. Không có cửa sổ thì thôi.
-  const input = JSON.parse((await readStdin()) || '{}') as { session_id?: string; cwd?: string };
+  let input: { session_id?: string; cwd?: string } = {};
+  try {
+    input = JSON.parse((await readStdin()) || '{}') as typeof input;
+  } catch {
+    /* stdin lạ thì vẫn báo theo cwd của tiến trình */
+  }
   const cwd = input.cwd || process.cwd();
   await signalWindow({ event: 'submitted', session: input.session_id ?? '', cwd }, undefined, log);
 }
