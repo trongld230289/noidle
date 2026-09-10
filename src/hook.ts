@@ -1,5 +1,5 @@
 /**
- * Hook cho Claude Code, đóng gói thành dist/claude-hook.js. Ba chế độ:
+ * Hook cho Claude Code, đóng gói thành dist/claude-hook.js. Các chế độ:
  *   prompt                    UserPromptSubmit: in hướng dẫn để Claude kết thúc bằng dòng 🔊.
  *   prompt                    ...rồi báo extension (tín hiệu submitted) là người dùng đã gửi, để tắt mic hands-free.
  *   speak [--voice] [--rate] [--player]
@@ -11,8 +11,8 @@
  *                             Có --listen thì phát xong gửi tín hiệu listen cho cửa sổ VS Code của cwd đó.
  *   notify [--voice] ...      Notification / PermissionRequest / PreToolUse(AskUserQuestion): đọc một câu ngắn
  *                             "Workspace X cần approve" hoặc "cần bạn xác nhận câu trả lời", xếp sau lượt đang đọc.
- *                             Có --config với voiceApprove/handsFree thì mở mic nghe và trả quyết định.
- *   listen --config <cfg>     Debug: nghe một câu, in chữ nghe được.
+ *                             Có --config với voiceApprove/handsFree thì nhờ extension mở mic (tín hiệu ask),
+ *                             nhận chữ nghe được và trả quyết định. Hook không tự mở mic.
  */
 import * as fs from 'fs';
 import * as os from 'os';
@@ -21,59 +21,25 @@ import * as crypto from 'crypto';
 import { spawn } from 'child_process';
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
 import { lastAssistantText, pickSpeech, PROMPT_CONTEXT, splitSentences, announcement, HookInput } from './speech';
-import { listenOnce } from './listen';
-import { transcribe } from './transcriber';
 import { parseApproval, isDangerous, parseChoice } from './decision';
-import { signalWindow } from './signal';
+import { signalWindow, askWindow } from './signal';
 
 const DEFAULT_VOICE = 'vi-VN-HoaiMyNeural';
 
 /** Cấu hình extension ghi ra file cho hook (đường dẫn qua --config). */
 interface HookConfig {
-  apiKey?: string;
-  ffmpegPath?: string;
-  micDevice?: string;
-  glossary?: string[];
-  language?: string;
   voiceApprove?: boolean;
   approveTimeoutSec?: number;
-  /** Vòng lặp nói chuyện: chọn đáp án bằng giọng, và tự mở mic sau khi đọc xong câu trả lời. */
+  /** Vòng lặp nói chuyện: chọn đáp án bằng giọng, và extension tự mở mic sau khi đọc xong câu trả lời. */
   handsFree?: boolean;
-  handsFreeTimeoutSec?: number;
-  refine?: boolean;
-  refineModel?: string;
 }
 
-/** Tiếng bíp ngắn báo "nói đi", phát bằng ffplay từ sóng sine, không cần file. */
-function beep(): Promise<void> {
-  return new Promise((resolve) => {
-    const p = spawn(
-      arg('player', 'ffplay'),
-      ['-nodisp', '-autoexit', '-loglevel', 'quiet', '-f', 'lavfi', '-i', 'sine=frequency=880:duration=0.18'],
-      { stdio: 'ignore', windowsHide: true },
-    );
-    p.on('error', () => resolve());
-    p.on('exit', () => resolve());
-  });
-}
-
-/** Mở mic, nghe một câu, gửi Whisper. Trả về '' nếu im lặng hoặc lỗi. Có bíp trước khi nghe. */
-async function listenAndTranscribe(cfg: HookConfig, maxMs: number, label: string): Promise<string> {
-  await beep();
+/** Nhờ extension mở mic nghe một câu; trả '' nếu không có cửa sổ VS Code, im lặng hoặc lỗi. */
+async function askHeard(cwd: string, session: string, timeoutSec: number, label: string): Promise<string> {
   const t0 = Date.now();
-  const wav = await listenOnce({ ffmpegPath: cfg.ffmpegPath || 'ffmpeg', device: cfg.micDevice || undefined, maxMs, log });
-  if (!wav) {
-    log(`${label}: không nghe thấy gì sau ${Date.now() - t0}ms`);
-    return '';
-  }
-  try {
-    const heard = await transcribe(wav, { apiKey: cfg.apiKey!, glossary: cfg.glossary, language: cfg.language });
-    log(`${label}: nghe ${JSON.stringify(heard)} (${Date.now() - t0}ms)`);
-    return heard;
-  } catch (err) {
-    log(`${label}: whisper lỗi ${(err as Error).message}`);
-    return '';
-  }
+  const heard = (await askWindow({ event: 'ask', session, cwd, timeoutSec }, undefined, log)) ?? '';
+  log(`${label}: nghe ${JSON.stringify(heard)} (${Date.now() - t0}ms)`);
+  return heard.trim();
 }
 
 function loadConfig(): HookConfig {
@@ -287,7 +253,7 @@ async function modeNotify(): Promise<void> {
   log(`notify ${input.hook_event_name ?? '?'} ${input.notification_type ?? input.tool_name ?? ''}: ${JSON.stringify(text)}`);
   if (!text) return;
   const cfg = loadConfig();
-  if (input.hook_event_name === 'PermissionRequest' && cfg.voiceApprove && cfg.apiKey) {
+  if (input.hook_event_name === 'PermissionRequest' && cfg.voiceApprove) {
     if (isDangerous(input.tool_name, input.tool_input)) {
       spawnPlay(`${text} Lệnh này thuộc loại nguy hiểm, bạn bấm tay nhé.`, 'notify', input.session_id ?? '');
       return;
@@ -295,7 +261,7 @@ async function modeNotify(): Promise<void> {
     await voiceApprove(text, input, cfg);
     return;
   }
-  if (input.hook_event_name === 'PreToolUse' && input.tool_name === 'AskUserQuestion' && cfg.handsFree && cfg.apiKey) {
+  if (input.hook_event_name === 'PreToolUse' && input.tool_name === 'AskUserQuestion' && cfg.handsFree) {
     await voiceChoose(text, input, cfg);
     return;
   }
@@ -313,7 +279,8 @@ async function voiceChoose(text: string, input: HookInput & { session_id?: strin
     spawnPlay(text, 'notify', session);
     return;
   }
-  const maxMs = Math.max(3, cfg.approveTimeoutSec ?? 15) * 1000;
+  const timeoutSec = Math.max(3, cfg.approveTimeoutSec ?? 15);
+  const cwd = input.cwd || process.cwd();
   const answers: string[] = [];
   for (const q of questions) {
     // Claude hay tự đánh số trong nhãn ("1. Tra tracking"); bỏ đi để không đọc số hai lần.
@@ -323,7 +290,7 @@ async function voiceChoose(text: string, input: HookInput & { session_id?: strin
       ? ` ${labels.map((l, i) => `${i + 1}, ${l}`).join('. ')}.${multi} Sau tiếng bíp, nói số hoặc tên.`
       : ' Sau tiếng bíp, bạn trả lời.';
     await playNow(`${q.question}${spokenOptions}`.trim(), 'notify', session);
-    const heard = await listenAndTranscribe(cfg, maxMs, 'chọn');
+    const heard = await askHeard(cwd, session, timeoutSec, 'chọn');
     if (!heard) {
       spawnPlay('Mình không nghe thấy, bạn chọn tay nhé.', 'notify', session);
       return;
@@ -367,8 +334,7 @@ async function voiceApprove(text: string, input: HookInput & { session_id?: stri
   const session = input.session_id ?? '';
   const t0 = Date.now();
   await playNow(`${text} Sau tiếng bíp, nói approve hoặc từ chối.`, 'notify', session);
-  const maxMs = Math.max(3, cfg.approveTimeoutSec ?? 15) * 1000;
-  const heard = await listenAndTranscribe(cfg, maxMs, 'approve');
+  const heard = await askHeard(input.cwd || process.cwd(), session, Math.max(3, cfg.approveTimeoutSec ?? 15), 'approve');
   if (!heard) {
     spawnPlay('Mình không nghe thấy, bạn bấm tay nhé.', 'notify', session);
     return;
@@ -389,26 +355,6 @@ async function voiceApprove(text: string, input: HookInput & { session_id?: stri
       },
     }),
   );
-}
-
-/** Debug: `listen --config <cfg> [--seconds N]` mở mic, in ra chữ nghe được và quyết định approve tương ứng. */
-async function modeListen(): Promise<void> {
-  const cfg = loadConfig();
-  const maxMs = Number(arg('seconds', '8')) * 1000;
-  process.stdout.write(`Đang nghe ${maxMs / 1000}s... nói "approve" hoặc "từ chối"\n`);
-  const t0 = Date.now();
-  const wav = await listenOnce({ ffmpegPath: cfg.ffmpegPath || 'ffmpeg', device: cfg.micDevice || undefined, maxMs, log: (m) => process.stdout.write(m + '\n') });
-  if (!wav) {
-    process.stdout.write(`Không nghe thấy gì (${Date.now() - t0}ms)\n`);
-    return;
-  }
-  process.stdout.write(`Thu được ${((wav.byteLength - 44) / 32000).toFixed(1)}s tiếng nói sau ${Date.now() - t0}ms\n`);
-  if (!cfg.apiKey) {
-    process.stdout.write('Không có apiKey trong config nên không gửi Whisper.\n');
-    return;
-  }
-  const heard = await transcribe(wav, { apiKey: cfg.apiKey, glossary: cfg.glossary, language: cfg.language });
-  process.stdout.write(`Nghe: ${JSON.stringify(heard)} → ${parseApproval(heard) ?? 'không rõ'} (${Date.now() - t0}ms)\n`);
 }
 
 /** Phát ngay trong tiến trình này và chờ phát xong (vẫn xếp hàng chung). */
@@ -545,8 +491,7 @@ async function main(): Promise<void> {
   if (mode === 'speak') return modeSpeak();
   if (mode === 'play') return modePlay();
   if (mode === 'notify') return modeNotify();
-  if (mode === 'listen') return modeListen();
-  process.stderr.write('usage: claude-hook.js prompt | speak | notify | listen | play <file>\n');
+  process.stderr.write('usage: claude-hook.js prompt | speak | notify | play <file>\n');
   process.exitCode = 2;
 }
 

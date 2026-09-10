@@ -71,7 +71,7 @@ Khi Claude Code cần bạn approve một lệnh hoặc chờ bạn chọn câu 
 
 Bật `viVoice.voiceApprove`. Khi Claude Code xin quyền, hook đọc "Workspace X cần approve, nói approve hoặc từ chối" rồi mở mic nghe tối đa 15 giây. Nói "approve", "đồng ý", "ok" thì lệnh được duyệt; "từ chối", "không", "dừng" thì bị chặn; im lặng hoặc không rõ thì hộp thoại hiện như thường để bấm tay. Hook xác nhận lại bằng giọng "đã approve" hoặc "đã từ chối".
 
-Lệnh nguy hiểm không bao giờ được duyệt bằng giọng, luôn phải bấm tay: xoá file đệ quy, git push, git reset --hard, drop table, sudo, docker prune, sửa file .env hay settings.json. Ai đứng gần mic cũng approve được, nên chỉ bật khi thật sự đang nằm nghe. Để hook dùng được Whisper, extension ghi key Groq cùng cấu hình mic vào file `hook-config.json` trong thư mục globalStorage của extension.
+Lệnh nguy hiểm không bao giờ được duyệt bằng giọng, luôn phải bấm tay: xoá file đệ quy, git push, git reset --hard, drop table, sudo, docker prune, sửa file .env hay settings.json. Ai đứng gần mic cũng approve được, nên chỉ bật khi thật sự đang nằm nghe. Mic do extension mở ngay trong cửa sổ VS Code (status bar hiện "Claude đang nghe"), hook chỉ gửi tín hiệu hỏi và nhận chữ nghe được; VS Code đóng thì hộp thoại hiện như thường.
 
 ### Hands-free: nói chuyện khép kín
 

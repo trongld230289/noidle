@@ -132,7 +132,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       ) {
         void syncClaudeHooks().catch((err) => log(`lỗi đồng bộ hook: ${(err as Error).message}`));
       } else if (e.affectsConfiguration('viVoice')) {
-        // Key, mic, từ điển, approve bằng giọng: hook đọc từ file cấu hình nên chỉ cần ghi lại file.
+        // Approve bằng giọng, hands-free: hook đọc từ file cấu hình nên chỉ cần ghi lại file.
         void writeHookConfig().catch((err) => log(`lỗi ghi hook-config: ${(err as Error).message}`));
       }
     }),
@@ -181,21 +181,13 @@ export function activate(ctx: vscode.ExtensionContext): void {
   const hookScript = path.join(ctx.extensionPath, 'dist', 'claude-hook.js');
   const hookConfigPath = path.join(ctx.globalStorageUri.fsPath, 'hook-config.json');
 
-  /** Ghi cấu hình cho hook: key Groq, mic, ffmpeg, từ điển, approve bằng giọng. */
+  /** Ghi cấu hình cho hook: approve bằng giọng và hands-free. Hook không tự mở mic nên không cần key hay mic. */
   async function writeHookConfig(): Promise<void> {
     const cfg = config();
     const data = {
-      apiKey: (await resolveApiKey()) ?? '',
-      ffmpegPath: cfg.ffmpegPath,
-      micDevice: cfg.micDevice ?? '',
-      glossary: cfg.glossary,
-      language: cfg.language,
       voiceApprove: cfg.voiceApprove,
       approveTimeoutSec: cfg.approveTimeoutSec,
       handsFree: cfg.handsFree,
-      handsFreeTimeoutSec: cfg.handsFreeTimeoutSec,
-      refine: cfg.refine,
-      refineModel: cfg.refineModel,
     };
     await fs.promises.mkdir(path.dirname(hookConfigPath), { recursive: true });
     await fs.promises.writeFile(hookConfigPath, JSON.stringify(data, null, 2), 'utf8');
