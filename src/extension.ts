@@ -7,6 +7,7 @@ import { transcribe, TranscribeError } from './transcriber';
 import { refine, DEFAULT_REFINE_MODEL } from './refiner';
 import { applyHooks, ClaudeSettings } from './claudeHooks';
 import { inject, InjectorApi, Target } from './injector';
+import { startServer, writeRegistry, removeRegistry, pipeName, Signal } from './signal';
 import { audioLevel, pcmToWav } from './wav';
 import * as fs from 'fs';
 import { execFile, spawn } from 'child_process';
@@ -71,13 +72,18 @@ async function ensureTerminalSkipShell(): Promise<void> {
   );
 }
 
-/** Một lần bấm F6 → nói → F6. Các cụm được gửi và chèn tuần tự trong lúc vẫn đang nghe. */
+/**
+ * Một lần bấm F6 → nói → F6. Các cụm được gửi và chèn tuần tự trong lúc vẫn đang nghe.
+ * auto: session hands-free do hook ra hiệu, tự tắt khi im lặng hoặc khi người dùng gửi prompt.
+ */
 interface Session {
   target: Target;
   segmenter: Segmenter;
   queue: Promise<void>;
   transcript: string;
   segments: number;
+  auto: boolean;
+  idleTimer?: NodeJS.Timeout;
 }
 
 export function activate(ctx: vscode.ExtensionContext): void {
@@ -297,7 +303,19 @@ export function activate(ctx: vscode.ExtensionContext): void {
     return piece;
   }
 
+  /** Session hands-free: im lặng quá handsFreeTimeoutSec kể từ lúc mở hoặc cụm cuối thì tự tắt mic. */
+  function armIdle(s: Session): void {
+    clearTimeout(s.idleTimer);
+    s.idleTimer = setTimeout(() => {
+      if (session === s) {
+        log('hands-free: im lặng, tắt mic');
+        void toggle();
+      }
+    }, Math.max(5, config().handsFreeTimeoutSec) * 1000);
+  }
+
   function enqueue(s: Session, pcm: Uint8Array): void {
+    if (s.auto) armIdle(s);
     s.segments++;
     const wav = pcmToWav(pcm, SAMPLE_RATE, CHANNELS);
     log(`cụm ${s.segments} (${(Recorder.durationMs(wav) / 1000).toFixed(1)}s) → ${s.target}`);
@@ -308,7 +326,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       .catch(() => undefined);
   }
 
-  async function toggle(args?: { target?: Target }): Promise<void> {
+  async function toggle(args?: { target?: Target; auto?: boolean }): Promise<void> {
     if (busy) return;
     busy = true;
     try {
@@ -320,16 +338,19 @@ export function activate(ctx: vscode.ExtensionContext): void {
           queue: lastQueue,
           transcript: '',
           segments: 0,
+          auto: !!args?.auto,
         };
         s.segmenter = new Segmenter({ sampleRate: SAMPLE_RATE }, (pcm) => enqueue(s, pcm));
         await recorder.start((chunk) => s.segmenter.push(chunk));
         session = s;
-        status.set('recording');
+        status.set(s.auto ? 'listening' : 'recording');
         maxTimer = setTimeout(() => void vscode.commands.executeCommand('viVoice.toggle'), MAX_RECORD_MS);
+        if (s.auto) armIdle(s);
         return;
       }
       clearTimeout(maxTimer);
       const s = session;
+      clearTimeout(s.idleTimer);
       session = undefined;
       const audio = await recorder.stop();
       lastAudio = audio;
@@ -399,10 +420,63 @@ export function activate(ctx: vscode.ExtensionContext): void {
     );
   }
 
+  /** Bíp ngắn báo "nói đi" trước khi mở mic hands-free, cùng cách với hook. */
+  function beep(): Promise<void> {
+    return new Promise((resolve) => {
+      const p = spawn(
+        playerPath(),
+        ['-nodisp', '-autoexit', '-loglevel', 'quiet', '-f', 'lavfi', '-i', 'sine=frequency=880:duration=0.18'],
+        { stdio: 'ignore', windowsHide: true },
+      );
+      p.on('error', () => resolve());
+      p.on('exit', () => resolve());
+    });
+  }
+
+  /** Tín hiệu từ hook Claude Code: listen = Claude vừa đọc xong, mở mic; submitted = người dùng đã gửi, tắt mic. */
+  async function onSignal(s: Signal): Promise<void> {
+    log(`tín hiệu ${s.event} (session ${s.session || '-'})`);
+    if (s.event === 'submitted') {
+      if (session?.auto) await toggle();
+      return;
+    }
+    if (!config().handsFree) return;
+    if (session) {
+      log('hands-free: mic đang bật sẵn, bỏ qua');
+      return;
+    }
+    if (!vscode.window.activeTerminal) {
+      log('hands-free: không có terminal đang mở, bỏ qua');
+      return;
+    }
+    await beep();
+    await toggle({ target: 'terminal', auto: true });
+  }
+
+  const pipe = pipeName(process.pid);
+  const server = startServer(pipe, (s) => void onSignal(s).catch((err) => log(`lỗi tín hiệu: ${(err as Error).message}`)));
+  const registerWindow = () => {
+    const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
+    try {
+      writeRegistry({ pid: process.pid, pipe, folders });
+      log(`đăng ký cửa sổ pid ${process.pid} cho hook: ${folders.join(', ') || '(không có folder)'}`);
+    } catch (err) {
+      log(`không ghi được đăng ký cửa sổ: ${(err as Error).message}`);
+    }
+  };
+  registerWindow();
+
   ctx.subscriptions.push(
     status,
     out,
     { dispose: () => recorder.dispose() },
+    vscode.workspace.onDidChangeWorkspaceFolders(registerWindow),
+    {
+      dispose: () => {
+        removeRegistry(process.pid);
+        server.close();
+      },
+    },
     vscode.commands.registerCommand('viVoice.toggle', toggle),
     vscode.commands.registerCommand('viVoice.setApiKey', setApiKey),
     vscode.commands.registerCommand('viVoice.retry', retry),

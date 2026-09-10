@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 
-export type State = 'idle' | 'recording' | 'transcribing';
+export type State = 'idle' | 'recording' | 'listening' | 'transcribing';
 
 export class StatusBar implements vscode.Disposable {
   private readonly item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -21,6 +21,11 @@ export class StatusBar implements vscode.Disposable {
       case 'recording':
         this.item.text = '$(record) Đang nghe…';
         this.item.tooltip = 'F6 để dừng';
+        this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+        break;
+      case 'listening':
+        this.item.text = '$(record) Claude đang nghe…';
+        this.item.tooltip = 'Nói yêu cầu tiếp theo rồi bấm Enter. F6 để tắt mic';
         this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
         break;
       case 'transcribing':
