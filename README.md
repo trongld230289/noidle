@@ -81,6 +81,7 @@ Gõ `Vi Voice` vào ô tìm kiếm của Settings:
 | `viVoice.ffmpegPath` | `ffmpeg` | Đường dẫn ffmpeg nếu không có trong PATH. |
 | `viVoice.micDevice` | trống | Tên micro. Trống thì lấy micro đầu tiên. Nên đặt bằng lệnh `Vi Voice: Chọn micro`. |
 | `viVoice.typingDelayMs` | `12` | Nghỉ bao nhiêu ms giữa các ký tự khi gõ vào editor. Đặt `0` để chèn nguyên cụm. |
+| `viVoice.glossary` | `[]` | Thuật ngữ riêng: tên project, tên biến, tên người, từ viết tắt. Whisper và LLM sẽ ưu tiên viết đúng các từ này. |
 | `viVoice.refine` | `true` | Sửa câu bằng LLM sau khi nhận dạng. |
 | `viVoice.refineModel` | `llama-3.3-70b-versatile` | Model Groq dùng để sửa câu. `llama-3.1-8b-instant` nhanh hơn nhưng kém hơn. |
 
@@ -95,6 +96,8 @@ Phím tắt mặc định là **F6**. Đổi phím trong `File > Preferences > K
 | Không nghe thấy tiếng nói | Kiểm tra mic trong Windows Settings > Sound > Input. Chạy `Vi Voice: Chọn micro` để chọn đúng thiết bị. Dùng lệnh lưu audio để nghe thử file thu được. |
 | Bấm F6 trong terminal ra ký tự lạ | Kiểm tra `terminal.integrated.commandsToSkipShell` trong Settings có chứa `viVoice.toggle`. |
 | Lỗi mạng hoặc quá giới hạn | Chờ vài giây rồi chạy `Vi Voice: Gửi lại audio cuối`. |
+| Từ tiếng Anh bị viết thành âm tiếng Việt (UI thành "du ai") | Thêm từ đó vào `viVoice.glossary`. |
+| Muốn xem chữ thô trước khi sửa | Mở `View > Output`, chọn kênh **Vi Voice**. Mỗi cụm có chữ thô của Whisper, chữ sau lọc và chữ sau LLM. |
 
 ## Riêng tư
 

@@ -40,6 +40,7 @@ function config() {
     ffmpegPath: c.get<string>('ffmpegPath', 'ffmpeg') || 'ffmpeg',
     micDevice: c.get<string>('micDevice', '') || undefined,
     typeDelayMs: typing > 0 ? typing : undefined,
+    glossary: c.get<string[]>('glossary', []),
     refine: c.get<boolean>('refine', true),
     refineModel: c.get<string>('refineModel', DEFAULT_REFINE_MODEL) || DEFAULT_REFINE_MODEL,
   };
@@ -70,6 +71,8 @@ interface Session {
 
 export function activate(ctx: vscode.ExtensionContext): void {
   const status = new StatusBar();
+  const out = vscode.window.createOutputChannel('Vi Voice');
+  const log = (msg: string) => out.appendLine(`${new Date().toLocaleTimeString('vi-VN')} ${msg}`);
   void ensureTerminalSkipShell().catch(() => undefined);
   let recorder = new Recorder(config());
   const api: InjectorApi = {
@@ -134,9 +137,17 @@ export function activate(ctx: vscode.ExtensionContext): void {
     const apiKey = await ctx.secrets.get(SECRET_KEY);
     if (!apiKey) return '';
     let text: string;
+    const cfg = config();
+    const t0 = Date.now();
     try {
-      text = await transcribe(wav, { apiKey, context });
+      text = await transcribe(wav, {
+        apiKey,
+        context,
+        glossary: cfg.glossary,
+        onRaw: (raw) => log(`whisper thô: ${JSON.stringify(raw)}`),
+      });
     } catch (err) {
+      log(`lỗi: ${(err as Error).message}`);
       failed = { wav, target, context };
       if (err instanceof TranscribeError && err.kind === 'auth') {
         const pick = await vscode.window.showErrorMessage(`Vi Voice: ${err.message}`, 'Nhập lại key');
@@ -148,9 +159,13 @@ export function activate(ctx: vscode.ExtensionContext): void {
       }
       return '';
     }
+    log(`sau lọc (${Date.now() - t0}ms): ${JSON.stringify(text)}`);
     if (!text) return '';
-    const cfg = config();
-    if (cfg.refine) text = await refine(text, { apiKey, target, context, model: cfg.refineModel });
+    if (cfg.refine) {
+      const t1 = Date.now();
+      text = await refine(text, { apiKey, target, context, model: cfg.refineModel, glossary: cfg.glossary });
+      log(`sau LLM (${Date.now() - t1}ms): ${JSON.stringify(text)}`);
+    }
     if (!text) return '';
     const piece = (context ? ' ' : '') + text;
     const used = await inject(target, piece, api, { typeDelayMs: config().typeDelayMs });
@@ -261,6 +276,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   ctx.subscriptions.push(
     status,
+    out,
     { dispose: () => recorder.dispose() },
     vscode.commands.registerCommand('viVoice.toggle', toggle),
     vscode.commands.registerCommand('viVoice.setApiKey', setApiKey),

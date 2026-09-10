@@ -34,8 +34,11 @@ describe('buildPrompt', () => {
     const base = buildPrompt();
     expect(buildPrompt('xin chào')).toBe(`${base} xin chào`);
     const long = 'a'.repeat(300);
-    expect(buildPrompt(long).endsWith('a'.repeat(150))).toBe(true);
-    expect(buildPrompt(long).length).toBe(base.length + 1 + 150);
+    expect(buildPrompt(long).endsWith('a'.repeat(100))).toBe(true);
+    expect(buildPrompt(long).length).toBe(base.length + 1 + 100);
+  });
+  it('lists the user glossary before the context tail', () => {
+    expect(buildPrompt('xin chào', ['claimNext', ' Vi Voice ', ''])).toBe(`${buildPrompt()} claimNext, Vi Voice. xin chào`);
   });
 });
 

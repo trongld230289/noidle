@@ -6,6 +6,8 @@ export interface RefineOptions {
   /** Chữ đã nhận ở các cụm trước, để chấm câu và nối ý cho đúng. */
   context?: string;
   model?: string;
+  /** Thuật ngữ riêng của người dùng: tên project, tên biến, tên người. */
+  glossary?: string[];
   fetchFn?: typeof fetch;
   timeoutMs?: number;
 }
@@ -20,6 +22,8 @@ Nhiệm vụ: sửa chính tả, dấu thanh, dấu câu, viết hoa đầu câu
 Quy tắc:
 - Giữ nguyên thuật ngữ lập trình và từ tiếng Anh (refactor, commit, pull request, function, API, tên biến, tên file, lệnh shell, cờ, đường dẫn).
 - Không dịch tiếng Anh sang tiếng Việt và ngược lại.
+- Người nói trộn tiếng Việt với thuật ngữ tiếng Anh. Whisper hay phiên âm chữ viết tắt và từ tiếng Anh thành âm tiếng Việt vô nghĩa; hãy đổi lại đúng thuật ngữ. Ví dụ: "du ai"/"diu ai" → UI, "ây pi ai" → API, "ây ai" → AI, "ai đi" → ID, "đi bi" → DB, "diu ét x"/"diu ếch" → UX, "gít" → git, "pi a"/"pi rờ" → PR, "cờ mít" → commit, "rì pô" → repo, "đì bấc" → debug, "rì lốt" → reload, "phai" → file, "phôn đơ" → folder, "cót" → code, "biu" → build, "đì lít" → delete, "bút tần" → button, "cờ lích" → click, "sờ tai" → style, "com pô nần" → component, "in pút" → input, "au pút" → output, "lây ao" → layout.
+- Nếu một cụm âm tiếng Việt vô nghĩa nghe giống một từ tiếng Anh thông dụng trong lập trình, thay bằng từ tiếng Anh đó.
 - Không thêm dấu chấm ở cuối nếu câu chưa kết thúc rõ ràng.
 - Nếu đoạn văn bản là chuỗi vô nghĩa do nhận dạng sai (không thành câu, lộn xộn), trả về đúng chuỗi ${DROP}.
 - Chỉ trả về văn bản đã sửa, không có dấu ngoặc kép bao quanh, không có lời dẫn.`;
@@ -47,8 +51,10 @@ export function cleanReply(reply: string, input: string): string {
 export async function refine(text: string, opts: RefineOptions): Promise<string> {
   const fetchFn = opts.fetchFn ?? fetch;
   const context = (opts.context ?? '').trim().slice(-MAX_CONTEXT_CHARS);
+  const terms = (opts.glossary ?? []).map((t) => t.trim()).filter(Boolean);
   const user =
     `${TARGET_HINT[opts.target]}\n` +
+    (terms.length ? `Thuật ngữ người dùng hay nói, giữ đúng chính tả: ${terms.join(', ')}\n` : '') +
     (context ? `Chữ đã nhận trước đó (chỉ để tham khảo, không sửa, không lặp lại): ${context}\n` : '') +
     `Đoạn cần sửa:\n${text}`;
 

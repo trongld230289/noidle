@@ -13,24 +13,33 @@ export interface TranscribeOptions {
   timeoutMs?: number;
   /** Chữ đã nhận ở các cụm trước, để Whisper nối câu đúng. */
   context?: string;
+  /** Thuật ngữ riêng của người dùng, đưa vào prompt để Whisper viết đúng. */
+  glossary?: string[];
+  /** Nhận chữ thô của Whisper trước khi lọc, để ghi log. */
+  onRaw?: (raw: string) => void;
 }
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
 const MODEL = 'whisper-large-v3';
-// Gợi ý ngữ cảnh để Whisper giữ nguyên thuật ngữ lập trình tiếng Anh.
+// Gợi ý ngữ cảnh để Whisper giữ nguyên thuật ngữ và chữ viết tắt tiếng Anh thay vì phiên âm
+// (UI thành "du ai", API thành "ây pi ai"). Whisper chỉ đọc ~224 token cuối nên phải ngắn.
 const PROMPT =
-  'Tôi cần refactor function claimNext, rồi commit và tạo pull request. ' +
-  'Component này dùng React hook, gọi API endpoint trả về JSON, viết unit test bằng vitest.';
+  'Mình sửa UI, gọi API, đọc JSON, viết CSS, HTML, SQL, dùng React hook, TypeScript, Node, ' +
+  'git commit, push, merge branch, tạo PR, chạy unit test, build, deploy, fix bug, refactor function, ' +
+  'config, log, debug, AI, ID, URL, DB, CI, VS Code, Copilot, Claude.';
 
-const MAX_CONTEXT_CHARS = 150;
+const MAX_CONTEXT_CHARS = 100;
 
 export function contextTail(context?: string): string {
   return (context ?? '').trim().slice(-MAX_CONTEXT_CHARS);
 }
 
-export function buildPrompt(context?: string): string {
+/** Prompt cho Whisper: thuật ngữ mặc định, từ điển của người dùng, rồi đuôi chữ đã nhận. */
+export function buildPrompt(context?: string, glossary: string[] = []): string {
+  const terms = glossary.map((t) => t.trim()).filter(Boolean);
+  const head = terms.length ? `${PROMPT} ${terms.join(', ')}.` : PROMPT;
   const tail = contextTail(context);
-  return tail ? `${PROMPT} ${tail}` : PROMPT;
+  return tail ? `${head} ${tail}` : head;
 }
 
 export function postProcess(text: string): string {
@@ -44,7 +53,7 @@ export async function transcribe(audio: Uint8Array, opts: TranscribeOptions): Pr
   form.append('model', MODEL);
   form.append('language', 'vi');
   form.append('response_format', 'verbose_json');
-  form.append('prompt', buildPrompt(opts.context));
+  form.append('prompt', buildPrompt(opts.context, opts.glossary));
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 30_000);
@@ -67,6 +76,7 @@ export async function transcribe(audio: Uint8Array, opts: TranscribeOptions): Pr
   if (!res.ok) throw new TranscribeError('server', `Groq trả lỗi HTTP ${res.status}`);
 
   const data = (await res.json()) as GroqVerbose;
+  opts.onRaw?.(data.text ?? '');
   const raw = stripHallucinations(joinConfidentSegments(data));
   return postProcess(stripContextEcho(raw, contextTail(opts.context)));
 }
