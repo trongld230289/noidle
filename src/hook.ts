@@ -23,6 +23,7 @@ import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
 import { lastAssistantText, pickSpeech, PROMPT_CONTEXT, splitSentences, announcement, HookInput } from './speech';
 import { parseApproval, isDangerous, parseChoice } from './decision';
 import { signalWindow, askWindow } from './signal';
+import { hedged } from './hedge';
 
 const DEFAULT_VOICE = 'vi-VN-HoaiMyNeural';
 
@@ -369,20 +370,26 @@ async function playNow(text: string, kind: Ticket['kind'], session: string): Pro
   }
 }
 
+/** Một yêu cầu Edge trên kết nối mới; quá SYNTH_TIMEOUT_MS thì đóng kết nối để không treo vô hạn. */
+const SYNTH_TIMEOUT_MS = 20_000;
+
 async function synthOnce(voice: string, rate: string, text: string): Promise<Buffer> {
   const tts = new MsEdgeTTS();
-  await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
-  const { audioStream } = tts.toStream(text, { rate });
+  const timer = setTimeout(() => tts.close(), SYNTH_TIMEOUT_MS);
   const chunks: Buffer[] = [];
   try {
+    await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
+    const { audioStream } = tts.toStream(text, { rate });
     await new Promise<void>((resolve, reject) => {
       audioStream.on('data', (c: Buffer) => chunks.push(c));
       audioStream.on('error', reject);
       audioStream.on('end', resolve);
     });
   } finally {
+    clearTimeout(timer);
     tts.close();
   }
+  if (chunks.length === 0) throw new Error('Edge không trả audio');
   return Buffer.concat(chunks);
 }
 
@@ -395,7 +402,14 @@ function cachePath(voice: string, rate: string, text: string): string {
   return path.join(CACHE_DIR, `${key}.mp3`);
 }
 
-/** Edge thỉnh thoảng đóng kết nối không trả audio (bị chặn tạm khi gọi dồn dập); thử lại với giãn cách tăng dần. */
+/**
+ * Độ trễ của Edge rất thất thường: cùng một câu lúc nửa giây, lúc sáu đến mười hai giây, thỉnh thoảng đóng kết nối
+ * giữa chừng. Loa chỉ có đệm bằng phần audio đã tổng hợp trước đó (một khối ~5-13 giây), nên một cú chậm là im tiếng.
+ * Vì thế: quá HEDGE_MS chưa về thì mở thêm yêu cầu song song lấy cái nào về trước; lỗi thì thử lại ngay, không giãn cách.
+ */
+const HEDGE_MS = 2500;
+const MAX_ATTEMPTS = 4;
+
 async function synth(voice: string, rate: string, text: string): Promise<Buffer> {
   const cacheable = text.length <= CACHE_MAX_CHARS;
   const file = cachePath(voice, rate, text);
@@ -406,25 +420,20 @@ async function synth(voice: string, rate: string, text: string): Promise<Buffer>
       /* chưa có */
     }
   }
-  const waits = [1500, 4000];
-  for (let attempt = 0; ; attempt++) {
+  const audio = await hedged(() => synthOnce(voice, rate, text), {
+    hedgeMs: HEDGE_MS,
+    maxAttempts: MAX_ATTEMPTS,
+    onEvent: (m) => log(`tts ${m}`),
+  });
+  if (cacheable) {
     try {
-      const audio = await synthOnce(voice, rate, text);
-      if (cacheable && audio.length > 0) {
-        try {
-          fs.mkdirSync(CACHE_DIR, { recursive: true });
-          fs.writeFileSync(file, audio);
-        } catch {
-          /* bỏ qua */
-        }
-      }
-      return audio;
-    } catch (err) {
-      if (attempt >= waits.length) throw err;
-      log(`tts lỗi, thử lại sau ${waits[attempt]}ms: ${(err as Error).message}`);
-      await new Promise((r) => setTimeout(r, waits[attempt]));
+      fs.mkdirSync(CACHE_DIR, { recursive: true });
+      fs.writeFileSync(file, audio);
+    } catch {
+      /* bỏ qua */
     }
   }
+  return audio;
 }
 
 async function modePlay(): Promise<void> {
@@ -467,8 +476,8 @@ async function playText(text: string, ticket: string): Promise<void> {
   });
   player.on('exit', () => (stopped = true));
 
-  // Đường ống: tổng hợp từng câu tuần tự (Edge chặn nếu mở nhiều kết nối cùng lúc);
-  // câu i+1 được tổng hợp trong lúc ffplay còn đang phát câu i nên không bị ngắt quãng.
+  // Đường ống: tổng hợp từng khối tuần tự (mỗi khối tối đa hai kết nối song song khi Edge chậm, xem synth);
+  // khối i+1 được tổng hợp trong lúc ffplay còn đang phát khối i nên bình thường không bị ngắt quãng.
   const sentences = splitSentences(text);
   for (let i = 0; i < sentences.length && !stopped; i++) {
     try {

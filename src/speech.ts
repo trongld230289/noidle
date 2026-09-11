@@ -78,9 +78,9 @@ export const PROMPT_CONTEXT =
   `Không chứa code, đường dẫn, tên file, bảng, gạch đầu dòng hay ký hiệu markdown; số liệu ngắn thì đọc bằng chữ, ví dụ "ba mươi chín quyền".`;
 
 /**
- * Tách thành khối để phát dần. Edge tổng hợp gần bằng tốc độ đọc thật và chỉ gửi khi xong cả yêu cầu,
- * nên khối đầu phải thật ngắn (một mệnh đề, tối đa ~firstMax ký tự) để nghe được sau vài giây;
- * các khối sau ~2 câu hoặc ~maxChars ký tự vì gọi quá nhiều yêu cầu dồn dập thì Edge chặn tạm.
+ * Tách thành khối để phát dần. Edge chỉ gửi audio khi xong cả yêu cầu và độ trễ thất thường (nửa giây tới hơn mười giây),
+ * nên khối đầu phải thật ngắn (một mệnh đề, tối đa ~firstMax ký tự) để nghe được sớm;
+ * các khối sau ~2 câu hoặc ~maxChars ký tự để mỗi khối đủ dài làm đệm cho khối kế mà không gọi Edge quá dồn dập.
  */
 export function splitSentences(text: string, maxChars = 220, firstMax = 90): string[] {
   const sentences = text
