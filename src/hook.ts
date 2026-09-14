@@ -1,10 +1,11 @@
 /**
  * Hook cho Claude Code, đóng gói thành dist/claude-hook.js. Các chế độ:
- *   prompt                    UserPromptSubmit: in hướng dẫn để Claude kết thúc bằng dòng 🔊.
+ *   prompt [--config]         UserPromptSubmit: in hướng dẫn để Claude kết thúc bằng dòng 🔊 (trừ khi config voiceMute).
  *   prompt                    ...rồi báo extension (tín hiệu submitted) là người dùng đã gửi, để tắt mic hands-free.
  *   speak [--voice] [--rate] [--player]
  *                             Stop: đọc transcript, chọn câu cần đọc, rồi tách tiến trình `play` và thoát ngay.
  *                             Hands-free: play xong thì báo extension mở mic (tín hiệu listen), hook không tự nghe.
+ *                             Config voiceMute thì speak và notify thoát ngay, không đọc gì; đổi cờ có hiệu lực ngay.
  *   play <textfile> --kind speak|notify --session <id> [--listen <cwd>]
  *                             Tổng hợp giọng bằng Edge TTS, phát bằng ffplay. Xếp hàng theo thứ tự đến;
  *                             câu trả lời mới của cùng một phiên thì cắt câu trả lời cũ của phiên đó.
@@ -29,6 +30,8 @@ const DEFAULT_VOICE = 'vi-VN-HoaiMyNeural';
 
 /** Cấu hình extension ghi ra file cho hook (đường dẫn qua --config). */
 interface HookConfig {
+  /** Tạm tắt tiếng: hook vẫn đăng ký nhưng không đọc, không báo, không chèn hướng dẫn 🔊. Đổi là có hiệu lực ngay. */
+  voiceMute?: boolean;
   voiceApprove?: boolean;
   approveTimeoutSec?: number;
   /** Vòng lặp nói chuyện: chọn đáp án bằng giọng, và extension tự mở mic sau khi đọc xong câu trả lời. */
@@ -194,9 +197,13 @@ async function waitTurn(file: string, maxMs = 5 * 60_000): Promise<void> {
 }
 
 async function modePrompt(): Promise<void> {
-  process.stdout.write(
-    JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: PROMPT_CONTEXT } }),
-  );
+  // Mute thì không dặn Claude viết phần 🔊, nhưng vẫn báo submitted để tắt mic nếu đang mở.
+  if (loadConfig().voiceMute) log('prompt: đang mute, không chèn hướng dẫn');
+  else {
+    process.stdout.write(
+      JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: PROMPT_CONTEXT } }),
+    );
+  }
   // Người dùng vừa gửi prompt: bảo extension tắt mic hands-free nếu đang mở. Không có cửa sổ thì thôi.
   let input: { session_id?: string; cwd?: string } = {};
   try {
@@ -219,6 +226,10 @@ async function modeSpeak(): Promise<void> {
   // Một hook khác vừa chặn Stop và Claude làm tiếp: không đọc lại để khỏi lặp.
   if (input.stop_hook_active) return;
   const cfg = loadConfig();
+  if (cfg.voiceMute) {
+    log('speak: đang mute, bỏ qua');
+    return;
+  }
   let transcript: string;
   try {
     transcript = fs.readFileSync(input.transcript_path, 'utf8');
@@ -254,6 +265,10 @@ async function modeNotify(): Promise<void> {
   log(`notify ${input.hook_event_name ?? '?'} ${input.notification_type ?? input.tool_name ?? ''}: ${JSON.stringify(text)}`);
   if (!text) return;
   const cfg = loadConfig();
+  if (cfg.voiceMute) {
+    log('notify: đang mute, bỏ qua');
+    return;
+  }
   if (input.hook_event_name === 'PermissionRequest' && cfg.voiceApprove) {
     if (isDangerous(input.tool_name, input.tool_input)) {
       spawnPlay(`${text} Lệnh này thuộc loại nguy hiểm, bạn bấm tay nhé.`, 'notify', input.session_id ?? '');

@@ -36,10 +36,12 @@ const q = (s: string) => `"${s.replace(/\\/g, '/')}"`;
 /** Lệnh hook. Đường dẫn dùng dấu / để không phải escape trong JSON và chạy được cả cmd lẫn bash. */
 export function hookCommands(o: HookOptions): { Stop: string; UserPromptSubmit: string; Notify: string } {
   const base = `node ${q(o.script)}`;
-  const voiceArgs = `--voice ${o.voice} --rate "${o.rate}" --player ${q(o.player)}` + (o.config ? ` --config ${q(o.config)}` : '');
+  const configArg = o.config ? ` --config ${q(o.config)}` : '';
+  const voiceArgs = `--voice ${o.voice} --rate "${o.rate}" --player ${q(o.player)}` + configArg;
   return {
     Stop: `${base} speak ${voiceArgs}`,
-    UserPromptSubmit: `${base} prompt`,
+    // prompt cũng cần config để biết đang mute mà không chèn hướng dẫn 🔊.
+    UserPromptSubmit: `${base} prompt${configArg}`,
     Notify: `${base} notify ${voiceArgs}`,
   };
 }

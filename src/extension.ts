@@ -44,6 +44,7 @@ function config() {
   return {
     apiKey: (c.get<string>('groqApiKey', '') || '').trim(),
     voiceResponse: c.get<boolean>('voiceResponse', false),
+    voiceMute: c.get<boolean>('voiceMute', false),
     voice: c.get<string>('voice', 'vi-VN-HoaiMyNeural') || 'vi-VN-HoaiMyNeural',
     voiceRate: c.get<string>('voiceRate', '+0%') || '+0%',
     voiceNotify: c.get<boolean>('voiceNotify', true),
@@ -197,6 +198,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
   async function writeHookConfig(): Promise<void> {
     const cfg = config();
     const data = {
+      voiceMute: cfg.voiceMute,
       voiceApprove: cfg.voiceApprove,
       approveTimeoutSec: cfg.approveTimeoutSec,
       handsFree: cfg.handsFree,
@@ -249,6 +251,16 @@ export function activate(ctx: vscode.ExtensionContext): void {
     }
   }
   void syncClaudeHooks().catch((err) => log(`lỗi đồng bộ hook: ${(err as Error).message}`));
+
+  /** Bật tắt nhanh một cờ boolean của viVoice ở Settings người dùng, rồi báo trạng thái mới. */
+  async function flip(key: 'voiceMute' | 'handsFree', on: string, off: string): Promise<void> {
+    const c = vscode.workspace.getConfiguration('viVoice');
+    const next = !c.get<boolean>(key, false);
+    await c.update(key, next, vscode.ConfigurationTarget.Global);
+    void vscode.window.showInformationMessage(`Vi Voice: ${next ? on : off}`);
+  }
+  const toggleMute = () => flip('voiceMute', 'đã tắt tiếng Claude Code (hook im lặng, không cần restart).', 'đã bật lại tiếng Claude Code.');
+  const toggleHandsFree = () => flip('handsFree', 'đã bật hands-free, Claude đọc xong sẽ mở mic.', 'đã tắt hands-free, đọc xong thì thôi.');
 
   async function testVoice(): Promise<void> {
     const cfg = config();
@@ -613,6 +625,8 @@ export function activate(ctx: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('viVoice.pickMic', pickMic),
     vscode.commands.registerCommand('viVoice.saveLastAudio', saveLastAudio),
     vscode.commands.registerCommand('viVoice.testVoice', testVoice),
+    vscode.commands.registerCommand('viVoice.toggleMute', toggleMute),
+    vscode.commands.registerCommand('viVoice.toggleHandsFree', toggleHandsFree),
   );
 }
 

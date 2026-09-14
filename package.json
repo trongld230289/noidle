@@ -2,7 +2,7 @@
   "name": "vi-voice",
   "displayName": "Vi Voice",
   "description": "Gõ tiếng Việt bằng giọng nói vào terminal, Copilot Chat và editor",
-  "version": "1.7.1",
+  "version": "1.8.0",
   "publisher": "trongld",
   "license": "MIT",
   "engines": {
@@ -38,6 +38,14 @@
         "title": "Vi Voice: Lưu audio cuối ra file (debug)"
       },
       {
+        "command": "viVoice.toggleMute",
+        "title": "Vi Voice: Tắt/bật tiếng Claude Code"
+      },
+      {
+        "command": "viVoice.toggleHandsFree",
+        "title": "Vi Voice: Tắt/bật hands-free"
+      },
+      {
         "command": "viVoice.testVoice",
         "title": "Vi Voice: Đọc thử giọng"
       }
@@ -54,6 +62,11 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Đọc câu trả lời của **Claude Code** thành tiếng. Bật lên thì extension tự thêm hook vào `~/.claude/settings.json`; Claude được dặn kết thúc mỗi câu trả lời bằng một dòng 🔊 tóm tắt và chỉ dòng đó được đọc. Cần `node` và `ffplay` (đi kèm ffmpeg) trong PATH."
+        },
+        "viVoice.voiceMute": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Tạm tắt tiếng Claude Code mà **không cần restart** phiên: hook vẫn đăng ký nhưng không đọc câu trả lời, không báo, không dặn Claude viết phần 🔊, không mở mic. Bật tắt là có hiệu lực ngay ở lượt sau. Khác với tắt `viVoice.voiceResponse` (gỡ hook, phải mở phiên Claude Code mới). Lệnh nhanh: `Vi Voice: Tắt/bật tiếng Claude Code`."
         },
         "viVoice.voiceNotify": {
           "type": "boolean",
@@ -73,7 +86,7 @@
         "viVoice.handsFree": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Vòng lặp nói chuyện với Claude Code. Claude đọc xong câu trả lời thì extension bíp và mở mic ngay trong cửa sổ này: bạn nói yêu cầu tiếp theo, chữ hiện trong terminal, ngắt hơi khoảng 2,5 giây là tự gửi. Nói **gửi** ở cuối câu để gửi ngay, **huỷ** để tắt mic không gửi. Im lặng hết giờ hoặc bấm F6 thì mic tắt. Claude hỏi chọn đáp án thì đọc các lựa chọn và nghe bạn chọn bằng số hoặc tên."
+          "markdownDescription": "Vòng lặp nói chuyện với Claude Code. Bật tắt là có hiệu lực ngay, không cần restart; tắt thì Claude đọc xong là thôi, không mở mic, không chờ. Lệnh nhanh: `Vi Voice: Tắt/bật hands-free`. Khi bật, Claude đọc xong câu trả lời thì extension bíp và mở mic ngay trong cửa sổ này: bạn nói yêu cầu tiếp theo, chữ hiện trong terminal, ngắt hơi khoảng 2,5 giây là tự gửi. Nói **gửi** ở cuối câu để gửi ngay, **huỷ** để tắt mic không gửi. Im lặng hết giờ hoặc bấm F6 thì mic tắt. Claude hỏi chọn đáp án thì đọc các lựa chọn và nghe bạn chọn bằng số hoặc tên."
         },
         "viVoice.handsFreeTimeoutSec": {
           "type": "number",
