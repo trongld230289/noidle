@@ -94,9 +94,22 @@ describe('applyHooks', () => {
 });
 
 describe('splitSentences', () => {
-  it('keeps the first sentence alone, then groups two sentences per chunk within the char limit', () => {
-    const text = 'Một. Hai. Ba. Bốn dài ' + 'x'.repeat(230) + '. Năm.';
-    expect(splitSentences(text)).toEqual(['Một.', 'Hai. Ba.', 'Bốn dài ' + 'x'.repeat(230) + '.', 'Năm.']);
+  it('keeps a first sentence of reasonable length alone, then groups two sentences per chunk within the char limit', () => {
+    const text = 'Một câu mở đầu vừa đủ dài để nghe được vài giây. Hai. Ba. Bốn dài ' + 'x'.repeat(230) + '. Năm.';
+    expect(splitSentences(text)).toEqual([
+      'Một câu mở đầu vừa đủ dài để nghe được vài giây.',
+      'Hai. Ba.',
+      'Bốn dài ' + 'x'.repeat(230) + '.',
+      'Năm.',
+    ]);
+  });
+  it('merges a very short first sentence with the following ones so the first chunk covers a few seconds of audio', () => {
+    const text = 'Xong hai việc. Một là hook giờ chỉ chèn hướng dẫn đầy đủ ở prompt đầu phiên, các prompt sau chèn một dòng nhắc. Hai là trang chi phí đã cập nhật.';
+    const chunks = splitSentences(text);
+    expect(chunks[0]).toBe('Xong hai việc. Một là hook giờ chỉ chèn hướng dẫn đầy đủ ở prompt đầu phiên,');
+    expect(chunks.join(' ')).toBe(text);
+    // Câu sau quá dài để gộp thì cụm đầu vẫn chỉ gồm các câu ngắn.
+    expect(splitSentences('Một. Hai. Ba. Bốn dài ' + 'x'.repeat(230) + '.')[0]).toBe('Một. Hai. Ba.');
   });
   it('cuts a long first sentence at a comma so the first chunk is short', () => {
     const text = 'App có mười một trang chính trên thanh menu, gồm Orders, Rates, Exceptions, Customers, Accounts, Products, Contacts, Invoices, Billings, Users và Settings. Xong.';

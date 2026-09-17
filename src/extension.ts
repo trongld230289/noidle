@@ -5,7 +5,8 @@ import { Segmenter } from './segmenter';
 import { listAudioDevices } from './devices';
 import { transcribe, TranscribeError } from './transcriber';
 import { parseVoiceCommand } from './decision';
-import { refine, DEFAULT_REFINE_MODEL } from './refiner';
+import { refine, DEFAULT_REFINE_MODEL, resetRefinePause } from './refiner';
+import { pronounce } from './pronounce';
 import { applyHooks, ClaudeSettings } from './claudeHooks';
 import { inject, InjectorApi, Target } from './injector';
 import { startServer, writeRegistry, removeRegistry, pipeName, Signal } from './signal';
@@ -58,6 +59,7 @@ function config() {
     micDevice: c.get<string>('micDevice', '') || undefined,
     typeDelayMs: typing > 0 ? typing : undefined,
     glossary: c.get<string[]>('glossary', []),
+    pronunciations: c.get<Record<string, string>>('pronunciations', {}) || {},
     language: c.get<string>('language', 'vi'),
     refine: c.get<boolean>('refine', true),
     refineModel: c.get<string>('refineModel', DEFAULT_REFINE_MODEL) || DEFAULT_REFINE_MODEL,
@@ -202,6 +204,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       voiceApprove: cfg.voiceApprove,
       approveTimeoutSec: cfg.approveTimeoutSec,
       handsFree: cfg.handsFree,
+      pronunciations: cfg.pronunciations,
     };
     await fs.promises.mkdir(path.dirname(hookConfigPath), { recursive: true });
     await fs.promises.writeFile(hookConfigPath, JSON.stringify(data, null, 2), 'utf8');
@@ -265,7 +268,9 @@ export function activate(ctx: vscode.ExtensionContext): void {
   async function testVoice(): Promise<void> {
     const cfg = config();
     const file = path.join(os.tmpdir(), 'vi-voice-test-voice.txt');
-    await fs.promises.writeFile(file, 'Xin chào, đây là giọng đọc của Vi Voice. Xong rồi, đã sửa ba file, test pass hết.', 'utf8');
+    // Câu mẫu có đuôi file và chữ viết tắt để nghe được bảng cách đọc (viVoice.pronunciations).
+    const sample = 'Xin chào, đây là giọng đọc của Vi Voice. Xong rồi, đã sửa README.md và gọi API, test pass hết.';
+    await fs.promises.writeFile(file, pronounce(sample, cfg.pronunciations), 'utf8');
     const child = spawn('node', [hookScript, 'play', file, '--voice', cfg.voice, '--rate', cfg.voiceRate, '--player', playerPath()], {
       detached: true,
       stdio: 'ignore',
@@ -274,6 +279,17 @@ export function activate(ctx: vscode.ExtensionContext): void {
     child.on('error', (e) => void vscode.window.showErrorMessage(`Vi Voice: không chạy được node để đọc: ${e.message}`));
     child.unref();
     void vscode.window.showInformationMessage(`Vi Voice: đang đọc thử bằng giọng ${cfg.voice}. Không nghe thấy gì thì xem log tại %TEMP%\\vi-voice-tts\\hook.log`);
+  }
+
+  /** Lỗi sửa câu: ghi log mỗi lần, và cảnh báo một lần khi model không tồn tại (Groq gỡ model mà không ai biết, chữ thô cứ thế hiện ra). */
+  let warnedRefineModel = false;
+  function reportRefineError(message: string): void {
+    log(`refine: ${message}`);
+    if (!message.includes('không tồn tại') || warnedRefineModel) return;
+    warnedRefineModel = true;
+    void vscode.window
+      .showWarningMessage(`Vi Voice: ${message}.`, 'Mở setting refineModel')
+      .then((pick) => pick && vscode.commands.executeCommand('workbench.action.openSettings', 'viVoice.refineModel'));
   }
 
   /** Gửi một cụm lên Groq và chèn kết quả. Trả về text đã chèn ('' nếu không có). */
@@ -322,7 +338,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     }
     if (cfg.refine) {
       const t1 = Date.now();
-      text = await refine(text, { apiKey, target, context, model: cfg.refineModel, glossary: cfg.glossary });
+      text = await refine(text, { apiKey, target, context, model: cfg.refineModel, glossary: cfg.glossary, onError: reportRefineError });
       log(`sau LLM (${Date.now() - t1}ms): ${JSON.stringify(text)}`);
     }
     if (!text) return '';
@@ -414,6 +430,8 @@ export function activate(ctx: vscode.ExtensionContext): void {
     try {
       if (!session) {
         if (!(await getApiKey())) return;
+        // Lượt nói mới: nếu lượt trước bị Groq 429 thì thử sửa câu lại ngay, hạn mức có thể đã được nới.
+        resetRefinePause();
         const s: Session = {
           target: args?.target ?? 'clipboard',
           segmenter: undefined as unknown as Segmenter,
@@ -541,6 +559,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
           clearTimeout(timer);
           resolve(v);
         };
+        resetRefinePause();
         // minSpeechMs thấp để một tiếng "một" hay "ok" ngắn cũng được nhận; ngắt hơi 1.2s là xong câu.
         const seg = new Segmenter(
           { sampleRate: SAMPLE_RATE, silenceMs: 1200, maxSegmentMs: timeoutMs, minSpeechMs: 180 },

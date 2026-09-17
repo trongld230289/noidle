@@ -2,7 +2,7 @@
   "name": "vi-voice",
   "displayName": "Vi Voice",
   "description": "Gõ tiếng Việt bằng giọng nói vào terminal, Copilot Chat và editor",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "publisher": "trongld",
   "license": "MIT",
   "engines": {
@@ -152,6 +152,14 @@
           "default": [],
           "description": "Từ tiếng Anh hay nói mà Whisper nghe sai, cùng tên project, tên biến, tên người. Ví dụ [\"impact\", \"order view\", \"claimNext\"]. Được đưa vào prompt Whisper và LLM để viết đúng."
         },
+        "viVoice.pronunciations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "markdownDescription": "Cách đọc thuật ngữ khi Claude Code trả lời bằng giọng nói. Giọng vi-VN đọc chữ viết tắt và đuôi file tiếng Anh sai (`.md` thành \"mờ đờ\"), nên hook thay sẵn bằng âm tiếng Việt trước khi đọc: `.md` → \"chấm em đi\", `API` → \"ây pi ai\", `JSON` → \"chây sơn\"... Bảng này thêm hoặc ghi đè bảng mặc định. Khoá bắt đầu bằng dấu chấm là đuôi file, khoá khác là nguyên từ, không phân biệt hoa thường. Ví dụ `{\"Claude\": \"cờ lốt\", \"shipngo\": \"síp gô\"}`. Đổi là có hiệu lực ngay ở lượt sau."
+        },
         "viVoice.refine": {
           "type": "boolean",
           "default": true,
@@ -159,8 +167,8 @@
         },
         "viVoice.refineModel": {
           "type": "string",
-          "default": "llama-3.3-70b-versatile",
-          "description": "Model Groq dùng để sửa câu. Ví dụ llama-3.1-8b-instant cho nhanh hơn nhưng kém chính xác hơn."
+          "default": "openai/gpt-oss-120b",
+          "description": "Model Groq dùng để sửa câu. openai/gpt-oss-20b nhanh hơn nhưng kém chính xác hơn. Groq đã gỡ llama-3.3-70b-versatile và llama-3.1-8b-instant khỏi gói miễn phí (16/8/2026); model không tồn tại thì extension cảnh báo và dùng chữ thô."
         },
         "viVoice.micDevice": {
           "type": "string",

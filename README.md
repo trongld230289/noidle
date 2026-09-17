@@ -56,7 +56,7 @@ Chữ được chèn theo nơi đang focus:
 
 Thuật ngữ lập trình tiếng Anh như `refactor`, `commit`, `pull request`, `unit test` được giữ nguyên, không bị dịch sang tiếng Việt.
 
-Mỗi cụm sau khi nhận dạng được gửi thêm một lượt qua LLM trên Groq để sửa chính tả, dấu thanh, dấu câu và viết hoa. Bước này tốn thêm khoảng nửa giây mỗi cụm. Tắt bằng setting `viVoice.refine` nếu muốn chữ ra ngay.
+Mỗi cụm sau khi nhận dạng được gửi thêm một lượt qua LLM trên Groq để sửa chính tả, dấu thanh, dấu câu và viết hoa. Bước này tốn thêm khoảng một giây mỗi cụm. Tắt bằng setting `viVoice.refine` nếu muốn chữ ra ngay.
 
 ## Nghe Claude Code trả lời bằng giọng nói
 
@@ -89,6 +89,10 @@ Bật tắt `viVoice.handsFree` có hiệu lực ngay, không cần restart Clau
 Hook không bao giờ tự mở mic: khi Claude xong, hook Stop thoát ngay và tiến trình đọc chỉ gửi một tín hiệu qua named pipe cho đúng cửa sổ VS Code (chọn theo thư mục làm việc của phiên Claude Code); lúc cần approve hay chọn đáp án, hook gửi tín hiệu hỏi và chờ extension nghe xong trả chữ về. Vì vậy câu nói là prompt thật do bạn gõ bằng giọng, hiện trong màn hình chat, sửa được trước khi gửi, và Claude Code không phải chờ hook. Mỗi cửa sổ ghi một file đăng ký trong `%TEMP%\vi-voice-tts\windows`.
 
 Phiên Claude Code đang mở cần khởi động lại để nhận hook. Chạy `Vi Voice: Đọc thử giọng` để kiểm tra loa. Đổi giọng nam hoặc nữ bằng `viVoice.voice`, chỉnh tốc độ bằng `viVoice.voiceRate`. Tắt setting thì hook được gỡ khỏi `settings.json`.
+
+Giọng vi-VN đọc chữ viết tắt và đuôi file tiếng Anh sai, kiểu `README.md` thành "mờ đờ". Hook thay sẵn các thuật ngữ hay gặp bằng âm tiếng Việt trước khi đọc: `.md` thành "chấm em đi", `API` thành "ây pi ai", `JSON` thành "chây sơn", `CI/CD` thành "xi ai xi đi". Thêm từ của bạn hoặc sửa cách đọc mặc định bằng `viVoice.pronunciations`, ví dụ `{"Claude": "cờ lốt", "shipngo": "síp gô"}`; đổi là có hiệu lực ngay ở lượt sau. Bảng mặc định nằm trong `src/pronounce.ts`.
+
+Để tiết kiệm token, hướng dẫn viết phần 🔊 chỉ được chèn đầy đủ ở prompt đầu tiên của mỗi phiên Claude Code (khoảng 400 token); các prompt sau chỉ chèn một dòng nhắc ngắn (khoảng 40 token), và cứ 20 prompt thì chèn lại bản đầy đủ một lần phòng khi context bị nén. Hook đếm theo `session_id` bằng file trong `%TEMP%\vi-voice-tts\sessions`.
 
 Mọi thứ từ dòng 🔊 đến hết câu trả lời sẽ được đọc. Claude được dặn viết phần này đủ nghĩa để nghe xong không cần nhìn màn hình: hỏi thông tin thì kể đủ các mục chính, báo cáo việc đã làm thì hai ba câu. Muốn nghe kỹ hơn nữa thì nói "đọc chi tiết". Nếu Claude không thêm dòng 🔊, extension đọc khoảng 300 ký tự đầu của câu trả lời, bỏ code và markdown. Lỗi đọc được ghi tại `%TEMP%\vi-voice-tts\hook.log`.
 
@@ -128,8 +132,9 @@ Gõ `Vi Voice` vào ô tìm kiếm của Settings:
 | `viVoice.typingDelayMs` | `12` | Nghỉ bao nhiêu ms giữa các ký tự khi gõ vào editor. Đặt `0` để chèn nguyên cụm. |
 | `viVoice.language` | `vi` | Mã ngôn ngữ báo cho Whisper. Để trống để Whisper tự nhận diện. |
 | `viVoice.glossary` | `[]` | Từ tiếng Anh hay nói mà Whisper nghe sai, cùng tên project, tên biến, tên người. Whisper và LLM sẽ ưu tiên viết đúng các từ này. |
+| `viVoice.pronunciations` | `{}` | Cách đọc thuật ngữ khi đọc câu trả lời: thuật ngữ → âm tiếng Việt, thêm hoặc ghi đè bảng mặc định (`.md` → "chấm em đi", `API` → "ây pi ai"). |
 | `viVoice.refine` | `true` | Sửa câu bằng LLM sau khi nhận dạng. |
-| `viVoice.refineModel` | `llama-3.3-70b-versatile` | Model Groq dùng để sửa câu. `llama-3.1-8b-instant` nhanh hơn nhưng kém hơn. |
+| `viVoice.refineModel` | `openai/gpt-oss-120b` | Model Groq dùng để sửa câu. `openai/gpt-oss-20b` nhanh hơn nhưng kém hơn. Groq đã gỡ các model Llama khỏi gói miễn phí từ 16/8/2026; nếu model không tồn tại, extension cảnh báo và dùng chữ thô của Whisper. |
 
 Phím tắt mặc định là **F6**. Đổi phím trong `File > Preferences > Keyboard Shortcuts`, tìm `viVoice.toggle`. Lần đầu chạy, extension tự thêm `viVoice.toggle` vào `terminal.integrated.commandsToSkipShell` để phím tắt hoạt động trong terminal.
 
@@ -142,6 +147,7 @@ Phím tắt mặc định là **F6**. Đổi phím trong `File > Preferences > K
 | Không nghe thấy tiếng nói | Kiểm tra mic trong Windows Settings > Sound > Input. Chạy `Vi Voice: Chọn micro` để chọn đúng thiết bị. Dùng lệnh lưu audio để nghe thử file thu được. |
 | Bấm F6 trong terminal ra ký tự lạ | Kiểm tra `terminal.integrated.commandsToSkipShell` trong Settings có chứa `viVoice.toggle`. |
 | Lỗi mạng hoặc quá giới hạn | Chờ vài giây rồi chạy `Vi Voice: Gửi lại audio cuối`. |
+| Chữ vẫn hiện nhưng thiếu dấu câu, thuật ngữ tiếng Anh bị phiên âm | Bước sửa câu đang tắt tạm vì Groq hết hạn mức (HTTP 429), chỉ trong lượt nói đó; lượt nói sau (F6 hoặc hands-free mở mic lại) thử lại ngay. Xem kênh Output **Vi Voice**. Muốn kéo dài hạn mức thì đổi `viVoice.refineModel` sang `openai/gpt-oss-20b`. |
 | Từ tiếng Anh bị viết thành âm tiếng Việt (button thành "bất tính") | Thêm từ đó vào `viVoice.glossary`. Whisper nghe tiếng Việt trộn tiếng Anh chưa tốt, từ nào có trong prompt sẽ được viết đúng. |
 | Muốn xem chữ thô trước khi sửa | Mở `View > Output`, chọn kênh **Vi Voice**. Mỗi cụm có chữ thô của Whisper, chữ sau lọc và chữ sau LLM. |
 

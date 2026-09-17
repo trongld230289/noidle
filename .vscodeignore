@@ -6,3 +6,8 @@ node_modules/**
 tsconfig.json
 vitest.config.ts
 *.vsix
+.env
+.env.*
+scripts/**
+hotkey/**
+.gitignore

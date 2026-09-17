@@ -21,10 +21,12 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { spawn } from 'child_process';
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
-import { lastAssistantText, pickSpeech, PROMPT_CONTEXT, splitSentences, announcement, HookInput } from './speech';
+import { lastAssistantText, pickSpeech, PROMPT_CONTEXT, PROMPT_REMINDER, splitSentences, announcement, HookInput } from './speech';
 import { parseApproval, isDangerous, parseChoice } from './decision';
 import { signalWindow, askWindow } from './signal';
 import { hedged } from './hedge';
+import { pronounce } from './pronounce';
+import { prefetchInOrder } from './prefetch';
 
 const DEFAULT_VOICE = 'vi-VN-HoaiMyNeural';
 
@@ -36,6 +38,8 @@ interface HookConfig {
   approveTimeoutSec?: number;
   /** Vòng lặp nói chuyện: chọn đáp án bằng giọng, và extension tự mở mic sau khi đọc xong câu trả lời. */
   handsFree?: boolean;
+  /** Bảng của người dùng: thuật ngữ → cách đọc, ghi đè bảng mặc định trong pronounce.ts. */
+  pronunciations?: Record<string, string>;
 }
 
 /** Nhờ extension mở mic nghe một câu; trả '' nếu không có cửa sổ VS Code, im lặng hoặc lỗi. */
@@ -196,21 +200,61 @@ async function waitTurn(file: string, maxMs = 5 * 60_000): Promise<void> {
   }
 }
 
-async function modePrompt(): Promise<void> {
-  // Mute thì không dặn Claude viết phần 🔊, nhưng vẫn báo submitted để tắt mic nếu đang mở.
-  if (loadConfig().voiceMute) log('prompt: đang mute, không chèn hướng dẫn');
-  else {
-    process.stdout.write(
-      JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: PROMPT_CONTEXT } }),
-    );
+const SESSION_DIR = path.join(WORK_DIR, 'sessions');
+/** Cứ bao nhiêu prompt thì chèn lại hướng dẫn đầy đủ một lần, phòng khi Claude Code nén context làm mất bản đầu. */
+const FULL_CONTEXT_EVERY = 20;
+const SESSION_MARK_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
+
+/**
+ * Hướng dẫn cho prompt này: đầy đủ ở prompt đầu tiên của phiên (và cứ FULL_CONTEXT_EVERY prompt một lần),
+ * còn lại chỉ một dòng nhắc ngắn vì bản đầy đủ đã nằm trong lịch sử phiên. Tiết kiệm ~85% token chèn thêm.
+ * Đếm bằng một file theo session_id; không có session_id thì luôn đầy đủ.
+ */
+function promptContextFor(session: string | undefined): string {
+  if (!session) return PROMPT_CONTEXT;
+  const mark = path.join(SESSION_DIR, session.replace(/[^\w.-]/g, '_'));
+  let count = 0;
+  try {
+    count = Number(fs.readFileSync(mark, 'utf8')) || 0;
+  } catch {
+    pruneSessionMarks();
   }
-  // Người dùng vừa gửi prompt: bảo extension tắt mic hands-free nếu đang mở. Không có cửa sổ thì thôi.
+  try {
+    fs.mkdirSync(SESSION_DIR, { recursive: true });
+    fs.writeFileSync(mark, String(count + 1));
+  } catch (err) {
+    log(`không ghi được dấu phiên: ${(err as Error).message}`);
+  }
+  return count % FULL_CONTEXT_EVERY === 0 ? PROMPT_CONTEXT : PROMPT_REMINDER;
+}
+
+/** Xoá dấu của các phiên cũ hơn một tuần; chỉ chạy khi gặp phiên mới nên rất thưa. */
+function pruneSessionMarks(): void {
+  try {
+    const now = Date.now();
+    for (const f of fs.readdirSync(SESSION_DIR)) {
+      const p = path.join(SESSION_DIR, f);
+      if (now - fs.statSync(p).mtimeMs > SESSION_MARK_MAX_AGE_MS) fs.unlinkSync(p);
+    }
+  } catch {
+    /* chưa có thư mục hoặc lỗi lặt vặt, bỏ qua */
+  }
+}
+
+async function modePrompt(): Promise<void> {
   let input: { session_id?: string; cwd?: string } = {};
   try {
     input = JSON.parse((await readStdin()) || '{}') as typeof input;
   } catch {
     /* stdin lạ thì vẫn báo theo cwd của tiến trình */
   }
+  // Mute thì không dặn Claude viết phần 🔊, nhưng vẫn báo submitted để tắt mic nếu đang mở.
+  if (loadConfig().voiceMute) log('prompt: đang mute, không chèn hướng dẫn');
+  else {
+    const additionalContext = promptContextFor(input.session_id);
+    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext } }));
+  }
+  // Người dùng vừa gửi prompt: bảo extension tắt mic hands-free nếu đang mở. Không có cửa sổ thì thôi.
   const cwd = input.cwd || process.cwd();
   await signalWindow({ event: 'submitted', session: input.session_id ?? '', cwd }, undefined, log);
 }
@@ -247,7 +291,9 @@ async function modeSpeak(): Promise<void> {
 }
 
 /** Tách tiến trình phát rồi thoát ngay để Claude Code không phải chờ. listenCwd: phát xong thì báo extension mở mic. */
-function spawnPlay(text: string, kind: Ticket['kind'], session: string, listenCwd?: string): void {
+function spawnPlay(raw: string, kind: Ticket['kind'], session: string, listenCwd?: string): void {
+  // Giọng vi-VN đọc sai chữ viết tắt và đuôi file tiếng Anh; viết sẵn cách đọc trước khi tổng hợp.
+  const text = pronounce(raw, loadConfig().pronunciations);
   fs.mkdirSync(WORK_DIR, { recursive: true });
   const file = path.join(WORK_DIR, `say-${Date.now()}-${process.pid}.txt`);
   fs.writeFileSync(file, text, 'utf8');
@@ -424,6 +470,10 @@ function cachePath(voice: string, rate: string, text: string): string {
  */
 const HEDGE_MS = 2500;
 const MAX_ATTEMPTS = 4;
+/** Số khối tổng hợp song song phía trước loa. 3 khối x tối đa 2 kết nối hedge = tối đa 6 kết nối Edge cùng lúc. */
+const SYNTH_AHEAD = 3;
+/** Chờ khối hai tối đa bao lâu trước khi phát khối đầu. */
+const FIRST_HOLD_MS = 4000;
 
 async function synth(voice: string, rate: string, text: string): Promise<Buffer> {
   const cacheable = text.length <= CACHE_MAX_CHARS;
@@ -491,19 +541,30 @@ async function playText(text: string, ticket: string): Promise<void> {
   });
   player.on('exit', () => (stopped = true));
 
-  // Đường ống: tổng hợp từng khối tuần tự (mỗi khối tối đa hai kết nối song song khi Edge chậm, xem synth);
-  // khối i+1 được tổng hợp trong lúc ffplay còn đang phát khối i nên bình thường không bị ngắt quãng.
+  // Đường ống: luôn có SYNTH_AHEAD khối đang tổng hợp (khối đang chờ phát và các khối sau), đưa vào ffplay theo
+  // thứ tự. Edge có lúc mất 5-8 giây một khối trong khi khối đầu chỉ phát ~5 giây, tổng hợp một khối phía trước
+  // là không đủ, loa im giữa chừng. Mỗi khối tối đa hai kết nối song song khi Edge chậm (xem synth).
   const sentences = splitSentences(text);
-  for (let i = 0; i < sentences.length && !stopped; i++) {
-    try {
-      const audio = await synth(voice, rate, sentences[i]);
-      if (i === 0) log(`câu đầu sẵn sàng sau ${Date.now() - t0}ms (${sentences.length} câu)`);
-      if (stopped) break;
-      player.stdin.write(audio);
-    } catch (err) {
-      log(`bỏ câu ${i + 1}: ${(err as Error).message}`);
-    }
-  }
+  await prefetchInOrder(sentences, {
+    ahead: SYNTH_AHEAD,
+    produce: (s) => synth(voice, rate, s),
+    stopped: () => stopped,
+    consume: async (audio, i, next) => {
+      if (i === 0) {
+        log(`câu đầu sẵn sàng sau ${Date.now() - t0}ms (${sentences.length} câu)`);
+        // Khối đầu chỉ vài giây; nếu khối hai chưa xong thì loa sẽ im giữa câu. Chờ khối hai một chút
+        // để im lặng dồn về đầu (nghe như đang nghĩ) thay vì kẹt giữa chừng. Không chờ quá FIRST_HOLD_MS.
+        if (next) {
+          const held = Date.now();
+          await Promise.race([next.catch(() => undefined), new Promise((r) => setTimeout(r, FIRST_HOLD_MS))]);
+          const ms = Date.now() - held;
+          if (ms > 100) log(`giữ câu đầu ${ms}ms chờ câu hai`);
+        }
+      }
+      if (!stopped) player.stdin.write(audio);
+    },
+    onError: (err, i) => log(`bỏ câu ${i + 1}: ${err.message}`),
+  });
   player.stdin.end();
   await new Promise<void>((r) => (stopped ? r() : player.on('exit', () => r())));
   log(`phát xong sau ${Date.now() - t0}ms`);

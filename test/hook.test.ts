@@ -89,3 +89,53 @@ describe('claude-hook voiceMute', () => {
     expect(added).not.toContain('play pid');
   });
 });
+
+describe('claude-hook pronunciations', () => {
+  it('speak: thay thuật ngữ theo bảng mặc định và bảng trong config trước khi đọc', async () => {
+    const cfg = path.join(work, 'pronounce.json');
+    fs.writeFileSync(cfg, JSON.stringify({ pronunciations: { Claude: 'cờ lốt' } }));
+    const transcript = path.join(work, 'transcript-pronounce.jsonl');
+    fs.writeFileSync(
+      transcript,
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: '🔊 Claude đã đọc README.md và gọi API.' }] } }) + '\n',
+    );
+    const before = readLog().length;
+    // --player trỏ tới file không tồn tại để tiến trình play tách ra không phát gì.
+    const r = await run(
+      ['speak', '--config', cfg, '--player', path.join(work, 'no-such-player.exe')],
+      JSON.stringify({ session_id: 's4', cwd: work, transcript_path: transcript }),
+    );
+    expect(r.code).toBe(0);
+    const added = readLog().slice(before);
+    expect(added).toContain('cờ lốt đã đọc README chấm em đi và gọi ây pi ai.');
+  });
+});
+
+describe('claude-hook prompt context per session', () => {
+  const prompt = (session: string) => run(['prompt', '--config', cfgNormal], JSON.stringify({ session_id: session, cwd: work }));
+  const ctx = (stdout: string) => (JSON.parse(stdout) as { hookSpecificOutput: { additionalContext: string } }).hookSpecificOutput.additionalContext;
+
+  it('chèn hướng dẫn đầy đủ ở prompt đầu tiên của phiên, các prompt sau chỉ nhắc một dòng ngắn', async () => {
+    const first = ctx((await prompt('ctx-a')).stdout);
+    expect(first.length).toBeGreaterThan(500);
+    expect(first).toContain('🔊');
+    const second = ctx((await prompt('ctx-a')).stdout);
+    expect(second.length).toBeLessThan(200);
+    expect(second).toContain('🔊');
+    const third = ctx((await prompt('ctx-a')).stdout);
+    expect(third).toBe(second);
+  });
+
+  it('phiên khác thì lại chèn đầy đủ', async () => {
+    await prompt('ctx-b');
+    const other = ctx((await prompt('ctx-c')).stdout);
+    expect(other.length).toBeGreaterThan(500);
+  });
+
+  it('không có session_id thì luôn chèn đầy đủ', async () => {
+    const r = await run(['prompt', '--config', cfgNormal], JSON.stringify({ cwd: work }));
+    expect(ctx(r.stdout).length).toBeGreaterThan(500);
+    const r2 = await run(['prompt', '--config', cfgNormal], JSON.stringify({ cwd: work }));
+    expect(ctx(r2.stdout).length).toBeGreaterThan(500);
+  });
+});

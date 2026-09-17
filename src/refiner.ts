@@ -10,32 +10,34 @@ export interface RefineOptions {
   glossary?: string[];
   fetchFn?: typeof fetch;
   timeoutMs?: number;
+  /** Lỗi gọi Groq: hàm vẫn trả chữ thô, nhưng báo ở đây để extension ghi log hoặc cảnh báo (model bị gỡ, hết hạn mức...). */
+  onError?: (message: string) => void;
+  /** Đồng hồ, để test điều khiển thời gian tạm dừng sau 429. */
+  now?: () => number;
 }
 
 const CHAT_URL = 'https://api.groq.com/openai/v1/chat/completions';
-export const DEFAULT_REFINE_MODEL = 'llama-3.3-70b-versatile';
+/**
+ * Groq gỡ llama-3.3-70b-versatile và llama-3.1-8b-instant khỏi gói miễn phí ngày 16/8/2026 (trả 404).
+ * gpt-oss-120b là model Groq khuyên thay; reasoning_effort low để nhanh (~1,3s) mà vẫn sửa đúng.
+ */
+export const DEFAULT_REFINE_MODEL = 'openai/gpt-oss-120b';
+const REASONING_EFFORT = 'low';
 const DROP = '[BỎ]';
 const MAX_CONTEXT_CHARS = 300;
 
-const SYSTEM = `Bạn là bộ sửa lỗi chính tả cho văn bản nhận dạng giọng nói tiếng Việt của một lập trình viên.
-Việc duy nhất: thêm hoặc sửa dấu thanh bị sai, thêm dấu phẩy và dấu chấm hỏi nếu rõ ràng cần, viết hoa đầu câu. Ngoài ra giữ nguyên tất cả.
-Đoạn đưa vào là một mẩu của câu đang nói, thường bị cắt giữa chừng và mẩu tiếp theo sẽ đến sau.
-Cấm:
-- Cấm thêm từ, bỏ từ, đổi thứ tự từ, hay thay một từ bằng từ khác, kể cả khi bạn thấy từ khác hợp hơn.
-- Cấm hoàn thiện câu cụt. Cấm thêm dấu chấm ở cuối nếu câu chưa kết thúc rõ ràng.
-- Cấm dịch. Từ tiếng Anh giữ nguyên tiếng Anh, từ tiếng Việt giữ nguyên tiếng Việt.
-- Cấm đổi một từ tiếng Việt có dấu thành chữ viết tắt. "bị" vẫn là "bị", không phải "BI".
-- Cấm trả lời, giải thích, hay bọc kết quả trong dấu ngoặc kép.
-Được phép:
-- Viết hoa chữ viết tắt tiếng Anh quen thuộc khi từ đưa vào không có dấu tiếng Việt, ví dụ "ui" thành "UI", "api" thành "API".
-- Nếu toàn bộ đoạn là chuỗi âm lộn xộn không thể hiểu, trả về đúng chuỗi ${DROP}. Mẩu ngắn hay cụt vẫn là câu nói bình thường, phải trả về nguyên.
+const SYSTEM = `Bạn sửa chính tả cho chữ nhận dạng giọng nói tiếng Việt của lập trình viên. Đầu vào là một mẩu câu đang nói, có thể cụt, mẩu sau sẽ đến tiếp.
+Chỉ làm: sửa dấu thanh sai; thêm dấu phẩy hoặc dấu hỏi khi rõ ràng cần; viết hoa đầu câu; viết hoa chữ viết tắt tiếng Anh quen thuộc nếu từ đó không có dấu (ui thành UI, api thành API).
+Không bao giờ thêm dấu chấm ở cuối đoạn, vì mẩu sau sẽ nối tiếp.
+Không: thêm, bỏ, đổi thứ tự hay thay từ, kể cả từ gần nghĩa (nha giữ là nha, không đổi thành nhé); hoàn thiện câu cụt; dịch (tiếng Anh giữ tiếng Anh, tiếng Việt giữ tiếng Việt); đổi từ có dấu thành viết tắt ("bị" không thành "BI"); trả lời, giải thích hay bọc trong ngoặc kép.
+Đoạn hoàn toàn vô nghĩa thì trả về đúng ${DROP}; mẩu ngắn hay cụt vẫn là câu bình thường, trả nguyên.
 Chỉ trả về văn bản đã sửa.`;
 
 const TARGET_HINT: Record<Target, string> = {
-  terminal: 'Văn bản sẽ được gõ vào terminal, có thể là lệnh shell hoặc mô tả việc cần làm. Giữ nguyên cú pháp lệnh.',
-  editor: 'Văn bản sẽ được chèn vào file mã nguồn hoặc tài liệu.',
-  chat: 'Văn bản là câu hỏi hoặc yêu cầu gửi cho AI assistant trong VS Code.',
-  clipboard: 'Văn bản sẽ được dán vào một ứng dụng khác.',
+  terminal: 'Chữ sẽ gõ vào terminal (lệnh shell hoặc mô tả việc cần làm), giữ nguyên cú pháp lệnh.',
+  editor: 'Chữ sẽ chèn vào file mã nguồn hoặc tài liệu.',
+  chat: 'Chữ là câu hỏi hoặc yêu cầu gửi cho AI assistant.',
+  clipboard: 'Chữ sẽ dán vào ứng dụng khác.',
 };
 
 /** Làm sạch câu trả lời của LLM; trả về input nếu câu trả lời trông không đáng tin. */
@@ -75,8 +77,49 @@ export function keepsMostWords(input: string, output: string): boolean {
   return kept / inWords.length >= 0.5;
 }
 
+/**
+ * Hết hạn mức Groq (429) thì tạm tắt bước sửa câu cho các cụm còn lại của lượt nói này: chèn thẳng chữ thô,
+ * không gọi mạng (mỗi lần gọi để nhận 429 tốn ~300ms và một dòng log). Lượt nói mới (F6, hands-free mở mic lại)
+ * gọi resetRefinePause() để thử lại ngay, vì hạn mức có thể đã được nới (nạp tiền, đổi model). Trong cùng lượt,
+ * quá giờ reset Groq báo (x-ratelimit-reset-tokens dạng "2m59.56s" hoặc retry-after giây) thì cũng tự thử lại.
+ */
+let pausedUntil = 0;
+const MAX_PAUSE_SECONDS = 24 * 3600;
+
+/** Gọi khi bắt đầu một lượt nói mới: bỏ trạng thái tạm tắt để thử Groq lại ngay. */
+export function resetRefinePause(): void {
+  pausedUntil = 0;
+}
+
+export function parseResetSeconds(headers: Record<string, string> | Headers): number {
+  const get = (k: string) => (headers instanceof Headers ? headers.get(k) : headers[k]) ?? '';
+  const retryAfter = Number(get('retry-after'));
+  if (retryAfter > 0) return retryAfter;
+  for (const key of ['x-ratelimit-reset-tokens', 'x-ratelimit-reset-requests']) {
+    const v = get(key).trim();
+    if (!v) continue;
+    let total = 0;
+    let matched = false;
+    for (const m of v.matchAll(/(\d+(?:\.\d+)?)\s*(h|m|s|ms)/g)) {
+      matched = true;
+      const n = Number(m[1]);
+      total += m[2] === 'h' ? n * 3600 : m[2] === 'm' ? n * 60 : m[2] === 's' ? n : n / 1000;
+    }
+    if (matched && total > 0) return total;
+  }
+  return 60;
+}
+
+function describeSeconds(s: number): string {
+  if (s >= 3600) return `${Math.round(s / 360) / 10} giờ`;
+  if (s >= 60) return `${Math.round(s / 60)} phút`;
+  return `${Math.round(s)} giây`;
+}
+
 /** Sửa chính tả và dấu câu bằng LLM trên Groq. Lỗi gì cũng trả về text gốc. */
 export async function refine(text: string, opts: RefineOptions): Promise<string> {
+  const now = opts.now ?? Date.now;
+  if (now() < pausedUntil) return text;
   const fetchFn = opts.fetchFn ?? fetch;
   const context = (opts.context ?? '').trim().slice(-MAX_CONTEXT_CHARS);
   const terms = (opts.glossary ?? []).map((t) => t.trim()).filter(Boolean);
@@ -84,7 +127,7 @@ export async function refine(text: string, opts: RefineOptions): Promise<string>
     `${TARGET_HINT[opts.target]}\n` +
     (terms.length ? `Thuật ngữ người dùng hay nói, giữ đúng chính tả: ${terms.join(', ')}\n` : '') +
     (context
-      ? `Chữ đã nhận trước đó, chỉ để tham khảo cách nối câu, không đưa vào kết quả. Nếu đoạn cần sửa trùng với chữ này thì người nói đang nhắc lại, vẫn sửa và trả về bình thường: ${context}\n`
+      ? `Chữ ngay trước đó, chỉ để nối câu, không đưa vào kết quả (trùng thì là người nói nhắc lại, vẫn sửa bình thường): ${context}\n`
       : '') +
     `Đoạn cần sửa:\n${text}`;
 
@@ -98,6 +141,7 @@ export async function refine(text: string, opts: RefineOptions): Promise<string>
         model: opts.model ?? DEFAULT_REFINE_MODEL,
         temperature: 0,
         max_tokens: 512,
+        reasoning_effort: REASONING_EFFORT,
         messages: [
           { role: 'system', content: SYSTEM },
           { role: 'user', content: user },
@@ -105,10 +149,27 @@ export async function refine(text: string, opts: RefineOptions): Promise<string>
       }),
       signal: controller.signal,
     });
-    if (!res.ok) return text;
+    if (!res.ok) {
+      const model = opts.model ?? DEFAULT_REFINE_MODEL;
+      if (res.status === 429) {
+        const seconds = Math.min(parseResetSeconds(res.headers), MAX_PAUSE_SECONDS);
+        pausedUntil = now() + seconds * 1000;
+        opts.onError?.(
+          `Groq hết hạn mức model ${model} (HTTP 429): tắt sửa câu cho hết lượt nói này, chèn thẳng chữ thô của Whisper (Groq báo reset sau ${describeSeconds(seconds)})`,
+        );
+        return text;
+      }
+      opts.onError?.(
+        res.status === 404
+          ? `model ${model} không tồn tại trên Groq (HTTP 404), đổi viVoice.refineModel; đang dùng chữ thô của Whisper`
+          : `Groq trả HTTP ${res.status} cho model ${model}, đang dùng chữ thô của Whisper`,
+      );
+      return text;
+    }
     const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
     return cleanReply(data.choices?.[0]?.message?.content ?? '', text);
-  } catch {
+  } catch (err) {
+    opts.onError?.(`không gọi được Groq để sửa câu: ${(err as Error).message}`);
     return text;
   } finally {
     clearTimeout(timer);

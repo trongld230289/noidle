@@ -78,11 +78,19 @@ export const PROMPT_CONTEXT =
   `Không chứa code, đường dẫn, tên file, bảng, gạch đầu dòng hay ký hiệu markdown; số liệu ngắn thì đọc bằng chữ, ví dụ "ba mươi chín quyền".`;
 
 /**
+ * Dòng nhắc ngắn cho các prompt sau của cùng một phiên: hướng dẫn đầy đủ đã nằm trong lịch sử, chỉ cần
+ * nhắc lại quy tắc cốt lõi để tiết kiệm token (đầy đủ ~400 token, dòng này ~40).
+ */
+export const PROMPT_REMINDER =
+  `Nhắc: người dùng đang nghe bằng tai nghe. Kết thúc câu trả lời bằng phần ${SPEAK_MARK} ở đầu dòng, ` +
+  `tiếng Việt, đủ nghĩa khi chỉ nghe, không markdown, không code, như đã dặn ở đầu phiên.`;
+
+/**
  * Tách thành khối để phát dần. Edge chỉ gửi audio khi xong cả yêu cầu và độ trễ thất thường (nửa giây tới hơn mười giây),
  * nên khối đầu phải thật ngắn (một mệnh đề, tối đa ~firstMax ký tự) để nghe được sớm;
  * các khối sau ~2 câu hoặc ~maxChars ký tự để mỗi khối đủ dài làm đệm cho khối kế mà không gọi Edge quá dồn dập.
  */
-export function splitSentences(text: string, maxChars = 220, firstMax = 90): string[] {
+export function splitSentences(text: string, maxChars = 220, firstMax = 90, firstMin = 40): string[] {
   const sentences = text
     .replace(/\s+/g, ' ')
     .split(/(?<=[.!?…])\s+/u)
@@ -93,6 +101,24 @@ export function splitSentences(text: string, maxChars = 220, firstMax = 90): str
   // Khối đầu: câu đầu, nếu dài thì cắt ở dấu phẩy/chấm phẩy gần nhất trước firstMax.
   let first = sentences[0];
   let rest = sentences.slice(1);
+  // Câu đầu quá ngắn ("Xong hai việc.") chỉ phát được hơn một giây, không đủ che thời gian Edge tổng hợp
+  // khối hai: gộp thêm câu sau cho tới khi đủ firstMin. Câu sau dài quá thì chỉ lấy tới dấu phẩy trước firstMax.
+  while (first.length < firstMin && rest.length) {
+    const next = rest[0];
+    if (first.length + 1 + next.length <= firstMax) {
+      first = `${first} ${next}`;
+      rest = rest.slice(1);
+      continue;
+    }
+    const room = firstMax - first.length - 1;
+    const head = next.slice(0, room);
+    const cut = Math.max(head.lastIndexOf(', '), head.lastIndexOf('; '), head.lastIndexOf(': '));
+    if (cut > 20) {
+      first = `${first} ${next.slice(0, cut + 1).trim()}`;
+      rest = [next.slice(cut + 1).trim(), ...rest.slice(1)];
+    }
+    break;
+  }
   if (first.length > firstMax) {
     const head = first.slice(0, firstMax);
     const cut = Math.max(head.lastIndexOf(', '), head.lastIndexOf('; '), head.lastIndexOf(': '));
