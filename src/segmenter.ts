@@ -12,6 +12,13 @@ export interface SegmenterOptions {
   speechThresholdDb?: number;
   /** Tổng thời gian khung có tiếng nói tối thiểu (ms) để cụm được gửi; ngắn hơn coi là tiếng động. */
   minSpeechMs?: number;
+  /**
+   * Cụm chỉ được coi là có tiếng nói khi có ít nhất một đoạn ồn liên tục dài chừng này. Gõ phím là các cú click
+   * 10-40ms cách quãng, cộng dồn vẫn qua minSpeechMs nhưng không bao giờ liền mạch; âm tiết nói dài 150ms trở lên.
+   */
+  minRunMs?: number;
+  /** Gọi mỗi khung có tiếng nói, để bên ngoài biết người dùng vẫn đang nói (hands-free không tự gửi giữa câu). */
+  onSpeech?: () => void;
 }
 
 /**
@@ -26,7 +33,10 @@ export class Segmenter {
   private readonly bytesPerMs: number;
   private readonly threshold: number;
   private readonly minSpeechMs: number;
+  private readonly minRunMs: number;
+  private readonly onSpeech: (() => void) | undefined;
   private speechMs = 0;
+  private loudRunMs = 0;
 
   private pending: Uint8Array = new Uint8Array(0); // bytes chưa đủ một khung
   private frames: Uint8Array[] = []; // các khung của cụm hiện tại
@@ -35,7 +45,8 @@ export class Segmenter {
   private segmentMs = 0;
 
   constructor(opts: SegmenterOptions, private readonly onSegment: (pcm: Uint8Array) => void) {
-    const frameMs = opts.frameMs ?? 100;
+    // Khung 20ms để phân biệt click gõ phím (1-2 khung) với âm tiết (5 khung trở lên); 100ms thì một click chiếm cả khung.
+    const frameMs = opts.frameMs ?? 20;
     this.silenceMs = opts.silenceMs ?? 500;
     this.maxSegmentMs = opts.maxSegmentMs ?? 10_000;
     this.leadInMs = opts.leadInMs ?? 200;
@@ -43,6 +54,8 @@ export class Segmenter {
     this.frameBytes = Math.round(this.bytesPerMs * frameMs);
     this.threshold = 32768 * Math.pow(10, (opts.speechThresholdDb ?? -42) / 20);
     this.minSpeechMs = opts.minSpeechMs ?? 300;
+    this.minRunMs = opts.minRunMs ?? 120;
+    this.onSpeech = opts.onSpeech;
   }
 
   push(chunk: Uint8Array): void {
@@ -67,10 +80,19 @@ export class Segmenter {
     const frameMs = f.length / this.bytesPerMs;
     const loud = rms(f) >= this.threshold;
     if (loud) {
-      this.hasSpeech = true;
-      this.speechMs += frameMs;
+      this.loudRunMs += frameMs;
       this.silenceRunMs = 0;
+      // Chỉ khi ồn liền mạch đủ lâu mới tính là tiếng nói (và mới báo onSpeech); click gõ phím không tới được đây.
+      if (this.loudRunMs >= this.minRunMs) {
+        if (!this.hasSpeech) {
+          this.hasSpeech = true;
+          this.speechMs = this.loudRunMs - frameMs;
+        }
+        this.speechMs += frameMs;
+        this.onSpeech?.();
+      }
     } else {
+      this.loudRunMs = 0;
       this.silenceRunMs += frameMs;
     }
     this.frames.push(f);
@@ -93,6 +115,7 @@ export class Segmenter {
     this.frames = [];
     this.hasSpeech = false;
     this.speechMs = 0;
+    this.loudRunMs = 0;
     this.silenceRunMs = 0;
     this.segmentMs = 0;
     if (enough && frames.length) this.onSegment(concat(frames));

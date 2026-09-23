@@ -28,11 +28,24 @@ export async function prefetchInOrder<T, R>(items: T[], opts: PrefetchOptions<T,
     pending[i] = p;
   };
 
+  const STOP = Symbol('stop');
+  // Đang chờ một mục tạo chậm (Edge 5-8 giây) mà có lệnh dừng thì thoát ngay, không đợi mục đó xong.
+  const untilStopped = () =>
+    new Promise<typeof STOP>((resolve) => {
+      const t = setInterval(() => {
+        if (stopped()) {
+          clearInterval(t);
+          resolve(STOP);
+        }
+      }, 100);
+      t.unref?.();
+    });
+
   for (let i = 0; i < items.length && !stopped(); i++) {
     for (let j = i; j < i + ahead; j++) start(j);
     try {
-      const result = await pending[i]!;
-      if (stopped()) break;
+      const result = await Promise.race([pending[i]!, untilStopped()]);
+      if (result === STOP || stopped()) break;
       await opts.consume(result, i, pending[i + 1]);
     } catch (err) {
       opts.onError?.(err as Error, i);

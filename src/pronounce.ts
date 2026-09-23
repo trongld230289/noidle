@@ -72,8 +72,12 @@ export const DEFAULT_PRONUNCIATIONS: Record<string, string> = {
   'Azure DevOps': 'a giơ đép óp',
   FedEx: 'phét ếch',
   Bash: 'bát',
+  agent: 'ơ chần',
+  agents: 'ơ chần',
+  subagent: 'súp ơ chần',
+  subagents: 'súp ơ chần',
   // Từ lập trình hay gặp: giọng vi-VN đọc tiếng Anh theo cơ chế dự phòng, nghe lơ lớ hoặc nuốt âm.
-  // Người dùng có thể tắt từng mục bằng cách đặt giá trị rỗng trong viVoice.pronunciations.
+  // Người dùng có thể tắt từng mục bằng cách đặt giá trị rỗng trong noIdle.pronunciations.
   git: 'ghít',
   commit: 'com mít',
   push: 'pút',
@@ -174,15 +178,18 @@ function buildRules(map: Record<string, string>): Rules {
 
 const defaultRules = buildRules(DEFAULT_PRONUNCIATIONS);
 
-/** Thay thuật ngữ trong text bằng cách đọc. extra: bảng của người dùng, ghi đè bảng mặc định theo khoá. */
-export function pronounce(text: string, extra?: Record<string, string>): string {
+/**
+ * Thay thuật ngữ trong text bằng cách đọc. extra: bảng của người dùng, ghi đè bảng mặc định theo khoá.
+ * useDefaults=false (đọc tiếng Anh): bỏ bảng mặc định vì nó phiên âm sang tiếng Việt, chỉ dùng bảng của người dùng.
+ */
+export function pronounce(text: string, extra?: Record<string, string>, useDefaults = true): string {
   // Khoá trống bị bỏ; giá trị rỗng nghĩa là tắt mục mặc định đó, từ được đọc như viết.
   const own = Object.entries(extra ?? {}).filter(([k]) => k.trim());
-  const { pattern, spoken } = own.length ? buildRules({ ...DEFAULT_PRONUNCIATIONS, ...Object.fromEntries(own) }) : defaultRules;
-  return text.replace(pattern, (m) => {
-    const say = spoken.get(m.toLowerCase());
-    if (say === undefined) return m;
-    // Phần mở rộng dính vào tên file nên chèn khoảng trắng: "README.md" thành "README chấm em đi".
-    return m.startsWith('.') ? ` ${say}` : say;
+  const base = useDefaults ? DEFAULT_PRONUNCIATIONS : {};
+  const { pattern, spoken } = own.length || !useDefaults ? buildRules({ ...base, ...Object.fromEntries(own) }) : defaultRules;
+  return text.replace(pattern, (term) => {
+    const say = spoken.get(term.toLowerCase());
+    if (say === undefined) return term;
+    return term.startsWith('.') ? ` ${say}` : say;
   });
 }

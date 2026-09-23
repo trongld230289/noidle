@@ -22,8 +22,8 @@ const w = (pid: number, ...folders: string[]): WindowEntry => ({ pid, pipe: `p${
 describe('pickWindow', () => {
   it('chọn folder là tiền tố dài nhất của cwd', () => {
     const a = w(1, 'D:/Project');
-    const b = w(2, 'D:/Project/vi-voice');
-    expect(pickWindow([a, b], 'D:/Project/vi-voice/src', true)?.pid).toBe(2);
+    const b = w(2, 'D:/Project/noidle');
+    expect(pickWindow([a, b], 'D:/Project/noidle/src', true)?.pid).toBe(2);
     expect(pickWindow([a, b], 'D:/Project/other', true)?.pid).toBe(1);
   });
   it('không phân biệt hoa thường và dấu gạch khi caseInsensitive', () => {
@@ -43,6 +43,11 @@ describe('parseSignal', () => {
   it('đọc dòng JSON hợp lệ', () => {
     expect(parseSignal('{"event":"listen","session":"s","cwd":"D:/x"}\n')).toEqual({ event: 'listen', session: 's', cwd: 'D:/x' });
   });
+  it('giữ danh sách pid tổ tiên (ancestors), bỏ phần tử không phải số', () => {
+    expect(parseSignal('{"event":"listen","session":"","cwd":"D:/x","ancestors":[100,90,"x",80]}')?.ancestors).toEqual([100, 90, 80]);
+    expect(parseSignal('{"event":"ask","session":"","cwd":"D:/x","ancestors":"nope"}')?.ancestors).toBeUndefined();
+    expect(parseSignal('{"event":"listen","session":"","cwd":"D:/x"}')?.ancestors).toBeUndefined();
+  });
   it('bỏ JSON hỏng, event lạ, thiếu cwd', () => {
     expect(parseSignal('{')).toBeUndefined();
     expect(parseSignal('{"event":"boom","session":"","cwd":"x"}')).toBeUndefined();
@@ -52,7 +57,7 @@ describe('parseSignal', () => {
 
 describe('registry', () => {
   it('ghi, đọc, xoá entry; bỏ file hỏng', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vi-voice-reg-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'noidle-reg-'));
     writeRegistry(w(11, 'D:/a'), dir);
     writeRegistry(w(12, 'D:/b'), dir);
     fs.writeFileSync(path.join(dir, '13.json'), '{oops', 'utf8');
@@ -80,7 +85,7 @@ describe('server/client', () => {
     expect(await sendSignal(testPipe(), { event: 'listen', session: '', cwd: 'x' }, 500)).toBe(false);
   });
   it('signalWindow chọn cửa sổ theo cwd và dọn entry chết', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vi-voice-sig-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'noidle-sig-'));
     const pipe = testPipe();
     const got: unknown[] = [];
     const server = startServer(pipe, (s) => void got.push(s));
@@ -110,7 +115,7 @@ describe('ask', () => {
     server.close();
   });
   it('askWindow chọn cửa sổ theo cwd', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vi-voice-ask-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'noidle-ask-'));
     const pipe = testPipe();
     const server = startServer(pipe, async () => 'đồng ý');
     await new Promise((r) => server.once('listening', r));

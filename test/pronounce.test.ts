@@ -2,6 +2,21 @@ import { describe, it, expect } from 'vitest';
 import { pronounce, DEFAULT_PRONUNCIATIONS } from '../src/pronounce';
 
 describe('pronounce', () => {
+  it('leaves word separation to the AI instead of splitting names mechanically', () => {
+    const original = 'SuperAdmin MasterData ScanForm viewAll APIResponse XMLHttpRequest';
+    expect(pronounce(original, undefined, false)).toBe(original);
+    expect(pronounce('Super Admin Ship N Go Shippo', undefined, false)).toBe('Super Admin Ship N Go Shippo');
+  });
+
+  it('keeps explicit pronunciations without splitting unrelated names', () => {
+    expect(pronounce('SuperAdmin MasterData', { SuperAdmin: 'customVoice' }, false)).toBe('customVoice MasterData');
+    expect(pronounce('GitHub DevOps APIResponse')).toBe(`${DEFAULT_PRONUNCIATIONS.GitHub} ${DEFAULT_PRONUNCIATIONS.DevOps} APIResponse`);
+  });
+
+  it('preserves standalone acronyms, IP versions and words without case boundaries', () => {
+    expect(pronounce('API JSON IPv4 IPv6 SHIPNGO appsettings', undefined, false)).toBe('API JSON IPv4 IPv6 SHIPNGO appsettings');
+  });
+
   it('spells file extensions with English letter names in Vietnamese syllables', () => {
     expect(pronounce('cần đọc file README.md trước khi làm')).toBe('cần đọc file README chấm em đi trước khi làm');
     expect(pronounce('sửa src/segmenter.ts và tsconfig.json')).toBe('sửa src/segmenter chấm ti ét và tsconfig chấm chây sơn');

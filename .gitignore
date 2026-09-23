@@ -3,3 +3,6 @@ dist/
 *.vsix
 .env
 scripts/out/
+hub/node_modules/
+hub/dist/
+.playwright-mcp/

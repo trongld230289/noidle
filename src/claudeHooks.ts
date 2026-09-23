@@ -1,4 +1,4 @@
-/** Đăng ký / gỡ hook của Vi Voice trong ~/.claude/settings.json của Claude Code. */
+/** Đăng ký / gỡ hook của NoIdle trong ~/.claude/settings.json của Claude Code. */
 
 export const HOOK_MARK = 'claude-hook.js';
 
@@ -58,11 +58,29 @@ export const NOTIFY_EVENTS: { event: string; matcher?: string; timeout?: number 
   { event: 'Notification', matcher: 'elicitation_dialog' },
 ];
 
+/** Hook của mình: đường dẫn script nằm trong thư mục extension noidle, hoặc vi-voice (tên cũ trước 2.0, gỡ khi đồng bộ). */
 function isOurs(h: HookCommand): boolean {
-  return typeof h.command === 'string' && h.command.includes(HOOK_MARK) && h.command.includes('vi-voice');
+  return typeof h.command === 'string' && h.command.includes(HOOK_MARK) && (h.command.includes('noidle') || h.command.includes('vi-voice'));
 }
 
-/** Trả về bản sao settings đã gỡ hook cũ của Vi Voice và (nếu enabled) thêm hook mới. */
+/**
+ * Nội dung file hook cho Copilot Chat trong VS Code (ghi ở ~/.copilot/hooks/noidle.json).
+ * Copilot mặc định không đọc ~/.claude/settings.json (setting chat.useClaudeHooks tắt), nên đăng ký riêng
+ * theo định dạng của Copilot: mỗi sự kiện là mảng lệnh, không có lớp matcher. Chỉ Stop và UserPromptSubmit:
+ * Copilot không có PermissionRequest hay AskUserQuestion nên không có gì để notify.
+ */
+export function copilotHooksFile(o: HookOptions): { hooks: Record<string, HookCommand[]> } {
+  const cmd = hookCommands(o);
+  return {
+    hooks: {
+      // --source copilot: phát xong, tín hiệu listen mang nguồn để extension mở mic vào ô chat Copilot thay vì terminal.
+      Stop: [{ type: 'command', command: `${cmd.Stop} --source copilot`, timeout: 60 }],
+      UserPromptSubmit: [{ type: 'command', command: cmd.UserPromptSubmit }],
+    },
+  };
+}
+
+/** Trả về bản sao settings đã gỡ hook cũ của NoIdle và (nếu enabled) thêm hook mới. */
 export function applyHooks(settings: ClaudeSettings, o: HookOptions): ClaudeSettings {
   const out: ClaudeSettings = { ...settings, hooks: { ...(settings.hooks ?? {}) } };
   const hooks = out.hooks!;

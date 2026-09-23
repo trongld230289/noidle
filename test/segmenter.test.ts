@@ -73,6 +73,32 @@ describe('Segmenter', () => {
     expect(segments).toHaveLength(0);
   });
 
+  it('ignores keyboard typing: loud 30ms clicks every 150ms add up past minSpeechMs but never form a sustained run', () => {
+    const { seg, segments } = make();
+    const spoke: number[] = [];
+    const seg2 = new Segmenter({ sampleRate: RATE, onSpeech: () => spoke.push(1) }, (s) => segments.push(s));
+    for (const target of [seg, seg2]) {
+      target.push(silence(300));
+      for (let i = 0; i < 20; i++) {
+        target.push(speech(30));
+        target.push(silence(120));
+      }
+      target.push(silence(1000));
+      target.flush();
+    }
+    expect(segments).toHaveLength(0);
+    expect(spoke).toHaveLength(0);
+  });
+
+  it('keeps a short spoken word (200ms sustained) when minSpeechMs allows it', () => {
+    const { seg, segments } = make({ minSpeechMs: 180 });
+    seg.push(silence(300));
+    seg.push(speech(200));
+    seg.push(silence(1000));
+    seg.flush();
+    expect(segments).toHaveLength(1);
+  });
+
   it('ignores background noise below the RMS threshold', () => {
     const { seg, segments } = make();
     seg.push(pcm(3000, 150)); // ~ -47 dBFS RMS

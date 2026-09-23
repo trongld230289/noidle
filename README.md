@@ -1,4 +1,6 @@
-# Vi Voice
+# NoIdle
+
+Hear when Claude Code or Copilot is done, say what's next. Không phút nào chờ vô ích: agent làm xong là bạn nghe thấy ngay, kèm việc kế tiếp, và nói tiếp qua tai nghe dù đang đứng, đang nằm hay đang ở cửa sổ khác. (Tên cũ: Vi Voice, tới bản 1.11. Bản 2.0 tự chuyển setting `viVoice.*` sang `noIdle.*` lúc khởi động.)
 
 Gõ tiếng Việt bằng giọng nói trong VS Code. Bấm **F6**, nói, bấm **F6** lần nữa. Chữ được chèn thẳng vào nơi bạn đang đứng: editor, terminal hoặc ô chat của Copilot.
 
@@ -21,20 +23,20 @@ ffmpeg -version
 ## Bước 1: Lấy Groq API key
 
 1. Mở https://console.groq.com/keys và đăng nhập (có thể dùng tài khoản Google hoặc GitHub).
-2. Bấm **Create API Key**, đặt tên tuỳ ý, ví dụ `vi-voice`.
+2. Bấm **Create API Key**, đặt tên tuỳ ý, ví dụ `noidle`.
 3. Copy key ngay khi nó hiện ra. Key bắt đầu bằng `gsk_`. Groq chỉ hiện key một lần, đóng hộp thoại rồi sẽ không xem lại được.
 
 ## Bước 2: Nhập key vào extension
 
 Có ba cách, chọn một:
 
-**Cách 1: Settings.** Bấm `Ctrl+,`, gõ `Vi Voice` vào ô tìm kiếm, dán key vào ô **Groq Api Key**.
+**Cách 1: Settings.** Bấm `Ctrl+,`, gõ `NoIdle` vào ô tìm kiếm, dán key vào ô **Groq Api Key**.
 
 **Cách 2: bấm F6 lần đầu.** Nếu chưa có key, extension sẽ hiện hộp nhập key ngay. Dán key vào và bấm Enter.
 
-**Cách 3: Command Palette.** Bấm `Ctrl+Shift+P`, chạy `Vi Voice: Set Groq API Key`, dán key, Enter.
+**Cách 3: Command Palette.** Bấm `Ctrl+Shift+P`, chạy `NoIdle: Set Groq API Key`, dán key, Enter.
 
-Cả ba cách đều lưu key vào setting `viVoice.groqApiKey` trong `settings.json`. Nếu bạn bật Settings Sync, hãy thêm `viVoice.groqApiKey` vào `settingsSync.ignoredSettings` để key không bị đồng bộ.
+Cả ba cách đều lưu key vào setting `noIdle.groqApiKey` trong `settings.json`. Nếu bạn bật Settings Sync, hãy thêm `noIdle.groqApiKey` vào `settingsSync.ignoredSettings` để key không bị đồng bộ.
 
 Nếu key sai hoặc hết hạn, extension báo lỗi kèm nút **Nhập lại key**.
 
@@ -49,108 +51,159 @@ Chữ được chèn theo nơi đang focus:
 
 | Đang focus | Kết quả |
 |---|---|
-| Editor | Chèn tại con trỏ, gõ từng ký tự. |
+| Editor | Chèn tại con trỏ của editor đang mở lúc bấm F6, gõ từng ký tự; đổi focus giữa chừng chữ vẫn vào editor đó. |
 | Terminal | Gửi vào terminal đang mở. |
-| Ô chat Copilot | Chèn vào ô chat. |
+| Ô chat Copilot | Đặt cả câu vào ô chat bằng lệnh mở chat của VS Code (không gửi), nên không phụ thuộc ô chat có đang focus; mỗi cụm mới thay cả nội dung ô chat bằng transcript tới lúc đó. |
 | Nơi khác | Copy vào clipboard và báo để bạn tự dán. |
 
 Thuật ngữ lập trình tiếng Anh như `refactor`, `commit`, `pull request`, `unit test` được giữ nguyên, không bị dịch sang tiếng Việt.
 
-Mỗi cụm sau khi nhận dạng được gửi thêm một lượt qua LLM trên Groq để sửa chính tả, dấu thanh, dấu câu và viết hoa. Bước này tốn thêm khoảng một giây mỗi cụm. Tắt bằng setting `viVoice.refine` nếu muốn chữ ra ngay.
+Mỗi cụm sau khi nhận dạng được gửi thêm một lượt qua LLM trên Groq để sửa chính tả, dấu thanh, dấu câu và viết hoa. Bước này tốn thêm khoảng một giây mỗi cụm. Tắt bằng setting `noIdle.refine` nếu muốn chữ ra ngay.
 
-## Nghe Claude Code trả lời bằng giọng nói
+## Nghe Claude Code và Copilot trả lời bằng giọng nói
 
-Bật setting `viVoice.voiceResponse`. Extension sẽ:
+Bật setting `noIdle.voiceResponse`. Extension sẽ:
 
-1. Thêm hai hook vào `~/.claude/settings.json`: một hook dặn Claude kết thúc mỗi câu trả lời bằng một dòng bắt đầu bằng 🔊 tóm tắt ngắn gọn kiểu nói chuyện, một hook đọc dòng đó khi Claude trả lời xong.
+1. Thêm hai hook vào `~/.claude/settings.json` (Claude Code) và ghi file `~/.copilot/hooks/noidle.json` (Copilot Chat agent mode trong VS Code 1.110 trở lên): một hook dặn Claude hoặc Copilot kết thúc mỗi câu trả lời bằng một dòng bắt đầu bằng 🔊 tóm tắt ngắn gọn kiểu nói chuyện, một hook đọc dòng đó khi trả lời xong.
 2. Đọc bằng giọng tiếng Việt của Microsoft Edge (miễn phí, cần mạng), phát qua `ffplay` đi kèm ffmpeg.
 
-Muốn im lặng một lúc mà không phải mở phiên Claude Code mới: bật `viVoice.voiceMute` hoặc chạy lệnh `Vi Voice: Tắt/bật tiếng Claude Code`. Hook vẫn đăng ký nhưng không đọc, không báo, không dặn Claude viết phần 🔊 và không mở mic; bật tắt có hiệu lực ngay ở lượt sau. Tắt `viVoice.voiceResponse` thì gỡ hẳn hook, phiên đang mở phải khởi động lại mới nhận.
+Muốn im lặng một lúc mà không phải mở phiên Claude Code mới: bật `noIdle.voiceMute` hoặc chạy lệnh `NoIdle: Tắt/bật tiếng Claude Code`. Hook vẫn đăng ký nhưng không đọc, không báo, không dặn Claude viết phần 🔊 và không mở mic; bật tắt có hiệu lực ngay ở lượt sau. Tắt `noIdle.voiceResponse` thì gỡ hẳn hook, phiên đang mở phải khởi động lại mới nhận.
 
-Khi Claude Code cần bạn approve một lệnh hoặc chờ bạn chọn câu trả lời, extension đọc một câu ngắn kèm tên workspace: "Workspace shipngo cần approve" hoặc "Workspace vi voice cần bạn xác nhận câu trả lời". Chạy nhiều cửa sổ cùng lúc vẫn biết cửa sổ nào đang chờ. Mọi lượt đọc xếp hàng theo thứ tự đến, không chồng tiếng; chỉ khi cùng một phiên có câu trả lời mới thì câu cũ của phiên đó bị cắt. Tắt bằng `viVoice.voiceNotify`.
+Khi Claude Code cần bạn approve một lệnh hoặc chờ bạn chọn câu trả lời, extension đọc một câu ngắn kèm tên workspace: "Workspace shipngo cần approve" hoặc "Workspace vi voice cần bạn xác nhận câu trả lời". Chạy nhiều cửa sổ cùng lúc vẫn biết cửa sổ nào đang chờ. Mọi lượt đọc xếp hàng theo thứ tự đến, không chồng tiếng; chỉ khi cùng một phiên có câu trả lời mới thì câu cũ của phiên đó bị cắt. Tắt bằng `noIdle.voiceNotify`.
 
 ### Approve bằng giọng nói
 
-Bật `viVoice.voiceApprove`. Khi Claude Code xin quyền, hook đọc "Workspace X cần approve, nói approve hoặc từ chối" rồi mở mic nghe tối đa 15 giây. Nói "approve", "đồng ý", "ok" thì lệnh được duyệt; "từ chối", "không", "dừng" thì bị chặn; im lặng hoặc không rõ thì hộp thoại hiện như thường để bấm tay. Hook xác nhận lại bằng giọng "đã approve" hoặc "đã từ chối".
+Bật `noIdle.voiceApprove`. Khi Claude Code xin quyền, hook đọc "Workspace X cần approve, nói approve hoặc từ chối" rồi mở mic nghe tối đa 15 giây. Nói "approve", "đồng ý", "ok" thì lệnh được duyệt; "từ chối", "không", "dừng" thì bị chặn; im lặng hoặc không rõ thì hộp thoại hiện như thường để bấm tay. Hook xác nhận lại bằng giọng "đã approve" hoặc "đã từ chối".
 
-Lệnh nguy hiểm không bao giờ được duyệt bằng giọng, luôn phải bấm tay: xoá file đệ quy, git push, git reset --hard, drop table, sudo, docker prune, sửa file .env hay settings.json. Ai đứng gần mic cũng approve được, nên chỉ bật khi thật sự đang nằm nghe. Mic do extension mở ngay trong cửa sổ VS Code (status bar hiện "Claude đang nghe"), hook chỉ gửi tín hiệu hỏi và nhận chữ nghe được; VS Code đóng thì hộp thoại hiện như thường.
+Chỉ khi cả câu là một lời xác nhận ("ok", "approve", "đồng ý", "cho phép", "go ahead"...) kèm nhiều nhất vài từ đệm ("ừ approve đi", "yes please", "đồng ý nhé") thì mới tính là đồng ý. Câu chứa từ đồng ý nhưng nói chuyện khác ("was that okay", "approve tomorrow", "ai đồng ý"), câu hỏi ("được không?"), câu có điều kiện ("only after tests pass") đều không tính, hộp thoại hiện để bấm tay. Từ chối thì nhận thoải mái, kể cả lẫn trong câu ("yes and no" là từ chối).
+
+Approve bằng giọng đi theo danh sách trắng và phải khớp trọn lệnh, kể cả tham số: đọc file, tìm kiếm, sửa file thường; npm test, npm ci, npm run với tên script quen (test, lint, build, typecheck, check, format, dev...), npx vitest/tsc/eslint/prettier; pytest, cargo test, go test, dotnet test, make test; git status, diff, log, show, fetch, branch (chỉ liệt kê), add, commit; ls, cat, grep, find không có delete/exec. Lệnh được tách thành đối số thật như shell (bỏ nháy) rồi xét theo quy tắc từng lệnh, nên `find . "-delete"` hay `git branch "-D" x` không lách được. Mọi lệnh con nối bằng && hay ; đều phải khớp; xuống dòng, biến, lệnh con, chuyển hướng, ngoặc, backslash là không an toàn. Tool lạ kể cả MCP, lệnh chưa phân loại (node script.js, curl, npm run deploy, make deploy, npm install tên-gói...) và lệnh nguy hiểm (xoá đệ quy, git push, git reset --hard, git branch -f, drop table, sudo, docker prune, sửa file .env hay settings.json) luôn phải bấm tay; hook đọc "chưa nằm trong danh sách an toàn" hoặc "thuộc loại nguy hiểm" rồi thôi. Ai đứng gần mic cũng approve được, nên chỉ bật khi thật sự đang nằm nghe. Mic do extension mở ngay trong cửa sổ VS Code (status bar hiện "Claude đang nghe"), hook chỉ gửi tín hiệu hỏi và nhận chữ nghe được; VS Code đóng thì hộp thoại hiện như thường.
 
 ### Hands-free: nói chuyện khép kín
 
-Bật `viVoice.handsFree`. Bấm F6 nói yêu cầu đầu tiên như thường. Từ đó:
+Bật `noIdle.handsFree`. Bấm F6 nói yêu cầu đầu tiên như thường. Từ đó:
 
-1. Claude làm xong, hook đọc phần 🔊. Loa vừa im thì extension bíp một tiếng và mở mic ngay trong cửa sổ VS Code đang chạy Claude Code (status bar hiện "Claude đang nghe"). Bạn nói yêu cầu tiếp theo, chữ hiện dần trong terminal y như khi bấm F6. Ngắt hơi khoảng `viVoice.handsFreeSendDelaySec` (mặc định 2,5 giây) là extension tự bấm Enter, với điều kiện đã có ít nhất ba từ. Nói "gửi" ở cuối câu thì gửi ngay; nói riêng một tiếng "huỷ", "thôi" hay "dừng" thì tắt mic, chữ để nguyên cho bạn sửa tay. Tắt `viVoice.handsFreeAutoSend` nếu muốn luôn tự bấm Enter.
-2. Claude cần approve: như mục trên, nếu bật `viVoice.voiceApprove`.
+1. Claude làm xong, hook đọc phần 🔊. Loa vừa im thì extension bíp một tiếng và mở mic ngay trong cửa sổ VS Code đang chạy Claude Code (status bar hiện "Claude đang nghe"), gõ vào đúng terminal đang chạy phiên Claude đó dù bạn đang chọn terminal khác hay focus sang app khác. Bạn nói yêu cầu tiếp theo, chữ hiện dần trong terminal y như khi bấm F6. Ngắt hơi khoảng `noIdle.handsFreeSendDelaySec` (mặc định 2,5 giây) là extension tự bấm Enter, với điều kiện đã có ít nhất ba từ. Nói "gửi" ở cuối câu thì gửi ngay; nói riêng một tiếng "huỷ", "thôi" hay "dừng" thì tắt mic, chữ để nguyên cho bạn sửa tay. Tắt `noIdle.handsFreeAutoSend` nếu muốn luôn tự bấm Enter.
+2. Claude cần approve: như mục trên, nếu bật `noIdle.voiceApprove`.
 3. Claude hỏi chọn đáp án: hook đọc câu hỏi và các lựa chọn theo số, rồi extension bíp và mở mic; bạn nói số hoặc tên lựa chọn, có thể chọn nhiều ("một và ba"), hoặc "tất cả". Hook nhắc lại lựa chọn rồi Claude làm tiếp. Nói "bỏ qua" hoặc không rõ thì hộp thoại hiện để chọn tay.
-4. Mic mở mà im lặng quá `viVoice.handsFreeTimeoutSec` (mặc định 20 giây) thì tự tắt. Bấm F6 lúc đang nghe cũng tắt. Muốn nói tiếp thì bấm F6 như thường.
+4. Mic mở mà quá `noIdle.handsFreeTimeoutSec` (mặc định 20 giây) không nghe ra chữ nào thì tự tắt. Đồng hồ này tính theo chữ thật sau lọc, không tính theo tiếng động: gõ phím, quạt hay tiếng ồn không giữ mic mở. Bấm F6 lúc đang nghe cũng tắt. Muốn nói tiếp thì bấm F6 như thường.
 
-Bật tắt `viVoice.handsFree` có hiệu lực ngay, không cần restart Claude Code: tắt thì Claude đọc xong là thôi, không mở mic, không chờ. Lệnh nhanh: `Vi Voice: Tắt/bật hands-free`.
+Chống tiếng gõ phím và câu bịa, bốn lớp: VAD chỉ nhận là tiếng nói khi có ồn liền mạch từ 120 ms (click gõ phím chỉ 10 đến 40 ms, cộng dồn bao nhiêu cũng không tính); bộ lọc bỏ các câu Whisper hay bịa trên tiếng ồn ở cả tiếng Việt lẫn tiếng Anh ("Thank you", "Thanks for watching", "Subscribe"...); cụm ngắn lặp đúng đuôi chữ vừa gõ bị bỏ; và nếu VAD vẫn thấy tiếng mà quá 8 giây không ra chữ mới thì coi là ồn, gửi luôn thay vì chờ mãi. Ngôn ngữ `auto` chỉ đổi theo cụm còn chữ sau lọc, câu bịa không đổi được ngôn ngữ phiên.
 
-Hook không bao giờ tự mở mic: khi Claude xong, hook Stop thoát ngay và tiến trình đọc chỉ gửi một tín hiệu qua named pipe cho đúng cửa sổ VS Code (chọn theo thư mục làm việc của phiên Claude Code); lúc cần approve hay chọn đáp án, hook gửi tín hiệu hỏi và chờ extension nghe xong trả chữ về. Vì vậy câu nói là prompt thật do bạn gõ bằng giọng, hiện trong màn hình chat, sửa được trước khi gửi, và Claude Code không phải chờ hook. Mỗi cửa sổ ghi một file đăng ký trong `%TEMP%\vi-voice-tts\windows`.
+Bật tắt `noIdle.handsFree` có hiệu lực ngay, không cần restart Claude Code: tắt thì Claude đọc xong là thôi, không mở mic, không chờ. Gửi prompt mới trong lúc câu trả lời cũ còn đang đọc thì câu cũ đọc xong không mở mic nữa (play so số prompt của phiên lúc được tách ra với số hiện tại), vì Claude đang làm lượt mới. Lệnh nhanh: `NoIdle: Tắt/bật hands-free`.
 
-Phiên Claude Code đang mở cần khởi động lại để nhận hook. Chạy `Vi Voice: Đọc thử giọng` để kiểm tra loa. Đổi giọng nam hoặc nữ bằng `viVoice.voice`, chỉnh tốc độ bằng `viVoice.voiceRate`. Tắt setting thì hook được gỡ khỏi `settings.json`.
+Hook không bao giờ tự mở mic: khi Claude xong, hook Stop thoát ngay và tiến trình đọc chỉ gửi một tín hiệu qua named pipe cho đúng cửa sổ VS Code (chọn theo thư mục làm việc của phiên Claude Code); lúc cần approve hay chọn đáp án, hook gửi tín hiệu hỏi và chờ extension nghe xong trả chữ về. Vì vậy câu nói là prompt thật do bạn gõ bằng giọng, hiện trong màn hình chat, sửa được trước khi gửi, và Claude Code không phải chờ hook. Mỗi cửa sổ ghi một file đăng ký trong `%TEMP%\noidle-tts\windows`. Tín hiệu listen còn mang chuỗi pid tổ tiên của tiến trình Claude Code (Claude → wrapper → shell của terminal); extension so với pid shell của từng terminal trong cửa sổ để chọn đúng terminal đang chạy Claude, không khớp mới lấy terminal đang chọn. Tra cây tiến trình bằng PowerShell mất hơn một giây nên hook lưu chuỗi theo phiên và chỉ tra lại khi pid Claude đổi.
 
-Giọng vi-VN đọc chữ viết tắt và đuôi file tiếng Anh sai, kiểu `README.md` thành "mờ đờ". Hook thay sẵn các thuật ngữ hay gặp bằng âm tiếng Việt trước khi đọc: `.md` thành "chấm em đi", `API` thành "ây pi ai", `JSON` thành "chây sơn", `CI/CD` thành "xi ai xi đi". Thêm từ của bạn hoặc sửa cách đọc mặc định bằng `viVoice.pronunciations`, ví dụ `{"Claude": "cờ lốt", "shipngo": "síp gô"}`; đổi là có hiệu lực ngay ở lượt sau. Bảng mặc định nằm trong `src/pronounce.ts`.
+Phiên Claude Code đang mở cần khởi động lại để nhận hook; Copilot thì nhận ngay ở phiên chat mới. Chạy `NoIdle: Đọc thử giọng` để kiểm tra loa. Đổi giọng nam hoặc nữ bằng `noIdle.voice`, chỉnh tốc độ bằng `noIdle.voiceRate`. Tắt setting thì hook được gỡ khỏi `settings.json` và file hook Copilot bị xoá.
 
-Để tiết kiệm token, hướng dẫn viết phần 🔊 chỉ được chèn đầy đủ ở prompt đầu tiên của mỗi phiên Claude Code (khoảng 400 token); các prompt sau chỉ chèn một dòng nhắc ngắn (khoảng 40 token), và cứ 20 prompt thì chèn lại bản đầy đủ một lần phòng khi context bị nén. Hook đếm theo `session_id` bằng file trong `%TEMP%\vi-voice-tts\sessions`.
+Với Copilot, extension chỉ đọc câu trả lời và mở mic hands-free; chưa có approve hay chọn đáp án bằng giọng vì Copilot không có sự kiện hook tương đương. Không cần bật `chat.useClaudeHooks` của VS Code: Copilot đọc thẳng thư mục `~/.copilot/hooks`.
 
-Mọi thứ từ dòng 🔊 đến hết câu trả lời sẽ được đọc. Claude được dặn viết phần này đủ nghĩa để nghe xong không cần nhìn màn hình: hỏi thông tin thì kể đủ các mục chính, báo cáo việc đã làm thì hai ba câu. Muốn nghe kỹ hơn nữa thì nói "đọc chi tiết". Nếu Claude không thêm dòng 🔊, extension đọc khoảng 300 ký tự đầu của câu trả lời, bỏ code và markdown. Lỗi đọc được ghi tại `%TEMP%\vi-voice-tts\hook.log`.
+Giọng vi-VN đọc chữ viết tắt và đuôi file tiếng Anh sai, kiểu `README.md` thành "mờ đờ". Hook thay sẵn các thuật ngữ hay gặp bằng âm tiếng Việt trước khi đọc: `.md` thành "chấm em đi", `API` thành "ây pi ai", `JSON` thành "chây sơn", `CI/CD` thành "xi ai xi đi". Thêm từ của bạn hoặc sửa cách đọc mặc định bằng `noIdle.pronunciations`, ví dụ `{"Claude": "cờ lốt", "shipngo": "síp gô"}`; đổi là có hiệu lực ngay ở lượt sau. Bảng mặc định nằm trong `src/pronounce.ts`.
+
+Để tiết kiệm token, hướng dẫn viết phần 🔊 chỉ được chèn đầy đủ ở prompt đầu tiên của mỗi phiên Claude Code (khoảng 400 token); các prompt sau chỉ chèn một dòng nhắc ngắn (khoảng 40 token), và cứ 20 prompt thì chèn lại bản đầy đủ một lần phòng khi context bị nén. Hook đếm theo `session_id` bằng file trong `%TEMP%\noidle-tts\sessions`.
+
+Chạy nhiều workspace cùng lúc thì mỗi phần đọc mở đầu bằng "Workspace X:" để biết cửa sổ nào vừa xong (setting `noIdle.voiceSayWorkspace`, mặc định chỉ bật khi có hơn một cửa sổ VS Code). Đang nghe mà muốn bỏ qua thì bấm **F7** hoặc chạy `NoIdle: Bỏ qua đang đọc`: bản đang đọc bị cắt, bản kế tiếp phát tiếp, hands-free vẫn mở mic như thường.
+
+Mọi thứ từ dòng 🔊 đến hết câu trả lời sẽ được đọc. Claude được dặn viết phần này đủ nghĩa để nghe xong không cần nhìn màn hình: hỏi thông tin thì kể đủ các mục chính, báo cáo việc đã làm thì hai ba câu. Muốn nghe kỹ hơn nữa thì nói "đọc chi tiết". Nếu Claude không thêm dòng 🔊, extension đọc khoảng 300 ký tự đầu của câu trả lời, bỏ code và markdown. Lỗi đọc được ghi tại `%TEMP%\noidle-tts\hook.log`.
+
+### Đọc thử nhanh, không chờ hook
+
+Mở `scripts/tts-preview.py`, thay nội dung biến `TEXT` đầu file bằng đoạn muốn nghe, rồi chạy:
+
+```powershell
+python scripts/tts-preview.py
+```
+
+Hoặc truyền một câu trực tiếp:
+
+```powershell
+python scripts/tts-preview.py "Bạn cập nhật extension rồi kiểm tra ShipNGo và Shippo nhé."
+```
+
+Script đọc lại Settings người dùng mỗi lần chạy, lấy `noIdle.voice`, `voiceRate`, `language`, `pronunciations` và đường dẫn player từ `ffmpegPath`. Dùng đúng bộ xử lý pronunciation của dự án, không gọi AI, không tự tách tên ghép và không thay cài đặt. Nó phát riêng, bỏ qua mute, hàng đợi và khóa mic của hook; nên dừng các lượt đọc/thu âm khác trước khi thử. Vẫn cần mạng để tổng hợp Edge TTS.
+
+- `--file sample.txt`: đọc file UTF-8 thay cho `TEXT`.
+- `--dry-run`: chỉ xem giọng và chữ sau pronunciation, không gọi mạng hoặc phát loa.
+- `--voice en-US-BrianMultilingualNeural`: thử giọng khác trong một lượt.
+- `--rate=+10%`, `--language vi`: đổi tạm tốc độ hoặc ngôn ngữ. Với `auto`, script đoán từ đoạn thử, không có lịch sử ngôn ngữ của phiên chat.
+- `--settings "C:\duong-dan\settings.json"`: chọn Settings của profile VS Code khác. Mặc định dùng `%APPDATA%\Code\User\settings.json`, hỗ trợ comment và dấu phẩy cuối.
+
+Cần Python 3, Node.js, ffplay và dependencies của repo (`npm install` nếu chưa có). Không cần cài gói Python; file Python gọi các thư viện Node có sẵn trong repo để tránh sai khác với extension. Giữ script trong repo khi chạy.
+
+## Dùng tiếng Anh / English mode
+
+Đặt `noIdle.language` thành `en`. Một setting này đổi cả chuỗi: Whisper nghe tiếng Anh, LLM sửa câu bằng prompt tiếng Anh, Claude và Copilot được dặn viết phần 🔊 bằng tiếng Anh, hook nói "Workspace abc needs approval" hay "After the beep, say approve or deny", và bảng phiên âm sang tiếng Việt được bỏ qua (bảng `noIdle.pronunciations` của bạn vẫn áp dụng). Nếu giọng đang là vi-VN thì extension tự dùng giọng đa ngôn ngữ Ava cho tiếng Anh; chọn giọng khác bằng `noIdle.voice` (có thêm Christopher, Aria, Jenny, Guy, Sonia, Ryan, Natasha chỉ nói tiếng Anh). Lệnh nói vẫn nhận cả hai thứ tiếng: approve, ok, yes, deny, no, send, cancel, stop, never mind, skip, all, one đến nine.
+
+Muốn khỏi bật tắt tay thì đặt `auto`: hook nhìn prompt bạn vừa gửi, có dấu tiếng Việt hoặc từ tiếng Việt quen thuộc thì tiếng Việt, câu ASCII từ ba từ trở lên thì tiếng Anh, ngắn quá kiểu "ok" thì giữ ngôn ngữ của lượt trước trong cùng phiên. Đổi ngôn ngữ giữa phiên thì hook chèn lại hướng dẫn đầy đủ để Claude đổi theo ngay lượt đó, không cần restart. Câu báo approve, chọn đáp án và giọng đọc đi theo ngôn ngữ đã nhớ của phiên đó; phiên mới chưa biết gì thì tiếng Việt. Phía mic, `auto` để Whisper tự nhận diện và chọn prompt sửa câu theo ngôn ngữ Whisper trả về; lưu ý nói tiếng Việt trộn nhiều thuật ngữ tiếng Anh thì Whisper đôi khi đoán nhầm sang tiếng Anh và dịch cả câu, nên dev Việt nên để `vi` nếu gặp chuyện đó.
+
+Set `noIdle.language` to `en` and the whole chain switches: Whisper listens for English, the LLM cleanup uses an English prompt, Claude and Copilot are told to write the 🔊 section in English, the hook speaks English ("Workspace abc needs approval", "After the beep, say approve or deny"), and the Vietnamese pronunciation table is skipped (your own `noIdle.pronunciations` still apply). A vi-VN voice is swapped for the multilingual Ava voice; pick another with `noIdle.voice` (William is a further multilingual voice with an Australian accent; Christopher, Aria, Jenny, Guy, Sonia, Ryan and Natasha are English-only additions). Spoken commands work in both languages: approve, ok, yes, deny, no, send, cancel, stop, never mind, skip, all, one to nine. With `auto`, the hook reads the language off each prompt you send (Vietnamese diacritics or common words → Vietnamese, plain ASCII of three words or more → English, too short → keep the session's last language), re-injects the full instructions whenever the language flips so Claude switches in that very turn, and the mic lets Whisper auto-detect. VS Code messages and this README are still Vietnamese for now.
 
 ## Lệnh có sẵn
 
-Mở bằng `Ctrl+Shift+P`, gõ `Vi Voice`:
+Mở bằng `Ctrl+Shift+P`, gõ `NoIdle`:
 
 | Lệnh | Tác dụng |
 |---|---|
-| Vi Voice: Bắt đầu / dừng nghe | Giống bấm F6. |
-| Vi Voice: Set Groq API Key | Nhập hoặc đổi key. |
-| Vi Voice: Gửi lại audio cuối | Gửi lại cụm vừa lỗi mạng hoặc lỗi server. |
-| Vi Voice: Chọn micro | Liệt kê micro ffmpeg thấy được và chọn một cái. |
-| Vi Voice: Lưu audio cuối ra file (debug) | Ghi lần thu cuối ra file WAV trong thư mục tạm để kiểm tra mic. |
-| Vi Voice: Đọc thử giọng | Đọc một câu mẫu bằng giọng đã chọn để kiểm tra loa. |
+| NoIdle: Bắt đầu / dừng nghe | Giống bấm F6. |
+| NoIdle: Set Groq API Key | Nhập hoặc đổi key. |
+| NoIdle: Gửi lại audio cuối | Gửi lại cụm vừa lỗi mạng hoặc lỗi server. |
+| NoIdle: Chọn micro | Liệt kê micro ffmpeg thấy được và chọn một cái. |
+| NoIdle: Lưu audio cuối ra file (debug) | Ghi lần thu cuối ra file WAV trong thư mục tạm để kiểm tra mic. |
+| NoIdle: Đọc thử giọng | Đọc một câu mẫu bằng giọng đã chọn để kiểm tra loa. |
+| NoIdle: Bỏ qua đang đọc | Phím **F7**. Cắt bản đang đọc, bản kế tiếp trong hàng đợi phát tiếp; hands-free vẫn mở mic như thường. |
 
 ## Cài đặt trong Settings (Ctrl+,)
 
-Gõ `Vi Voice` vào ô tìm kiếm của Settings:
+Gõ `NoIdle` vào ô tìm kiếm của Settings:
 
 | Setting | Mặc định | Ý nghĩa |
 |---|---|---|
-| `viVoice.groqApiKey` | trống | Groq API key. |
-| `viVoice.voiceResponse` | `false` | Đọc câu trả lời của Claude Code thành tiếng. |
-| `viVoice.voiceMute` | `false` | Tạm tắt tiếng Claude Code ngay, không cần restart; hook vẫn đăng ký nhưng im lặng. |
-| `viVoice.voiceNotify` | `true` | Đọc "Workspace X cần approve" hoặc "cần bạn xác nhận câu trả lời" khi Claude Code chờ bạn. |
-| `viVoice.voiceApprove` | `false` | Approve bằng giọng nói sau khi nghe thông báo. |
-| `viVoice.voiceApproveTimeoutSec` | `15` | Chờ bạn nói tối đa bao nhiêu giây khi approve bằng giọng. |
-| `viVoice.handsFree` | `false` | Vòng lặp nói chuyện: Claude đọc xong thì bíp và mở mic trong VS Code, bạn nói, ngắt hơi là tự gửi; chọn đáp án bằng giọng. Đổi là có hiệu lực ngay. |
-| `viVoice.handsFreeTimeoutSec` | `20` | Hands-free: mic mở mà im lặng bao nhiêu giây thì tự tắt. |
-| `viVoice.handsFreeAutoSend` | `true` | Hands-free: ngắt hơi là tự bấm Enter (cần ít nhất ba từ). Tắt thì chỉ nói "gửi" mới gửi. |
-| `viVoice.handsFreeSendDelaySec` | `2.5` | Hands-free: im lặng bao nhiêu giây sau câu cuối thì tự gửi. |
-| `viVoice.voice` | `vi-VN-HoaiMyNeural` | Giọng Việt HoaiMy hoặc NamMinh đọc tiếng Việt chuẩn nhất; giọng Multilingual như Ava, Andrew tự chuyển giữa tiếng Việt và tiếng Anh trong câu, hợp khi nói nhiều thuật ngữ. |
-| `viVoice.voiceRate` | `+0%` | Tốc độ đọc. |
-| `viVoice.ffmpegPath` | `ffmpeg` | Đường dẫn ffmpeg nếu không có trong PATH. |
-| `viVoice.micDevice` | trống | Tên micro. Trống thì lấy micro đầu tiên. Nên đặt bằng lệnh `Vi Voice: Chọn micro`. |
-| `viVoice.typingDelayMs` | `12` | Nghỉ bao nhiêu ms giữa các ký tự khi gõ vào editor. Đặt `0` để chèn nguyên cụm. |
-| `viVoice.language` | `vi` | Mã ngôn ngữ báo cho Whisper. Để trống để Whisper tự nhận diện. |
-| `viVoice.glossary` | `[]` | Từ tiếng Anh hay nói mà Whisper nghe sai, cùng tên project, tên biến, tên người. Whisper và LLM sẽ ưu tiên viết đúng các từ này. |
-| `viVoice.pronunciations` | `{}` | Cách đọc thuật ngữ khi đọc câu trả lời: thuật ngữ → âm tiếng Việt, thêm hoặc ghi đè bảng mặc định (`.md` → "chấm em đi", `API` → "ây pi ai"). |
-| `viVoice.refine` | `true` | Sửa câu bằng LLM sau khi nhận dạng. |
-| `viVoice.refineModel` | `openai/gpt-oss-120b` | Model Groq dùng để sửa câu. `openai/gpt-oss-20b` nhanh hơn nhưng kém hơn. Groq đã gỡ các model Llama khỏi gói miễn phí từ 16/8/2026; nếu model không tồn tại, extension cảnh báo và dùng chữ thô của Whisper. |
+| `noIdle.groqApiKey` | trống | Groq API key. |
+| `noIdle.voiceResponse` | `false` | Đọc câu trả lời của Claude Code và Copilot Chat thành tiếng. |
+| `noIdle.voiceMute` | `false` | Tạm tắt tiếng Claude Code ngay, không cần restart; hook vẫn đăng ký nhưng im lặng. |
+| `noIdle.voiceNotify` | `true` | Đọc "Workspace X cần approve" hoặc "cần bạn xác nhận câu trả lời" khi Claude Code chờ bạn. |
+| `noIdle.voiceApprove` | `false` | Approve bằng giọng nói sau khi nghe thông báo. |
+| `noIdle.voiceApproveTimeoutSec` | `15` | Chờ bạn nói tối đa bao nhiêu giây khi approve bằng giọng. |
+| `noIdle.handsFree` | `false` | Vòng lặp nói chuyện: Claude đọc xong thì bíp và mở mic trong VS Code, bạn nói, ngắt hơi là tự gửi; chọn đáp án bằng giọng. Đổi là có hiệu lực ngay. |
+| `noIdle.handsFreeTimeoutSec` | `20` | Hands-free: mic mở mà im lặng bao nhiêu giây thì tự tắt. |
+| `noIdle.handsFreeAutoSend` | `true` | Hands-free: ngắt hơi là tự bấm Enter (cần ít nhất ba từ). Tắt thì chỉ nói "gửi" mới gửi. |
+| `noIdle.handsFreeSendDelaySec` | `2.5` | Hands-free: im lặng bao nhiêu giây sau câu cuối thì tự gửi. |
+| `noIdle.voice` | `vi-VN-HoaiMyNeural` | Giọng Việt HoaiMy hoặc NamMinh đọc tiếng Việt chuẩn nhất; giọng Multilingual như Ava, Andrew tự chuyển giữa tiếng Việt và tiếng Anh trong câu, hợp khi nói nhiều thuật ngữ; Christopher, Aria, Jenny, Guy, Sonia, Ryan, Natasha chỉ tiếng Anh. Đọc tiếng Anh mà giọng đang là vi-VN thì tự dùng Ava. |
+| `noIdle.voiceRate` | `+0%` | Tốc độ đọc. |
+| `noIdle.ffmpegPath` | `ffmpeg` | Đường dẫn ffmpeg nếu không có trong PATH. |
+| `noIdle.micDevice` | trống | Tên micro. Trống thì lấy micro đầu tiên. Nên đặt bằng lệnh `NoIdle: Chọn micro`. |
+| `noIdle.typingDelayMs` | `12` | Nghỉ bao nhiêu ms giữa các ký tự khi gõ vào editor. Đặt `0` để chèn nguyên cụm. |
+| `noIdle.language` | `vi` | Ngôn ngữ làm việc: `vi`, `en` hoặc `auto` (đoán theo prompt mỗi lượt, nhớ theo phiên), chi phối Whisper, LLM sửa câu, hướng dẫn 🔊, câu hook nói, giọng và bảng phiên âm. Để trống thì Whisper tự nhận diện, còn lại như `vi`. |
+| `noIdle.glossary` | `[]` | Từ tiếng Anh hay nói mà Whisper nghe sai, cùng tên project, tên biến, tên người. Whisper và LLM sẽ ưu tiên viết đúng các từ này. |
+| `noIdle.voiceSayWorkspace` | `auto` | Mở đầu phần đọc bằng "Workspace X:". `auto` chỉ khi có hơn một cửa sổ VS Code đang mở, `always`, `never`. |
+| `noIdle.pronunciations` | `{}` | Cách đọc thuật ngữ khi đọc câu trả lời: thuật ngữ → âm tiếng Việt, thêm hoặc ghi đè bảng mặc định (`.md` → "chấm em đi", `API` → "ây pi ai"). |
+| `noIdle.refine` | `true` | Sửa câu bằng LLM sau khi nhận dạng. |
+| `noIdle.refineModel` | `openai/gpt-oss-120b` | Model Groq dùng để sửa câu. `openai/gpt-oss-20b` nhanh hơn nhưng kém hơn. Groq đã gỡ các model Llama khỏi gói miễn phí từ 16/8/2026; nếu model không tồn tại, extension cảnh báo và dùng chữ thô của Whisper. |
 
-Phím tắt mặc định là **F6**. Đổi phím trong `File > Preferences > Keyboard Shortcuts`, tìm `viVoice.toggle`. Lần đầu chạy, extension tự thêm `viVoice.toggle` vào `terminal.integrated.commandsToSkipShell` để phím tắt hoạt động trong terminal.
+Phím tắt mặc định là **F6**. Đổi phím trong `File > Preferences > Keyboard Shortcuts`, tìm `noIdle.toggle`. Lần đầu chạy, extension tự thêm `noIdle.toggle` vào `terminal.integrated.commandsToSkipShell` để phím tắt hoạt động trong terminal.
 
 ## Khi gặp lỗi
 
 | Hiện tượng | Cách xử lý |
 |---|---|
-| Báo không tìm thấy ffmpeg | Cài ffmpeg, hoặc điền đường dẫn đầy đủ vào `viVoice.ffmpegPath`. |
-| Báo sai key | Chạy `Vi Voice: Set Groq API Key`, nhập lại key `gsk_...`. |
-| Không nghe thấy tiếng nói | Kiểm tra mic trong Windows Settings > Sound > Input. Chạy `Vi Voice: Chọn micro` để chọn đúng thiết bị. Dùng lệnh lưu audio để nghe thử file thu được. |
-| Bấm F6 trong terminal ra ký tự lạ | Kiểm tra `terminal.integrated.commandsToSkipShell` trong Settings có chứa `viVoice.toggle`. |
-| Lỗi mạng hoặc quá giới hạn | Chờ vài giây rồi chạy `Vi Voice: Gửi lại audio cuối`. |
-| Chữ vẫn hiện nhưng thiếu dấu câu, thuật ngữ tiếng Anh bị phiên âm | Bước sửa câu đang tắt tạm vì Groq hết hạn mức (HTTP 429), chỉ trong lượt nói đó; lượt nói sau (F6 hoặc hands-free mở mic lại) thử lại ngay. Xem kênh Output **Vi Voice**. Muốn kéo dài hạn mức thì đổi `viVoice.refineModel` sang `openai/gpt-oss-20b`. |
-| Từ tiếng Anh bị viết thành âm tiếng Việt (button thành "bất tính") | Thêm từ đó vào `viVoice.glossary`. Whisper nghe tiếng Việt trộn tiếng Anh chưa tốt, từ nào có trong prompt sẽ được viết đúng. |
-| Muốn xem chữ thô trước khi sửa | Mở `View > Output`, chọn kênh **Vi Voice**. Mỗi cụm có chữ thô của Whisper, chữ sau lọc và chữ sau LLM. |
+| Báo không tìm thấy ffmpeg | Cài ffmpeg, hoặc điền đường dẫn đầy đủ vào `noIdle.ffmpegPath`. |
+| Báo sai key | Chạy `NoIdle: Set Groq API Key`, nhập lại key `gsk_...`. |
+| Không nghe thấy tiếng nói | Kiểm tra mic trong Windows Settings > Sound > Input. Chạy `NoIdle: Chọn micro` để chọn đúng thiết bị. Dùng lệnh lưu audio để nghe thử file thu được. |
+| Bấm F6 trong terminal ra ký tự lạ | Kiểm tra `terminal.integrated.commandsToSkipShell` trong Settings có chứa `noIdle.toggle`. |
+| Lỗi mạng hoặc quá giới hạn | Chờ vài giây rồi chạy `NoIdle: Gửi lại audio cuối`. |
+| Chữ vẫn hiện nhưng thiếu dấu câu, thuật ngữ tiếng Anh bị phiên âm | Bước sửa câu đang tắt tạm vì Groq hết hạn mức (HTTP 429), chỉ trong lượt nói đó; lượt nói sau (F6 hoặc hands-free mở mic lại) thử lại ngay. Xem kênh Output **NoIdle**. Muốn kéo dài hạn mức thì đổi `noIdle.refineModel` sang `openai/gpt-oss-20b`. |
+| Từ tiếng Anh bị viết thành âm tiếng Việt (button thành "bất tính") | Thêm từ đó vào `noIdle.glossary`. Whisper nghe tiếng Việt trộn tiếng Anh chưa tốt, từ nào có trong prompt sẽ được viết đúng. |
+| Muốn xem chữ thô trước khi sửa | Mở `View > Output`, chọn kênh **NoIdle**. Mỗi cụm có chữ thô của Whisper, chữ sau lọc và chữ sau LLM. |
 
 ## Riêng tư
 
-Âm thanh chỉ được gửi tới Groq để nhận dạng và không lưu ở đâu khác. Extension không thu thập gì thêm.
+Extension không thu thập gì và không có máy chủ riêng. Dữ liệu đi đâu:
+
+- Âm thanh từ mic được gửi tới Groq để nhận dạng (Whisper) và chữ nhận được gửi lại Groq để sửa câu (LLM). Groq không lưu theo chính sách của họ; extension không giữ audio trừ file WAV tạm khi bạn chạy lệnh lưu audio để debug.
+- Phần 🔊 của câu trả lời được gửi tới dịch vụ đọc của Microsoft Edge để tổng hợp giọng. Audio của các câu ngắn được cache trong `%TEMP%\noidle-tts` để đọc lại nhanh; xoá thư mục đó là sạch.
+- Groq API key lưu trong Settings (`noIdle.groqApiKey`) để bạn xem, đổi và đồng bộ được như các setting khác; thêm vào `settingsSync.ignoredSettings` nếu không muốn đồng bộ. Bản cũ lưu ở SecretStorage vẫn được đọc.
+- Chữ bạn nói (thô và sau sửa) được ghi vào kênh Output **NoIdle** và file log trong thư mục global storage của extension để bạn kiểm tra khi nhận dạng sai; nội dung hook đọc ghi ở `%TEMP%\noidle-tts\hook.log`. Log nằm trên máy bạn, không tự xoá; xoá file là xong.
+
+Các setting của NoIdle khai báo scope `application` (đường dẫn ffmpeg và micro là `machine`), nên VS Code không cho đặt riêng theo workspace; hook đọc một file cấu hình chung cho mọi cửa sổ.
+
+Mic dùng chung giữa các cửa sổ VS Code, giữ bằng một khoá tạo kiểu độc quyền nên hai cửa sổ xin cùng lúc chỉ một cửa sổ được. Một cửa sổ đang nghe (F6, hands-free, hay đang chờ approve) thì cửa sổ khác không tự mở mic hands-free hay hỏi approve bằng giọng; bấm F6 tay ở cửa sổ khác thì cửa sổ đang nghe (kể cả đang nghe approve) được bảo tắt mic, F6 chờ nó trả khoá tối đa 2,5 giây rồi mới mở; nó không trả thì báo "cửa sổ khác đang nghe" và không mở. Trong lúc mic đang mở, loa của mọi phiên không phát; chờ tới khi mic tắt (khoá mic tự hết hạn sau 5 phút), quá thì bỏ lượt đọc đó thay vì phát chen. Ngược lại, bấm F6 lúc loa đang đọc thì lượt đọc đó bị cắt để mic không thu tiếng loa; nghe approve hay chọn đáp án cũng cắt như vậy, vì giữa lúc câu báo đọc xong và lúc extension giữ được mic, một câu của phiên khác có thể vừa bắt đầu phát. Huỷ lượt nghe approve lúc mic còn đang khởi động thì extension đợi khởi động xong, tắt mic, rồi mới trả khoá cho cửa sổ khác. Mỗi phiên nói chốt terminal từ lúc mở mic, kể cả khi bấm "Gửi lại" sau lỗi mạng: bạn đổi sang terminal khác giữa chừng thì chữ và Enter vẫn vào terminal ban đầu. Một cửa sổ có nhiều terminal thì hands-free vẫn gõ vào terminal đang chạy phiên Claude vừa đọc xong (so pid shell với cây tiến trình của Claude); Claude chạy ở terminal ngoài VS Code thì không có terminal nào khớp và hands-free bỏ qua.

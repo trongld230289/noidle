@@ -17,21 +17,26 @@ export interface WindowEntry {
 }
 
 export type SignalEvent = 'listen' | 'submitted' | 'ask';
+export type SignalSource = 'claude' | 'copilot';
 export interface Signal {
   event: SignalEvent;
   session: string;
   cwd: string;
   /** ask: chờ người dùng nói tối đa bao nhiêu giây. */
   timeoutSec?: number;
+  /** listen: agent nào vừa đọc xong, để extension chọn đích chèn (terminal cho Claude Code, ô chat cho Copilot). */
+  source?: SignalSource;
+  /** listen/ask: pid của Claude Code rồi cha, ông... để extension tìm terminal có shell pid trong chuỗi này. */
+  ancestors?: number[];
 }
 
 /** Trả lời của server cho ask; các tín hiệu khác không có trả lời. */
 export type SignalHandler = (s: Signal) => void | string | Promise<void | string>;
 
-export const WINDOWS_DIR = path.join(os.tmpdir(), 'vi-voice-tts', 'windows');
+export const WINDOWS_DIR = path.join(os.tmpdir(), 'noidle-tts', 'windows');
 
 export function pipeName(pid: number): string {
-  return process.platform === 'win32' ? `\\\\.\\pipe\\vi-voice-${pid}` : path.join(os.tmpdir(), `vi-voice-${pid}.sock`);
+  return process.platform === 'win32' ? `\\\\.\\pipe\\noidle-${pid}` : path.join(os.tmpdir(), `noidle-${pid}.sock`);
 }
 
 function normPath(p: string, caseInsensitive: boolean): string {
@@ -64,9 +69,92 @@ export function parseSignal(line: string): Signal | undefined {
     if ((o.event !== 'listen' && o.event !== 'submitted' && o.event !== 'ask') || typeof o.cwd !== 'string') return undefined;
     const out: Signal = { event: o.event, session: typeof o.session === 'string' ? o.session : '', cwd: o.cwd };
     if (typeof o.timeoutSec === 'number') out.timeoutSec = o.timeoutSec;
+    if (o.source === 'claude' || o.source === 'copilot') out.source = o.source;
+    if (Array.isArray(o.ancestors)) out.ancestors = o.ancestors.filter((n): n is number => typeof n === 'number');
     return out;
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * Khoá mic dùng chung cho mọi cửa sổ VS Code: một file trong thư mục tạm ghi pid đang giữ mic.
+ * Không có nó thì workspace A đang nghe, B đọc xong cũng mở mic, cả hai nhận cùng một câu.
+ * Khoá của tiến trình đã chết hoặc quá MIC_LOCK_MAX_AGE_MS bị coi như không có.
+ */
+export const MIC_LOCK_MAX_AGE_MS = 5 * 60_000;
+const MIC_LOCK = 'mic.lock';
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/** pid đang giữ mic, hoặc undefined nếu không ai giữ (hay khoá đã chết/cũ). */
+export function micHolder(dir = WINDOWS_DIR, alive: (pid: number) => boolean = pidAlive): number | undefined {
+  try {
+    const o = JSON.parse(fs.readFileSync(path.join(dir, MIC_LOCK), 'utf8')) as { pid?: unknown; at?: unknown };
+    const pid = Number(o.pid);
+    const at = Number(o.at);
+    if (!pid || !at || Date.now() - at > MIC_LOCK_MAX_AGE_MS || !alive(pid)) return undefined;
+    return pid;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Xin giữ mic cho pid; false nếu cửa sổ khác còn sống đang giữ. Cùng pid xin lại thì được.
+ * force: người dùng bấm F6 ở cửa sổ này nên vẫn lấy (cửa sổ kia sẽ tự tắt khi hết giờ im lặng).
+ */
+export function acquireMic(pid: number, dir = WINDOWS_DIR, alive: (pid: number) => boolean = pidAlive, force = false): boolean {
+  const file = path.join(dir, MIC_LOCK);
+  const data = JSON.stringify({ pid, at: Date.now() });
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch {
+    return true; // không có thư mục tạm thì thôi khoá, vẫn cho nghe
+  }
+  // Chiếm khoá nguyên tử bằng tạo file kiểu exclusive; hai cửa sổ cùng xin một lúc thì chỉ một cái tạo được.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      fs.writeFileSync(file, data, { encoding: 'utf8', flag: 'wx' });
+      return true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') return true;
+    }
+    const holder = micHolder(dir, alive);
+    if (holder !== undefined && holder !== pid && !force) return false;
+    // Khoá cũ, chết, của chính mình, hoặc bị ép: xoá rồi thử tạo lại.
+    try {
+      fs.unlinkSync(file);
+    } catch {
+      /* ai đó vừa xoá */
+    }
+  }
+  return false;
+}
+
+/** Gửi tín hiệu tới đúng cửa sổ có pid này (theo file đăng ký), ví dụ bảo cửa sổ đang giữ mic tắt mic. */
+export async function signalPid(pid: number, signal: Signal, dir = WINDOWS_DIR): Promise<boolean> {
+  const entry = readRegistry(dir).find((e) => e.pid === pid);
+  if (!entry) return false;
+  return sendSignal(entry.pipe, signal);
+}
+
+/** Trả mic nếu chính pid này đang giữ. */
+export function releaseMic(pid: number, dir = WINDOWS_DIR): void {
+  const file = path.join(dir, MIC_LOCK);
+  try {
+    const o = JSON.parse(fs.readFileSync(file, 'utf8')) as { pid?: unknown };
+    if (Number(o.pid) !== pid) return;
+    fs.unlinkSync(file);
+  } catch {
+    /* không có khoá */
   }
 }
 

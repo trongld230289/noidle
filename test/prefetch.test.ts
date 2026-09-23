@@ -81,6 +81,21 @@ describe('prefetchInOrder', () => {
     expect(seen).toEqual([2, 3, undefined]);
   });
 
+  it('returns promptly when stopped() turns true while waiting for a slow item', async () => {
+    let stop = false;
+    const never = new Promise<number>(() => undefined);
+    const t0 = Date.now();
+    const run = prefetchInOrder([1, 2], {
+      ahead: 2,
+      produce: async (item) => (item === 2 ? never : item),
+      consume: () => undefined,
+      stopped: () => stop,
+    });
+    setTimeout(() => (stop = true), 50);
+    await run;
+    expect(Date.now() - t0).toBeLessThan(1000);
+  });
+
   it('stops consuming once stopped() reports true', async () => {
     const consumed: number[] = [];
     let stop = false;

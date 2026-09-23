@@ -1,8 +1,8 @@
 {
-  "name": "vi-voice",
-  "displayName": "Vi Voice",
-  "description": "Gõ tiếng Việt bằng giọng nói vào terminal, Copilot Chat và editor",
-  "version": "1.9.0",
+  "name": "noidle",
+  "displayName": "NoIdle",
+  "description": "Hear when Claude Code or Copilot is done, say what's next. Nói tiếng Việt để gõ, nghe agent trả lời, hands-free từ ghế hay giường, không phút nào chờ vô ích.",
+  "version": "2.0.0",
   "publisher": "trongld",
   "license": "MIT",
   "engines": {
@@ -18,92 +18,106 @@
   "contributes": {
     "commands": [
       {
-        "command": "viVoice.toggle",
-        "title": "Vi Voice: Bắt đầu / dừng nghe"
+        "command": "noIdle.toggle",
+        "title": "NoIdle: Bắt đầu / dừng nghe"
       },
       {
-        "command": "viVoice.setApiKey",
-        "title": "Vi Voice: Set Groq API Key"
+        "command": "noIdle.setApiKey",
+        "title": "NoIdle: Set Groq API Key"
       },
       {
-        "command": "viVoice.retry",
-        "title": "Vi Voice: Gửi lại audio cuối"
+        "command": "noIdle.retry",
+        "title": "NoIdle: Gửi lại audio cuối"
       },
       {
-        "command": "viVoice.pickMic",
-        "title": "Vi Voice: Chọn micro"
+        "command": "noIdle.pickMic",
+        "title": "NoIdle: Chọn micro"
       },
       {
-        "command": "viVoice.saveLastAudio",
-        "title": "Vi Voice: Lưu audio cuối ra file (debug)"
+        "command": "noIdle.saveLastAudio",
+        "title": "NoIdle: Lưu audio cuối ra file (debug)"
       },
       {
-        "command": "viVoice.toggleMute",
-        "title": "Vi Voice: Tắt/bật tiếng Claude Code"
+        "command": "noIdle.toggleMute",
+        "title": "NoIdle: Tắt/bật tiếng Claude Code"
       },
       {
-        "command": "viVoice.toggleHandsFree",
-        "title": "Vi Voice: Tắt/bật hands-free"
+        "command": "noIdle.toggleHandsFree",
+        "title": "NoIdle: Tắt/bật hands-free"
       },
       {
-        "command": "viVoice.testVoice",
-        "title": "Vi Voice: Đọc thử giọng"
+        "command": "noIdle.testVoice",
+        "title": "NoIdle: Đọc thử giọng"
+      },
+      {
+        "command": "noIdle.skipSpeech",
+        "title": "NoIdle: Bỏ qua đang đọc"
       }
     ],
     "configuration": {
-      "title": "Vi Voice",
+      "title": "NoIdle",
       "properties": {
-        "viVoice.groqApiKey": {
+        "noIdle.groqApiKey": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Groq API key (bắt đầu bằng `gsk_`). Lấy miễn phí tại [console.groq.com/keys](https://console.groq.com/keys). Lưu dạng chữ thường trong settings.json; nếu dùng Settings Sync hãy thêm `viVoice.groqApiKey` vào `settingsSync.ignoredSettings`."
+          "markdownDescription": "Groq API key (bắt đầu bằng `gsk_`). Lấy miễn phí tại [console.groq.com/keys](https://console.groq.com/keys). Lưu dạng chữ thường trong settings.json; nếu dùng Settings Sync hãy thêm `noIdle.groqApiKey` vào `settingsSync.ignoredSettings`.",
+          "scope": "application"
         },
-        "viVoice.voiceResponse": {
+        "noIdle.voiceResponse": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Đọc câu trả lời của **Claude Code** thành tiếng. Bật lên thì extension tự thêm hook vào `~/.claude/settings.json`; Claude được dặn kết thúc mỗi câu trả lời bằng một dòng 🔊 tóm tắt và chỉ dòng đó được đọc. Cần `node` và `ffplay` (đi kèm ffmpeg) trong PATH."
+          "markdownDescription": "Đọc câu trả lời của **Claude Code** và **Copilot Chat** (agent mode, VS Code 1.110+) thành tiếng. Bật lên thì extension tự thêm hook vào `~/.claude/settings.json` và ghi `~/.copilot/hooks/noidle.json`; Claude/Copilot được dặn kết thúc mỗi câu trả lời bằng một dòng 🔊 tóm tắt và chỉ dòng đó được đọc. Cần `node` và `ffplay` (đi kèm ffmpeg) trong PATH.",
+          "scope": "application"
         },
-        "viVoice.voiceMute": {
+        "noIdle.voiceMute": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Tạm tắt tiếng Claude Code mà **không cần restart** phiên: hook vẫn đăng ký nhưng không đọc câu trả lời, không báo, không dặn Claude viết phần 🔊, không mở mic. Bật tắt là có hiệu lực ngay ở lượt sau. Khác với tắt `viVoice.voiceResponse` (gỡ hook, phải mở phiên Claude Code mới). Lệnh nhanh: `Vi Voice: Tắt/bật tiếng Claude Code`."
+          "markdownDescription": "Tạm tắt tiếng Claude Code mà **không cần restart** phiên: hook vẫn đăng ký nhưng không đọc câu trả lời, không báo, không dặn Claude viết phần 🔊, không mở mic. Bật tắt là có hiệu lực ngay ở lượt sau. Khác với tắt `noIdle.voiceResponse` (gỡ hook, phải mở phiên Claude Code mới). Lệnh nhanh: `NoIdle: Tắt/bật tiếng Claude Code`.",
+          "scope": "application"
         },
-        "viVoice.voiceNotify": {
+        "noIdle.voiceNotify": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Khi bật Voice Response: đọc một câu ngắn lúc Claude Code cần approve, có câu hỏi, hoặc đang chờ bạn, kèm tên workspace. Ví dụ: Workspace abc cần approve lệnh Bash. Giúp biết cửa sổ nào đang chờ khi chạy nhiều workspace."
+          "markdownDescription": "Khi bật Voice Response: đọc một câu ngắn lúc Claude Code cần approve, có câu hỏi, hoặc đang chờ bạn, kèm tên workspace. Ví dụ: Workspace abc cần approve lệnh Bash. Giúp biết cửa sổ nào đang chờ khi chạy nhiều workspace.",
+          "scope": "application"
         },
-        "viVoice.voiceApprove": {
+        "noIdle.voiceApprove": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Approve bằng giọng nói. Khi Claude Code xin quyền, hook đọc thông báo rồi mở mic nghe: nói **approve**, **đồng ý**, **ok** để cho phép; **từ chối**, **không**, **dừng** để chặn. Im lặng hoặc không rõ thì hộp thoại hiện như thường. Lệnh nguy hiểm (xoá file, git push, drop table, sudo...) không bao giờ được duyệt bằng giọng. Ai ở gần mic cũng approve được, chỉ bật khi thật sự cần."
+          "markdownDescription": "Approve bằng giọng nói. Khi Claude Code xin quyền, hook đọc thông báo rồi mở mic nghe: nói **approve**, **đồng ý**, **ok** để cho phép; **từ chối**, **không**, **dừng** để chặn. Im lặng, câu hỏi, câu có điều kiện hay không rõ thì hộp thoại hiện như thường. Chỉ tool và lệnh trong danh sách trắng (đọc file, sửa file thường, npm test, git status/diff/commit...) mới duyệt được bằng giọng; tool lạ, lệnh chưa phân loại và lệnh nguy hiểm (xoá file, git push, drop table, sudo...) luôn phải bấm tay. Ai ở gần mic cũng approve được, chỉ bật khi thật sự cần.",
+          "scope": "application"
         },
-        "viVoice.voiceApproveTimeoutSec": {
+        "noIdle.voiceApproveTimeoutSec": {
           "type": "number",
           "default": 15,
-          "description": "Approve bằng giọng: chờ bạn nói tối đa bao nhiêu giây."
+          "description": "Approve bằng giọng: chờ bạn nói tối đa bao nhiêu giây.",
+          "scope": "application"
         },
-        "viVoice.handsFree": {
+        "noIdle.handsFree": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Vòng lặp nói chuyện với Claude Code. Bật tắt là có hiệu lực ngay, không cần restart; tắt thì Claude đọc xong là thôi, không mở mic, không chờ. Lệnh nhanh: `Vi Voice: Tắt/bật hands-free`. Khi bật, Claude đọc xong câu trả lời thì extension bíp và mở mic ngay trong cửa sổ này: bạn nói yêu cầu tiếp theo, chữ hiện trong terminal, ngắt hơi khoảng 2,5 giây là tự gửi. Nói **gửi** ở cuối câu để gửi ngay, **huỷ** để tắt mic không gửi. Im lặng hết giờ hoặc bấm F6 thì mic tắt. Claude hỏi chọn đáp án thì đọc các lựa chọn và nghe bạn chọn bằng số hoặc tên."
+          "markdownDescription": "Vòng lặp nói chuyện với Claude Code. Bật tắt là có hiệu lực ngay, không cần restart; tắt thì Claude đọc xong là thôi, không mở mic, không chờ. Lệnh nhanh: `NoIdle: Tắt/bật hands-free`. Khi bật, Claude đọc xong câu trả lời thì extension bíp và mở mic ngay trong cửa sổ này: bạn nói yêu cầu tiếp theo, chữ hiện trong terminal, ngắt hơi khoảng 2,5 giây là tự gửi. Nói **gửi** ở cuối câu để gửi ngay, **huỷ** để tắt mic không gửi. Im lặng hết giờ hoặc bấm F6 thì mic tắt. Claude hỏi chọn đáp án thì đọc các lựa chọn và nghe bạn chọn bằng số hoặc tên.",
+          "scope": "application"
         },
-        "viVoice.handsFreeTimeoutSec": {
+        "noIdle.handsFreeTimeoutSec": {
           "type": "number",
           "default": 20,
-          "description": "Hands-free: mic mở mà im lặng bao nhiêu giây thì tự tắt."
+          "description": "Hands-free: mic mở mà im lặng bao nhiêu giây thì tự tắt.",
+          "scope": "application"
         },
-        "viVoice.handsFreeAutoSend": {
+        "noIdle.handsFreeAutoSend": {
           "type": "boolean",
           "default": true,
-          "description": "Hands-free: nói xong, ngắt hơi đủ lâu thì tự bấm Enter (cần ít nhất ba từ). Tắt thì chỉ nói \"gửi\" mới gửi."
+          "description": "Hands-free: nói xong, ngắt hơi đủ lâu thì tự bấm Enter (cần ít nhất ba từ). Tắt thì chỉ nói \"gửi\" mới gửi.",
+          "scope": "application"
         },
-        "viVoice.handsFreeSendDelaySec": {
+        "noIdle.handsFreeSendDelaySec": {
           "type": "number",
           "default": 2.5,
-          "description": "Hands-free: im lặng bao nhiêu giây sau câu cuối thì tự gửi."
+          "description": "Hands-free: im lặng bao nhiêu giây sau câu cuối thì tự gửi.",
+          "scope": "application"
         },
-        "viVoice.voice": {
+        "noIdle.voice": {
           "type": "string",
           "default": "vi-VN-HoaiMyNeural",
           "enum": [
@@ -112,7 +126,31 @@
             "en-US-AvaMultilingualNeural",
             "en-US-EmmaMultilingualNeural",
             "en-US-AndrewMultilingualNeural",
-            "en-US-BrianMultilingualNeural"
+            "en-US-BrianMultilingualNeural",
+            "en-AU-WilliamMultilingualNeural",
+            "en-US-ChristopherNeural",
+            "en-US-AriaNeural",
+            "en-US-JennyNeural",
+            "en-US-GuyNeural",
+            "en-GB-SoniaNeural",
+            "en-GB-RyanNeural",
+            "en-AU-NatashaNeural"
+          ],
+          "enumItemLabels": [
+            "Hoài My - VN (nữ)",
+            "Nam Minh - VN (nam)",
+            "Ava - Multilingual (nữ)",
+            "Emma - Multilingual (nữ)",
+            "Andrew - Multilingual (nam)",
+            "Brian - Multilingual (nam)",
+            "William - Multilingual AU (nam)",
+            "Christopher - English US (nam)",
+            "Aria - English US (nữ)",
+            "Jenny - English US (nữ)",
+            "Guy - English US (nam)",
+            "Sonia - English UK (nữ)",
+            "Ryan - English UK (nam)",
+            "Natasha - English AU (nữ)"
           ],
           "enumDescriptions": [
             "Giọng nữ tiếng Việt chuẩn nhất, nhưng đọc từ tiếng Anh theo âm Việt.",
@@ -120,73 +158,228 @@
             "Nữ, đa ngôn ngữ: tự chuyển giữa tiếng Việt và tiếng Anh trong câu, tiếng Việt hơi lơ lớ.",
             "Nữ, đa ngôn ngữ, giọng trầm hơn Ava.",
             "Nam, đa ngôn ngữ: tự chuyển giữa tiếng Việt và tiếng Anh trong câu.",
-            "Nam, đa ngôn ngữ, giọng Anh Anh."
+            "Nam, đa ngôn ngữ, giọng Anh Anh.",
+            "Nam, đa ngôn ngữ, giọng Anh Úc.",
+            "Nam Mỹ, trầm, chỉ tiếng Anh.",
+            "Nữ Mỹ, chỉ tiếng Anh, rõ ràng kiểu bản tin.",
+            "Nữ Mỹ, chỉ tiếng Anh, giọng trợ lý quen thuộc.",
+            "Nam Mỹ, chỉ tiếng Anh.",
+            "Nữ Anh Anh, chỉ tiếng Anh.",
+            "Nam Anh Anh, chỉ tiếng Anh.",
+            "Nữ Úc, chỉ tiếng Anh."
           ],
-          "description": "Giọng đọc (Microsoft Edge TTS, miễn phí, cần mạng). Giọng vi-VN đọc tiếng Việt chuẩn nhất; giọng Multilingual đọc trộn Việt Anh tự nhiên hơn."
+          "description": "Giọng đọc (Microsoft Edge TTS, miễn phí, cần mạng). Giọng vi-VN đọc tiếng Việt chuẩn nhất; giọng Multilingual đọc trộn Việt Anh tự nhiên hơn; giọng chỉ tiếng Anh dùng khi language là en. Khi đọc tiếng Anh mà giọng đang là vi-VN thì tự dùng Ava.",
+          "scope": "application"
         },
-        "viVoice.voiceRate": {
+        "noIdle.voiceRate": {
           "type": "string",
           "default": "+0%",
-          "description": "Tốc độ đọc, ví dụ +20% cho nhanh hơn, -10% cho chậm hơn."
+          "description": "Tốc độ đọc, ví dụ +20% cho nhanh hơn, -10% cho chậm hơn.",
+          "scope": "application"
         },
-        "viVoice.ffmpegPath": {
+        "noIdle.ffmpegPath": {
           "type": "string",
           "default": "ffmpeg",
-          "description": "Đường dẫn ffmpeg. Mặc định lấy từ PATH."
+          "description": "Đường dẫn ffmpeg. Mặc định lấy từ PATH.",
+          "scope": "machine"
         },
-        "viVoice.typingDelayMs": {
+        "noIdle.typingDelayMs": {
           "type": "number",
           "default": 12,
-          "description": "Hiệu ứng gõ từng ký tự: nghỉ bao nhiêu ms giữa các ký tự (0 = chèn nguyên cụm)."
+          "description": "Hiệu ứng gõ từng ký tự: nghỉ bao nhiêu ms giữa các ký tự (0 = chèn nguyên cụm).",
+          "scope": "application"
         },
-        "viVoice.language": {
+        "noIdle.language": {
           "type": "string",
+          "enum": [
+            "vi",
+            "en",
+            "auto",
+            ""
+          ],
+          "enumDescriptions": [
+            "Tiếng Việt: Whisper nghe tiếng Việt, LLM sửa dấu thanh, Claude viết phần 🔊 bằng tiếng Việt, hook nói tiếng Việt.",
+            "English: Whisper listens for English, the LLM cleans up English, Claude writes the 🔊 part in English, the hook speaks English, and a vi-VN voice is swapped for a multilingual one.",
+            "Tự động: hook nhìn prompt bạn vừa gửi (có dấu tiếng Việt hay không) để chọn ngôn ngữ cho phần 🔊, câu báo và giọng, nhớ theo từng phiên; mic để Whisper tự nhận diện (nói tiếng Việt trộn thuật ngữ tiếng Anh có thể bị đoán nhầm sang tiếng Anh). / Auto: the hook picks the language from each prompt you send and remembers it per session; the mic lets Whisper auto-detect.",
+            "Whisper tự nhận diện ngôn ngữ; mọi thứ khác như tiếng Việt."
+          ],
           "default": "vi",
-          "description": "Mã ngôn ngữ báo cho Whisper. Mặc định vi. Để trống thì Whisper tự nhận diện, có thể nghe từ tiếng Anh tốt hơn nhưng đôi khi dịch cả câu sang tiếng Anh."
+          "markdownDescription": "Ngôn ngữ làm việc. `vi` (mặc định) hoặc `en` chi phối cả Whisper, LLM sửa câu, hướng dẫn 🔊 cho Claude/Copilot, câu hook nói ra và bảng phiên âm; `auto` đoán theo prompt mỗi lượt và nhớ theo phiên, đổi ngôn ngữ giữa phiên là Claude đổi theo ngay lượt đó. Đổi là có hiệu lực ngay ở lượt sau. Để trống thì Whisper tự nhận diện, còn lại như `vi`. / Working language: `en` switches Whisper, the LLM cleanup, the 🔊 instructions for Claude/Copilot and every spoken hook phrase to English; `auto` follows the language of each prompt.",
+          "scope": "application"
         },
-        "viVoice.glossary": {
+        "noIdle.glossary": {
           "type": "array",
           "items": {
             "type": "string"
           },
           "default": [],
-          "description": "Từ tiếng Anh hay nói mà Whisper nghe sai, cùng tên project, tên biến, tên người. Ví dụ [\"impact\", \"order view\", \"claimNext\"]. Được đưa vào prompt Whisper và LLM để viết đúng."
+          "description": "Từ tiếng Anh hay nói mà Whisper nghe sai, cùng tên project, tên biến, tên người. Ví dụ [\"impact\", \"order view\", \"claimNext\"]. Được đưa vào prompt Whisper và LLM để viết đúng.",
+          "scope": "application"
         },
-        "viVoice.pronunciations": {
+        "noIdle.voiceSayWorkspace": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "always",
+            "never"
+          ],
+          "default": "auto",
+          "enumDescriptions": [
+            "Chỉ khi có hơn một cửa sổ VS Code đang mở.",
+            "Luôn nói tên workspace.",
+            "Không bao giờ."
+          ],
+          "description": "Mở đầu phần đọc câu trả lời của Claude Code bằng \"Workspace X:\" để biết cửa sổ nào vừa xong khi chạy nhiều workspace. Câu báo approve và chọn đáp án luôn có tên workspace.",
+          "scope": "application"
+        },
+        "noIdle.pronunciations": {
           "type": "object",
           "additionalProperties": {
             "type": "string"
           },
           "default": {},
-          "markdownDescription": "Cách đọc thuật ngữ khi Claude Code trả lời bằng giọng nói. Giọng vi-VN đọc chữ viết tắt và đuôi file tiếng Anh sai (`.md` thành \"mờ đờ\"), nên hook thay sẵn bằng âm tiếng Việt trước khi đọc: `.md` → \"chấm em đi\", `API` → \"ây pi ai\", `JSON` → \"chây sơn\"... Bảng này thêm hoặc ghi đè bảng mặc định. Khoá bắt đầu bằng dấu chấm là đuôi file, khoá khác là nguyên từ, không phân biệt hoa thường. Ví dụ `{\"Claude\": \"cờ lốt\", \"shipngo\": \"síp gô\"}`. Đổi là có hiệu lực ngay ở lượt sau."
+          "markdownDescription": "Cách đọc thuật ngữ khi Claude Code trả lời bằng giọng nói. Giọng vi-VN đọc chữ viết tắt và đuôi file tiếng Anh sai (`.md` thành \"mờ đờ\"), nên hook thay sẵn bằng âm tiếng Việt trước khi đọc: `.md` → \"chấm em đi\", `API` → \"ây pi ai\", `JSON` → \"chây sơn\"... Bảng này thêm hoặc ghi đè bảng mặc định. Khoá bắt đầu bằng dấu chấm là đuôi file, khoá khác là nguyên từ, không phân biệt hoa thường. Ví dụ `{\"Claude\": \"cờ lốt\", \"shipngo\": \"síp gô\"}`. Đổi là có hiệu lực ngay ở lượt sau.",
+          "scope": "application"
+        },
+        "noIdle.refine": {
+          "type": "boolean",
+          "default": true,
+          "description": "Sau khi nhận dạng, gửi câu qua LLM trên Groq để sửa chính tả, dấu thanh và dấu câu. Tắt nếu muốn chữ ra nhanh hơn.",
+          "scope": "application"
+        },
+        "noIdle.refineModel": {
+          "type": "string",
+          "default": "openai/gpt-oss-120b",
+          "description": "Model Groq dùng để sửa câu. openai/gpt-oss-20b nhanh hơn nhưng kém chính xác hơn. Groq đã gỡ llama-3.3-70b-versatile và llama-3.1-8b-instant khỏi gói miễn phí (16/8/2026); model không tồn tại thì extension cảnh báo và dùng chữ thô.",
+          "scope": "application"
+        },
+        "noIdle.micDevice": {
+          "type": "string",
+          "default": "",
+          "description": "Tên thiết bị mic (dshow). Bỏ trống để tự chọn thiết bị đầu tiên. Xem danh sách bằng lệnh 'NoIdle: Chọn micro'.",
+          "scope": "machine"
+        },
+        "viVoice.groqApiKey": {
+          "type": "string",
+          "scope": "application",
+          "deprecationMessage": "Đã đổi thành noIdle.groqApiKey (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+        },
+        "viVoice.voiceResponse": {
+          "type": "boolean",
+          "scope": "application",
+          "deprecationMessage": "Đã đổi thành noIdle.voiceResponse (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+        },
+        "viVoice.voiceMute": {
+          "type": "boolean",
+          "scope": "application",
+          "deprecationMessage": "Đã đổi thành noIdle.voiceMute (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+        },
+        "viVoice.voiceNotify": {
+          "type": "boolean",
+          "scope": "application",
+          "deprecationMessage": "Đã đổi thành noIdle.voiceNotify (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+        },
+        "viVoice.voiceApprove": {
+          "type": "boolean",
+          "scope": "application",
+          "deprecationMessage": "Đã đổi thành noIdle.voiceApprove (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+        },
+        "viVoice.voiceApproveTimeoutSec": {
+          "type": "number",
+          "scope": "application",
+          "deprecationMessage": "Đã đổi thành noIdle.voiceApproveTimeoutSec (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+        },
+        "viVoice.handsFree": {
+          "type": "boolean",
+          "scope": "application",
+          "deprecationMessage": "Đã đổi thành noIdle.handsFree (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+        },
+        "viVoice.handsFreeTimeoutSec": {
+          "type": "number",
+          "scope": "application",
+          "deprecationMessage": "Đã đổi thành noIdle.handsFreeTimeoutSec (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+        },
+        "viVoice.handsFreeAutoSend": {
+          "type": "boolean",
+          "scope": "application",
+          "deprecationMessage": "Đã đổi thành noIdle.handsFreeAutoSend (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+        },
+        "viVoice.handsFreeSendDelaySec": {
+          "type": "number",
+          "scope": "application",
+          "deprecationMessage": "Đã đổi thành noIdle.handsFreeSendDelaySec (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+        },
+        "viVoice.voice": {
+          "type": "string",
+          "scope": "application",
+          "deprecationMessage": "Đã đổi thành noIdle.voice (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+        },
+        "viVoice.voiceRate": {
+          "type": "string",
+          "scope": "application",
+          "deprecationMessage": "Đã đổi thành noIdle.voiceRate (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+        },
+        "viVoice.ffmpegPath": {
+          "type": "string",
+          "scope": "machine",
+          "deprecationMessage": "Đã đổi thành noIdle.ffmpegPath (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+        },
+        "viVoice.typingDelayMs": {
+          "type": "number",
+          "scope": "application",
+          "deprecationMessage": "Đã đổi thành noIdle.typingDelayMs (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+        },
+        "viVoice.language": {
+          "type": "string",
+          "scope": "application",
+          "deprecationMessage": "Đã đổi thành noIdle.language (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+        },
+        "viVoice.glossary": {
+          "type": "array",
+          "scope": "application",
+          "deprecationMessage": "Đã đổi thành noIdle.glossary (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+        },
+        "viVoice.voiceSayWorkspace": {
+          "type": "string",
+          "scope": "application",
+          "deprecationMessage": "Đã đổi thành noIdle.voiceSayWorkspace (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+        },
+        "viVoice.pronunciations": {
+          "type": "object",
+          "scope": "application",
+          "deprecationMessage": "Đã đổi thành noIdle.pronunciations (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
         },
         "viVoice.refine": {
           "type": "boolean",
-          "default": true,
-          "description": "Sau khi nhận dạng, gửi câu qua LLM trên Groq để sửa chính tả, dấu thanh và dấu câu. Tắt nếu muốn chữ ra nhanh hơn."
+          "scope": "application",
+          "deprecationMessage": "Đã đổi thành noIdle.refine (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
         },
         "viVoice.refineModel": {
           "type": "string",
-          "default": "openai/gpt-oss-120b",
-          "description": "Model Groq dùng để sửa câu. openai/gpt-oss-20b nhanh hơn nhưng kém chính xác hơn. Groq đã gỡ llama-3.3-70b-versatile và llama-3.1-8b-instant khỏi gói miễn phí (16/8/2026); model không tồn tại thì extension cảnh báo và dùng chữ thô."
+          "scope": "application",
+          "deprecationMessage": "Đã đổi thành noIdle.refineModel (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
         },
         "viVoice.micDevice": {
           "type": "string",
-          "default": "",
-          "description": "Tên thiết bị mic (dshow). Bỏ trống để tự chọn thiết bị đầu tiên. Xem danh sách bằng lệnh 'Vi Voice: Chọn micro'."
+          "scope": "machine",
+          "deprecationMessage": "Đã đổi thành noIdle.micDevice (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
         }
       }
     },
     "keybindings": [
       {
-        "command": "viVoice.toggle",
+        "command": "noIdle.skipSpeech",
+        "key": "f7"
+      },
+      {
+        "command": "noIdle.toggle",
         "key": "f6",
         "args": {
           "target": "clipboard"
         }
       },
       {
-        "command": "viVoice.toggle",
+        "command": "noIdle.toggle",
         "key": "f6",
         "when": "editorTextFocus",
         "args": {
@@ -194,7 +387,7 @@
         }
       },
       {
-        "command": "viVoice.toggle",
+        "command": "noIdle.toggle",
         "key": "f6",
         "when": "inChatInput",
         "args": {
@@ -202,7 +395,7 @@
         }
       },
       {
-        "command": "viVoice.toggle",
+        "command": "noIdle.toggle",
         "key": "f6",
         "when": "terminalFocus",
         "args": {

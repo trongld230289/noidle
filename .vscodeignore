@@ -11,3 +11,6 @@ vitest.config.ts
 scripts/**
 hotkey/**
 .gitignore
+hub/**
+.playwright-mcp/**
+*.png

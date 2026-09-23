@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { transcribe, postProcess, buildPrompt, stripHallucinations, stripContextEcho } from '../src/transcriber';
+import { transcribe, postProcess, buildPrompt, stripHallucinations, stripContextEcho, repeatsTail } from '../src/transcriber';
 
 function fakeFetch(status: number, body: unknown) {
   return vi.fn(async () =>
@@ -23,15 +23,41 @@ describe('stripHallucinations', () => {
     expect(stripHallucinations('Cảm ơn các bạn đã theo dõi và hẹn gặp lại')).toBe('');
     expect(stripHallucinations('Hẹn gặp lại. Hẹn gặp lại. Xin cảm ơn.')).toBe('');
   });
+  it('drops the English fillers Whisper invents on keyboard noise or silence (real hands-free log 2026-09-23)', () => {
+    expect(stripHallucinations('Thank you.')).toBe('');
+    expect(stripHallucinations('Thank you. Thank you. Thank you.')).toBe('');
+    expect(stripHallucinations('Thanks for watching!')).toBe('');
+    expect(stripHallucinations('Thank you for watching. Bye.')).toBe('');
+    expect(stripHallucinations('Please subscribe to my channel')).toBe('');
+    expect(stripHallucinations('you')).toBe('');
+    expect(stripHallucinations('.')).toBe('');
+  });
+  it('keeps English sentences that merely contain thanks', () => {
+    expect(stripHallucinations('thank you, now refactor this function')).toBe('thank you, now refactor this function');
+    expect(stripHallucinations('add a thank you page after checkout')).toBe('add a thank you page after checkout');
+  });
   it('keeps real sentences and removes consecutive duplicates', () => {
     expect(stripHallucinations('sửa hàm claimNext. sửa hàm claimNext. rồi chạy test')).toBe('sửa hàm claimNext. rồi chạy test');
     expect(stripHallucinations('cảm ơn bạn, giờ refactor hàm này')).toBe('cảm ơn bạn, giờ refactor hàm này');
   });
 });
 
+describe('repeatsTail', () => {
+  it('true when a short new chunk just repeats the end of what was already typed', () => {
+    expect(repeatsTail('Thank you', 'Thank you')).toBe(true);
+    expect(repeatsTail('sửa hàm này. Thank you', ' thank you.')).toBe(true);
+    expect(repeatsTail('ok ok', 'OK')).toBe(true);
+  });
+  it('false for new content, for the first chunk, and for long chunks even if repeated', () => {
+    expect(repeatsTail('', 'Thank you')).toBe(false);
+    expect(repeatsTail('Thank you', 'now run the tests')).toBe(false);
+    expect(repeatsTail('chạy test rồi build lại toàn bộ project', 'chạy test rồi build lại toàn bộ project')).toBe(false);
+  });
+});
+
 describe('buildPrompt', () => {
   it('appends the user glossary to the base prompt', () => {
-    expect(buildPrompt(['claimNext', ' Vi Voice ', ''])).toBe(`${buildPrompt()} Project này có claimNext, Vi Voice.`);
+    expect(buildPrompt(['claimNext', ' NoIdle ', ''])).toBe(`${buildPrompt()} Project này có claimNext, NoIdle.`);
     expect(buildPrompt([])).toBe(buildPrompt());
   });
 });

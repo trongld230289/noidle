@@ -36,6 +36,41 @@ describe('inject', () => {
     expect(api.executeCommand).toHaveBeenCalledWith('type', { text: 'b' });
   });
 
+  it('editor pinned at mic start: inserts through that editor, not the focused one', async () => {
+    const api = fakeApi();
+    const insert = vi.fn(async () => true);
+    expect(await inject('editor', 'xin chào', api, { editor: { insert } })).toBe('editor');
+    expect(insert).toHaveBeenCalledWith('xin chào');
+    expect(api.executeCommand).not.toHaveBeenCalledWith('type', expect.anything());
+  });
+
+  it('editor pinned: typing effect goes piece by piece through the editor', async () => {
+    const api = fakeApi();
+    const seen: string[] = [];
+    const insert = async (t: string) => (seen.push(t), true);
+    await inject('editor', 'ab', api, { editor: { insert }, typeDelayMs: 0 });
+    expect(seen).toEqual(['a', 'b']);
+  });
+
+  it('editor pinned: edit rejected (editor closed) falls back to paste', async () => {
+    const api = fakeApi();
+    expect(await inject('editor', 'c', api, { editor: { insert: async () => false } })).toBe('paste');
+    expect(api.writeClipboard).toHaveBeenNthCalledWith(1, 'c');
+  });
+
+  it('chat: sets the whole transcript into the chat input without submitting, independent of focus', async () => {
+    const api = fakeApi();
+    expect(await inject('chat', ' tiếp', api, { chatText: 'câu đầu tiếp' })).toBe('chat');
+    expect(api.executeCommand).toHaveBeenCalledWith('workbench.action.chat.open', { query: 'câu đầu tiếp', isPartialQuery: true });
+    expect(api.executeCommand).not.toHaveBeenCalledWith('type', expect.anything());
+  });
+
+  it('chat: open command failure falls back to paste', async () => {
+    const api = fakeApi({ executeCommand: vi.fn(async () => { throw new Error('no chat'); }) });
+    expect(await inject('chat', 'd', api, { chatText: 'd' })).toBe('paste');
+    expect(api.writeClipboard).toHaveBeenNthCalledWith(1, 'd');
+  });
+
   it('type command failure falls back to paste', async () => {
     const api = fakeApi({ executeCommand: vi.fn(async () => { throw new Error('no editor'); }) });
     expect(await inject('editor', 'c', api)).toBe('paste');

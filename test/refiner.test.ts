@@ -77,9 +77,9 @@ describe('refine', () => {
 
   it('passes the user glossary to the model', async () => {
     const f = fakeFetch(200, 'ok');
-    await refine('ok', { apiKey: 'k', target: 'chat', glossary: ['claimNext', 'Vi Voice'], fetchFn: f as unknown as typeof fetch });
+    await refine('ok', { apiKey: 'k', target: 'chat', glossary: ['claimNext', 'NoIdle'], fetchFn: f as unknown as typeof fetch });
     const body = JSON.parse((f.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
-    expect(body.messages.at(-1).content).toContain('claimNext, Vi Voice');
+    expect(body.messages.at(-1).content).toContain('claimNext, NoIdle');
   });
 
   it('honours a custom model', async () => {

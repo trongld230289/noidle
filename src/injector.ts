@@ -14,6 +14,21 @@ export interface InjectorApi {
 export interface InjectOptions {
   /** Có giá trị thì gõ từng ký tự, nghỉ chừng này ms giữa các ký tự (hiệu ứng typing). */
   typeDelayMs?: number;
+  /**
+   * Terminal đã chốt từ lúc bắt đầu phiên nói. Không có thì lấy terminal đang active lúc chèn,
+   * nhưng như vậy người dùng đổi terminal giữa chừng là cụm sau chạy sang cửa sổ khác.
+   */
+  terminal?: { sendText(text: string, addNewLine?: boolean): void };
+  /**
+   * Editor đã chốt từ lúc mở mic: chèn qua editor.edit tại con trỏ của nó, không qua lệnh `type` (đi vào chỗ đang focus).
+   * insert trả false (editor đã đóng, edit bị từ chối) thì rơi xuống paste.
+   */
+  editor?: { insert(text: string): Thenable<boolean> };
+  /**
+   * Ô chat Copilot: toàn bộ transcript tính đến cụm này. Đặt vào ô chat bằng workbench.action.chat.open với
+   * isPartialQuery (không gửi), không phụ thuộc ô chat có đang focus hay không. Gửi thì gọi cùng lệnh không có isPartialQuery.
+   */
+  chatText?: string;
 }
 
 /**
@@ -28,10 +43,21 @@ export async function inject(target: Target, text: string, api: InjectorApi, opt
   const delay = opts.typeDelayMs ?? 0;
   try {
     if (target === 'terminal') {
-      const terminal = api.activeTerminal();
+      const terminal = opts.terminal ?? api.activeTerminal();
       if (!terminal) throw new Error('Không có terminal đang mở');
       await typeWith((p) => terminal.sendText(p, false), pieces, delay);
       return 'terminal';
+    }
+    if (target === 'editor' && opts.editor) {
+      const editor = opts.editor;
+      await typeWith(async (p) => {
+        if (!(await editor.insert(p))) throw new Error('Editor không nhận edit');
+      }, pieces, delay);
+      return 'editor';
+    }
+    if (target === 'chat' && opts.chatText !== undefined) {
+      await api.executeCommand('workbench.action.chat.open', { query: opts.chatText, isPartialQuery: true });
+      return 'chat';
     }
     if (target === 'chat' || target === 'editor') {
       await typeWith((p) => api.executeCommand('type', { text: p }), pieces, delay);

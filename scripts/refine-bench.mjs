@@ -1,12 +1,12 @@
 // So chất lượng và số token của bước sửa câu trên các cụm giống chữ thô Whisper.
-// Chạy: node scripts/refine-bench.mjs [label]   (cần viVoice.groqApiKey trong settings.json hoặc GROQ_KEY)
+// Chạy: node scripts/refine-bench.mjs [label]   (cần noIdle.groqApiKey trong settings.json hoặc GROQ_KEY)
 import fs from 'fs';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const { refine } = require('../src/refiner.ts');
 const label = process.argv[2] || 'run';
 const settings = fs.readFileSync('C:/Users/Admin/AppData/Roaming/Code/User/settings.json', 'utf8');
-const apiKey = process.env.GROQ_KEY || (settings.match(/"viVoice.groqApiKey":\s*"([^"]+)"/) || [])[1];
+const apiKey = process.env.GROQ_KEY || (settings.match(/"noIdle.groqApiKey":\s*"([^"]+)"/) || [])[1];
 const CASES = [
   ['terminal', '', 'sửa lại hàm claim next cho nó trả về null khi không có order'],
   ['chat', '', 'tạo một cái bất tính ở góc phải màn hình để mở popup'],

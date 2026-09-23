@@ -1,4 +1,5 @@
 import type { Target } from './injector';
+import { langOf } from './lang';
 
 export interface RefineOptions {
   apiKey: string;
@@ -14,6 +15,8 @@ export interface RefineOptions {
   onError?: (message: string) => void;
   /** Đồng hồ, để test điều khiển thời gian tạm dừng sau 429. */
   now?: () => number;
+  /** Ngôn ngữ người dùng nói (setting noIdle.language): chọn prompt sửa câu tiếng Việt hay tiếng Anh. */
+  language?: string;
 }
 
 const CHAT_URL = 'https://api.groq.com/openai/v1/chat/completions';
@@ -24,26 +27,41 @@ const CHAT_URL = 'https://api.groq.com/openai/v1/chat/completions';
 export const DEFAULT_REFINE_MODEL = 'openai/gpt-oss-120b';
 const REASONING_EFFORT = 'low';
 const DROP = '[BỎ]';
+const DROP_EN = '[DROP]';
 const MAX_CONTEXT_CHARS = 300;
 
-const SYSTEM = `Bạn sửa chính tả cho chữ nhận dạng giọng nói tiếng Việt của lập trình viên. Đầu vào là một mẩu câu đang nói, có thể cụt, mẩu sau sẽ đến tiếp.
+const SYSTEM_VI = `Bạn sửa chính tả cho chữ nhận dạng giọng nói tiếng Việt của lập trình viên. Đầu vào là một mẩu câu đang nói, có thể cụt, mẩu sau sẽ đến tiếp.
 Chỉ làm: sửa dấu thanh sai; thêm dấu phẩy hoặc dấu hỏi khi rõ ràng cần; viết hoa đầu câu; viết hoa chữ viết tắt tiếng Anh quen thuộc nếu từ đó không có dấu (ui thành UI, api thành API).
 Không bao giờ thêm dấu chấm ở cuối đoạn, vì mẩu sau sẽ nối tiếp.
 Không: thêm, bỏ, đổi thứ tự hay thay từ, kể cả từ gần nghĩa (nha giữ là nha, không đổi thành nhé); hoàn thiện câu cụt; dịch (tiếng Anh giữ tiếng Anh, tiếng Việt giữ tiếng Việt); đổi từ có dấu thành viết tắt ("bị" không thành "BI"); trả lời, giải thích hay bọc trong ngoặc kép.
 Đoạn hoàn toàn vô nghĩa thì trả về đúng ${DROP}; mẩu ngắn hay cụt vẫn là câu bình thường, trả nguyên.
 Chỉ trả về văn bản đã sửa.`;
 
-const TARGET_HINT: Record<Target, string> = {
+const SYSTEM_EN = `You clean up speech-recognition text spoken in English by a software developer. The input is a fragment of an ongoing sentence, possibly cut off; the next fragment will follow.
+Only do: fix obvious misheard spellings of technical terms; add a comma or question mark where clearly needed; capitalize the first letter of a sentence; capitalize well-known acronyms (ui to UI, api to API); keep code identifiers as spoken (claimNext stays claimNext).
+Never add a period at the end of the fragment, because the next fragment continues it.
+Do not: add, remove, reorder or replace words, even with synonyms; complete a cut-off sentence; translate; answer, explain or wrap the text in quotes.
+If the fragment is complete nonsense return exactly ${DROP_EN}; a short or cut-off fragment is still normal text, return it unchanged.
+Return only the corrected text.`;
+
+const TARGET_HINT_VI: Record<Target, string> = {
   terminal: 'Chữ sẽ gõ vào terminal (lệnh shell hoặc mô tả việc cần làm), giữ nguyên cú pháp lệnh.',
   editor: 'Chữ sẽ chèn vào file mã nguồn hoặc tài liệu.',
   chat: 'Chữ là câu hỏi hoặc yêu cầu gửi cho AI assistant.',
   clipboard: 'Chữ sẽ dán vào ứng dụng khác.',
 };
 
+const TARGET_HINT_EN: Record<Target, string> = {
+  terminal: 'The text goes into a terminal (a shell command or a task description); keep command syntax intact.',
+  editor: 'The text is inserted into a source file or a document.',
+  chat: 'The text is a question or request for an AI assistant.',
+  clipboard: 'The text will be pasted into another application.',
+};
+
 /** Làm sạch câu trả lời của LLM; trả về input nếu câu trả lời trông không đáng tin. */
 export function cleanReply(reply: string, input: string): string {
   let out = reply.trim();
-  if (out === DROP) return '';
+  if (out === DROP || out === DROP_EN) return '';
   if ((out.startsWith('"') && out.endsWith('"')) || (out.startsWith('“') && out.endsWith('”'))) {
     out = out.slice(1, -1).trim();
   }
@@ -123,13 +141,20 @@ export async function refine(text: string, opts: RefineOptions): Promise<string>
   const fetchFn = opts.fetchFn ?? fetch;
   const context = (opts.context ?? '').trim().slice(-MAX_CONTEXT_CHARS);
   const terms = (opts.glossary ?? []).map((t) => t.trim()).filter(Boolean);
-  const user =
-    `${TARGET_HINT[opts.target]}\n` +
-    (terms.length ? `Thuật ngữ người dùng hay nói, giữ đúng chính tả: ${terms.join(', ')}\n` : '') +
-    (context
-      ? `Chữ ngay trước đó, chỉ để nối câu, không đưa vào kết quả (trùng thì là người nói nhắc lại, vẫn sửa bình thường): ${context}\n`
-      : '') +
-    `Đoạn cần sửa:\n${text}`;
+  const en = langOf(opts.language) === 'en';
+  const user = en
+    ? `${TARGET_HINT_EN[opts.target]}\n` +
+      (terms.length ? `Terms the user often says, keep their exact spelling: ${terms.join(', ')}\n` : '') +
+      (context
+        ? `Text spoken just before, only for continuity, do not include it in the result (if it repeats, the speaker said it again, fix it normally): ${context}\n`
+        : '') +
+      `Text to fix:\n${text}`
+    : `${TARGET_HINT_VI[opts.target]}\n` +
+      (terms.length ? `Thuật ngữ người dùng hay nói, giữ đúng chính tả: ${terms.join(', ')}\n` : '') +
+      (context
+        ? `Chữ ngay trước đó, chỉ để nối câu, không đưa vào kết quả (trùng thì là người nói nhắc lại, vẫn sửa bình thường): ${context}\n`
+        : '') +
+      `Đoạn cần sửa:\n${text}`;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 8_000);
@@ -143,7 +168,7 @@ export async function refine(text: string, opts: RefineOptions): Promise<string>
         max_tokens: 512,
         reasoning_effort: REASONING_EFFORT,
         messages: [
-          { role: 'system', content: SYSTEM },
+          { role: 'system', content: en ? SYSTEM_EN : SYSTEM_VI },
           { role: 'user', content: user },
         ],
       }),
@@ -161,7 +186,7 @@ export async function refine(text: string, opts: RefineOptions): Promise<string>
       }
       opts.onError?.(
         res.status === 404
-          ? `model ${model} không tồn tại trên Groq (HTTP 404), đổi viVoice.refineModel; đang dùng chữ thô của Whisper`
+          ? `model ${model} không tồn tại trên Groq (HTTP 404), đổi noIdle.refineModel; đang dùng chữ thô của Whisper`
           : `Groq trả HTTP ${res.status} cho model ${model}, đang dùng chữ thô của Whisper`,
       );
       return text;
