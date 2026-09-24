@@ -112,7 +112,7 @@ Giọng vi-VN đọc chữ viết tắt và đuôi file tiếng Anh sai, kiểu 
 
 Để tiết kiệm token, hướng dẫn viết phần 🔊 chỉ được chèn đầy đủ ở prompt đầu tiên của mỗi phiên Claude Code (khoảng 400 token); các prompt sau chỉ chèn một dòng nhắc ngắn (khoảng 40 token), và cứ 20 prompt thì chèn lại bản đầy đủ một lần phòng khi context bị nén. Hook đếm theo `session_id` bằng file trong `%TEMP%\noidle-tts\sessions`.
 
-Không muốn tốn token cho phần 🔊 thì đặt `noIdle.voiceStyle` là `announce`: hook không dặn Claude gì cả, trả lời xong chỉ đọc "Workspace X xong" (hoặc "Workspace X đang hỏi bạn" khi câu cuối là câu hỏi). Bạn biết cửa sổ nào cần mình mà không nghe nội dung; approve và chọn đáp án bằng giọng vẫn chạy như thường vì vốn là câu cứng.
+Không muốn tốn token cho phần 🔊 thì đặt `noIdle.voiceStyle` là `announce`: hook không dặn Claude gì cả, trả lời xong chỉ đọc "Workspace X xong" (hoặc "Workspace X đang hỏi bạn" khi câu cuối là câu hỏi). Bạn biết cửa sổ nào cần mình mà không nghe nội dung; approve và chọn đáp án bằng giọng vẫn chạy như thường vì vốn là câu cứng. Đổi kiểu giữa phiên cũng được: sang `announce` thì hook nhắc Claude một lần thôi viết phần 🔊 (hướng dẫn cũ còn trong lịch sử), quay lại `recap` thì chèn lại hướng dẫn đầy đủ.
 
 Chạy nhiều workspace cùng lúc thì mỗi phần đọc mở đầu bằng "Workspace X:" để biết cửa sổ nào vừa xong (setting `noIdle.voiceSayWorkspace`, mặc định chỉ bật khi có hơn một cửa sổ VS Code). Đang nghe mà muốn bỏ qua thì bấm **F7** hoặc chạy `NoIdle: Bỏ qua đang đọc`: bản đang đọc bị cắt, bản kế tiếp phát tiếp, hands-free vẫn mở mic như thường.
 

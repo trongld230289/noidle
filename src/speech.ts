@@ -128,6 +128,13 @@ const PROMPT_REMINDER_EN =
   `in English, complete when only heard, no markdown or code. Only separate compound names by meaning in speech; ` +
   `leave uncertain names unchanged. Keep original names in the main answer.`;
 
+/** Chèn một lần khi phiên đang recap đổi sang announce: hướng dẫn cũ còn trong lịch sử nên phải bảo Claude thôi. */
+export function promptStopRecap(lang: Lang = 'vi'): string {
+  return lang === 'en'
+    ? `The ${SPEAK_MARK} section is no longer needed from now on; answer normally without it.`
+    : `Từ giờ không cần viết phần ${SPEAK_MARK} nữa; trả lời như bình thường, không có phần đó.`;
+}
+
 export function promptContext(lang: Lang = 'vi'): string {
   return lang === 'en' ? PROMPT_CONTEXT_EN : PROMPT_CONTEXT_VI;
 }

@@ -25,7 +25,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { spawn } from 'child_process';
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
-import { lastAssistantText, pickSpeech, hasSpeakSection, promptContext, promptReminder, splitSentences, announcement, doneAnnouncement, workspaceName, spoken, HookInput } from './speech';
+import { lastAssistantText, pickSpeech, hasSpeakSection, promptContext, promptReminder, promptStopRecap, splitSentences, announcement, doneAnnouncement, workspaceName, spoken, HookInput } from './speech';
 import { langOf, isAuto, detectLang, effectiveVoice, type Lang } from './lang';
 import { parseApproval, isDangerous, voiceApprovable, parseChoice, permissionRequestOutput } from './decision';
 import { signalWindow, askWindow, readRegistry, micHolder, MIC_LOCK_MAX_AGE_MS, type SignalSource } from './signal';
@@ -264,6 +264,8 @@ interface SessionMark {
   count: number;
   lang?: Lang;
   backgroundTurn?: boolean;
+  /** voiceStyle đã áp cho prompt trước của phiên; thiếu (dấu cũ) coi như recap. Đổi giữa phiên thì chèn câu chuyển. */
+  style?: 'recap' | 'announce';
   /** Chuỗi pid tổ tiên của Claude Code (pid không đổi trong một phiên), để khỏi tra cây tiến trình mỗi lượt. */
   proc?: { pid: number; chain: number[] };
 }
@@ -283,8 +285,9 @@ function readMark(session: string): SessionMark {
   const n = Number(raw);
   if (!Number.isNaN(n)) return { count: n };
   try {
-    const o = JSON.parse(raw) as { count?: unknown; lang?: unknown; backgroundTurn?: unknown; proc?: { pid?: unknown; chain?: unknown } };
+    const o = JSON.parse(raw) as { count?: unknown; lang?: unknown; backgroundTurn?: unknown; style?: unknown; proc?: { pid?: unknown; chain?: unknown } };
     const mark: SessionMark = { count: Number(o.count) || 0, lang: o.lang === 'en' ? 'en' : o.lang === 'vi' ? 'vi' : undefined, backgroundTurn: o.backgroundTurn === true };
+    if (o.style === 'announce' || o.style === 'recap') mark.style = o.style;
     if (o.proc && typeof o.proc.pid === 'number' && Array.isArray(o.proc.chain)) {
       mark.proc = { pid: o.proc.pid, chain: o.proc.chain.filter((n): n is number => typeof n === 'number') };
     }
@@ -312,14 +315,27 @@ function writeMark(session: string, mark: SessionMark): void {
  */
 function promptContextFor(session: string | undefined, cfg: HookConfig, promptText: string): string {
   const auto = isAuto(cfg.language);
-  if (!session) return promptContext(auto ? (detectLang(promptText) ?? 'vi') : langOf(cfg.language));
+  const style = cfg.voiceStyle === 'announce' ? 'announce' : 'recap';
+  if (!session) return style === 'announce' ? '' : promptContext(auto ? (detectLang(promptText) ?? 'vi') : langOf(cfg.language));
   const mark = readMark(session);
   const lang = auto ? (detectLang(promptText) ?? mark.lang ?? 'vi') : langOf(cfg.language);
   const switched = mark.lang !== undefined && mark.lang !== lang;
-  writeMark(session, { count: mark.count + 1, lang, proc: mark.proc });
+  // Dấu cũ (trước khi có voiceStyle) không ghi style: phiên đó đã nhận hướng dẫn recap.
+  const prevStyle = mark.count === 0 ? undefined : mark.style ?? 'recap';
+  writeMark(session, { count: mark.count + 1, lang, style, proc: mark.proc });
   if (auto) log(`prompt: ngôn ngữ ${lang} (${detectLang(promptText) ? 'đoán từ prompt' : 'giữ của phiên'}) ${JSON.stringify(promptText.slice(0, 60))}`);
+  if (style === 'announce') {
+    // Hướng dẫn 🔊 còn trong lịch sử phiên thì Claude vẫn viết phần đó: bảo thôi, một lần.
+    if (prevStyle === 'recap') {
+      log('prompt: voiceStyle recap → announce, bảo Claude thôi viết phần 🔊');
+      return promptStopRecap(lang);
+    }
+    log('prompt: voiceStyle announce, không chèn hướng dẫn');
+    return '';
+  }
   if (switched) log(`prompt: đổi ngôn ngữ ${mark.lang} → ${lang}, chèn lại hướng dẫn đầy đủ`);
-  return mark.count % FULL_CONTEXT_EVERY === 0 || switched ? promptContext(lang) : promptReminder(lang);
+  if (prevStyle === 'announce') log('prompt: voiceStyle announce → recap, chèn lại hướng dẫn đầy đủ');
+  return mark.count % FULL_CONTEXT_EVERY === 0 || switched || prevStyle === 'announce' ? promptContext(lang) : promptReminder(lang);
 }
 
 /** Xoá dấu của các phiên cũ hơn một tuần; chỉ chạy khi gặp phiên mới nên rất thưa. */
@@ -361,13 +377,10 @@ async function modePrompt(): Promise<void> {
   // Mute thì không dặn Claude viết phần 🔊, nhưng vẫn báo submitted để tắt mic nếu đang mở.
   const cfg = loadConfig();
   if (cfg.voiceMute) log('prompt: đang mute, không chèn hướng dẫn');
-  else if (cfg.voiceStyle === 'announce') {
-    // Vẫn cập nhật dấu phiên (số prompt, ngôn ngữ) để speak/notify chọn đúng ngôn ngữ, nhưng không chèn hướng dẫn.
-    promptContextFor(input.session_id, cfg, promptText);
-    log('prompt: voiceStyle announce, không chèn hướng dẫn');
-  } else {
+  else {
+    // announce thường trả rỗng (vẫn cập nhật dấu phiên để speak/notify chọn đúng ngôn ngữ), chỉ có chữ khi vừa đổi kiểu.
     const additionalContext = promptContextFor(input.session_id, cfg, promptText);
-    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext } }));
+    if (additionalContext) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext } }));
   }
   // Người dùng vừa gửi prompt: bảo extension tắt mic hands-free nếu đang mở. Không có cửa sổ thì thôi.
   const cwd = input.cwd || process.cwd();

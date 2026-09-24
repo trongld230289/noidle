@@ -343,3 +343,33 @@ describe('claude-hook voiceStyle announce', () => {
     expect(playedText(readLog().slice(before))).toBe(pronounce(`Workspace ${workspaceName(work)} đang hỏi bạn.`));
   });
 });
+
+describe('claude-hook đổi voiceStyle giữa phiên', () => {
+  const cfgRecap = path.join(work, 'style-recap.json');
+  const cfgAnnounce = path.join(work, 'style-announce.json');
+  beforeAll(() => {
+    fs.writeFileSync(cfgRecap, JSON.stringify({ voiceStyle: 'recap' }));
+    fs.writeFileSync(cfgAnnounce, JSON.stringify({ voiceStyle: 'announce' }));
+  });
+  const ctx = async (cfg: string, session: string) => {
+    const r = await run(['prompt', '--config', cfg], JSON.stringify({ session_id: session, cwd: work, prompt: 'làm tiếp' }));
+    expect(r.code).toBe(0);
+    if (!r.stdout.trim()) return '';
+    return (JSON.parse(r.stdout) as { hookSpecificOutput?: { additionalContext?: string } }).hookSpecificOutput?.additionalContext ?? '';
+  };
+
+  it('recap → announce: chèn một dòng bảo Claude thôi viết phần 🔊, lần sau không chèn gì', async () => {
+    expect(await ctx(cfgRecap, 'sw-1')).toContain('tai nghe');
+    const note = await ctx(cfgAnnounce, 'sw-1');
+    expect(note).toContain('🔊');
+    expect(note).toMatch(/không cần/);
+    expect(note.length).toBeLessThan(200);
+    expect(await ctx(cfgAnnounce, 'sw-1')).toBe('');
+  });
+
+  it('announce → recap: chèn lại hướng dẫn đầy đủ vì dòng nhắc ngắn không đủ', async () => {
+    expect(await ctx(cfgAnnounce, 'sw-2')).toBe('');
+    expect(await ctx(cfgAnnounce, 'sw-2')).toBe('');
+    expect(await ctx(cfgRecap, 'sw-2')).toContain('tai nghe');
+  });
+});
