@@ -64,7 +64,8 @@ async function main() {
   const input = JSON.parse(fs.readFileSync(0, 'utf8'));
   const parsed = ts.parseConfigFileTextToJson(input.settings, fs.readFileSync(input.settings, 'utf8'));
   if (parsed.error) throw new Error('Invalid settings: ' + ts.flattenDiagnosticMessageText(parsed.error.messageText, ' '));
-  const properties = require('./package.json').contributes.configuration.properties;
+  const configuration = require('./package.json').contributes.configuration;
+  const properties = Object.assign({}, ...[].concat(configuration).map((b) => b.properties || {}));
   const setting = name => parsed.config['noIdle.' + name] ?? properties['noIdle.' + name].default;
   const { pronounce } = loadSource('src/pronounce.ts');
   const { isAuto, detectLang, langOf, effectiveVoice } = loadSource('src/lang.ts');

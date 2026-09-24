@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { planMigration } from '../src/migrate';
+import { planMigration, configProperties } from '../src/migrate';
 
 /**
  * Đổi tên 1.x → 2.0: id setting viVoice.* thành noIdle.*. Lần đầu chạy bản mới, giá trị người dùng đã đặt
@@ -26,5 +26,13 @@ describe('planMigration', () => {
     const plan = planMigration(keys, () => undefined, () => undefined);
     expect(plan.set).toEqual([]);
     expect(plan.clear).toEqual([]);
+  });
+});
+
+describe('configProperties', () => {
+  it('đọc được cả dạng một khối và dạng nhiều nhóm có tiêu đề', () => {
+    expect(Object.keys(configProperties({ configuration: { properties: { 'noIdle.a': {} } } }))).toEqual(['noIdle.a']);
+    expect(Object.keys(configProperties({ configuration: [{ title: 'A', properties: { 'noIdle.a': {} } }, { title: 'B', properties: { 'noIdle.b': {} } }] }))).toEqual(['noIdle.a', 'noIdle.b']);
+    expect(configProperties(undefined)).toEqual({});
   });
 });

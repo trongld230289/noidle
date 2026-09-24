@@ -171,6 +171,8 @@ Mở bằng `Ctrl+Shift+P`, gõ `NoIdle`:
 
 Gõ `NoIdle` vào ô tìm kiếm của Settings:
 
+**Mic tự mở khi nào?** Chỉ ba lúc: Claude đọc xong câu trả lời và lúc Claude hỏi chọn đáp án (cả hai do `noIdle.handsFree`), và lúc Claude xin quyền chạy lệnh (`noIdle.voiceApprove`). Tắt hai setting này là mic không bao giờ tự mở, chỉ mở khi bạn bấm F6. Trong Settings, các setting được chia năm nhóm: Đọc câu trả lời, Mic tự mở, Báo cửa sổ đang cần bạn, Giọng đọc, Nói để gõ.
+
 | Setting | Mặc định | Ý nghĩa |
 |---|---|---|
 | `noIdle.groqApiKey` | trống | Groq API key. |

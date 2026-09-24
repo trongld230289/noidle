@@ -15,7 +15,7 @@ import { inject, InjectorApi, Target } from './injector';
 import { startServer, writeRegistry, removeRegistry, pipeName, Signal, acquireMic, releaseMic, micHolder, signalPid, type AttentionReason } from './signal';
 import { audioLevel, pcmToWav } from './wav';
 import { pickTerminal } from './proctree';
-import { planMigration } from './migrate';
+import { planMigration, configProperties } from './migrate';
 import * as fs from 'fs';
 import { execFile, spawn } from 'child_process';
 import * as os from 'os';
@@ -110,7 +110,7 @@ async function ensureTerminalSkipShell(): Promise<void> {
  * chuyển key trong secrets và cờ welcomed, xoá file hook Copilot cũ, dọn id lệnh cũ khỏi commandsToSkipShell.
  */
 async function migrateFromViVoice(ctx: vscode.ExtensionContext, log: (m: string) => void): Promise<void> {
-  const props = (ctx.extension.packageJSON.contributes?.configuration?.properties ?? {}) as Record<string, unknown>;
+  const props = configProperties(ctx.extension.packageJSON.contributes);
   const keys = Object.keys(props).filter((k) => k.startsWith('noIdle.')).map((k) => k.slice('noIdle.'.length));
   const oldCfg = vscode.workspace.getConfiguration('viVoice');
   const newCfg = vscode.workspace.getConfiguration('noIdle');

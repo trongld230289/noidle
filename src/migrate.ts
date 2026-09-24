@@ -19,3 +19,13 @@ export function planMigration(keys: readonly string[], oldValue: (key: string) =
   }
   return plan;
 }
+
+type ConfigBlock = { title?: string; properties?: Record<string, unknown> };
+
+/** Gộp mọi setting khai báo trong contributes.configuration, dạng một khối hay mảng nhiều nhóm có tiêu đề. */
+export function configProperties(contributes: { configuration?: ConfigBlock | ConfigBlock[] } | undefined): Record<string, unknown> {
+  const c = contributes?.configuration;
+  if (!c) return {};
+  const blocks = Array.isArray(c) ? c : [c];
+  return Object.assign({}, ...blocks.map((b) => b.properties ?? {}));
+}
