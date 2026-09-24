@@ -401,3 +401,17 @@ describe('claude-hook tín hiệu attention', () => {
     expect(readLog().slice(before)).toMatch(/signal attention/);
   });
 });
+
+describe('claude-hook attention với Copilot Chat', () => {
+  it('Copilot trả lời xong (Stop, --source copilot) cũng gửi attention cho cửa sổ của workspace', async () => {
+    const transcript = path.join(work, 'transcript-copilot-att.jsonl');
+    fs.writeFileSync(transcript, JSON.stringify({ type: 'assistant.message', data: { content: 'Xong rồi.' } }) + '\n');
+    const before = readLog().length;
+    const r = await run(
+      ['speak', '--config', cfgMuted, '--source', 'copilot'],
+      JSON.stringify({ session_id: 'cp-att', cwd: work, transcript_path: transcript, stop_hook_active: false }),
+    );
+    expect(r.code).toBe(0);
+    expect(readLog().slice(before)).toMatch(/signal attention/);
+  });
+});
