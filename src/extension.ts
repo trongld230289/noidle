@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { StatusBar } from './status';
+import { StatusBar, UsageBar } from './status';
 import { Recorder, SAMPLE_RATE, CHANNELS } from './recorder';
 import { Segmenter } from './segmenter';
 import { listAudioDevices } from './devices';
@@ -8,6 +8,7 @@ import { parseVoiceCommand } from './decision';
 import { refine, DEFAULT_REFINE_MODEL, resetRefinePause } from './refiner';
 import { pronounce } from './pronounce';
 import { langOf, isAuto, effectiveVoice, type Lang } from './lang';
+import { ELEVEN_DEFAULT_VOICE, ELEVEN_DEFAULT_MODEL, readUsage, usageFilePath } from './elevenlabs';
 import { applyHooks, copilotHooksFile, ClaudeSettings, HookOptions } from './claudeHooks';
 import { inject, InjectorApi, Target } from './injector';
 import { startServer, writeRegistry, removeRegistry, pipeName, Signal, acquireMic, releaseMic, micHolder, signalPid } from './signal';
@@ -55,6 +56,10 @@ function config() {
     voiceMute: c.get<boolean>('voiceMute', false),
     voice: c.get<string>('voice', 'vi-VN-HoaiMyNeural') || 'vi-VN-HoaiMyNeural',
     voiceRate: c.get<string>('voiceRate', '+0%') || '+0%',
+    ttsProvider: (c.get<string>('ttsProvider', 'edge') === 'elevenlabs' ? 'elevenlabs' : 'edge') as 'edge' | 'elevenlabs',
+    elevenLabsApiKey: (c.get<string>('elevenLabsApiKey', '') || '').trim(),
+    elevenLabsVoiceId: (c.get<string>('elevenLabsVoiceId', '') || '').trim() || ELEVEN_DEFAULT_VOICE,
+    elevenLabsModel: (c.get<string>('elevenLabsModel', '') || '').trim() || ELEVEN_DEFAULT_MODEL,
     voiceNotify: c.get<boolean>('voiceNotify', true),
     voiceApprove: c.get<boolean>('voiceApprove', false),
     approveTimeoutSec: c.get<number>('voiceApproveTimeoutSec', 15),
@@ -70,6 +75,7 @@ function config() {
     glossary: c.get<string[]>('glossary', []),
     pronunciations: c.get<Record<string, string>>('pronunciations', {}) || {},
     voiceSayWorkspace: c.get<'auto' | 'always' | 'never'>('voiceSayWorkspace', 'auto') || 'auto',
+    voiceStyle: (c.get<string>('voiceStyle', 'recap') === 'announce' ? 'announce' : 'recap') as 'recap' | 'announce',
     language: c.get<string>('language', 'vi'),
     /** auto: mic để Whisper tự nhận diện, giao diện và giọng theo ngôn ngữ nghe được gần nhất. */
     auto: isAuto(c.get<string>('language', 'vi')),
@@ -156,6 +162,13 @@ interface Session {
 
 export function activate(ctx: vscode.ExtensionContext): void {
   const status = new StatusBar();
+  // Credit ElevenLabs: hook ghi file sau mỗi lượt đọc, extension theo dõi file và hiện cạnh nút mic, không đọc thành tiếng.
+  const usageBar = new UsageBar();
+  const usageFile = usageFilePath();
+  const refreshUsage = () => usageBar.update(config().ttsProvider === 'elevenlabs' ? readUsage(usageFile) : undefined);
+  fs.watchFile(usageFile, { interval: 2000 }, refreshUsage);
+  refreshUsage();
+  ctx.subscriptions.push(usageBar, { dispose: () => fs.unwatchFile(usageFile, refreshUsage) });
   const out = vscode.window.createOutputChannel('NoIdle');
   // Ghi thêm ra file để xem lại được sau khi đóng VS Code.
   const logFile = path.join(ctx.globalStorageUri.fsPath, 'noidle.log');
@@ -209,6 +222,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       ) {
         void syncHooks().catch((err) => log(`lỗi đồng bộ hook: ${(err as Error).message}`));
       } else if (e.affectsConfiguration('noIdle')) {
+        if (e.affectsConfiguration('noIdle.ttsProvider')) refreshUsage();
         // Approve bằng giọng, hands-free: hook đọc từ file cấu hình nên chỉ cần ghi lại file.
         void writeHookConfig().catch((err) => log(`lỗi ghi hook-config: ${(err as Error).message}`));
       }
@@ -225,6 +239,21 @@ export function activate(ctx: vscode.ExtensionContext): void {
     const key = value?.trim();
     if (key) await vscode.workspace.getConfiguration('noIdle').update('groqApiKey', key, vscode.ConfigurationTarget.Global);
     return key || undefined;
+  }
+
+  async function setElevenLabsApiKey(): Promise<void> {
+    const value = await vscode.window.showInputBox({
+      prompt: 'ElevenLabs API key. Lấy tại elevenlabs.io/app/settings/api-keys (gói Free có 10.000 credit mỗi tháng). Key được lưu vào setting noIdle.elevenLabsApiKey và noIdle.ttsProvider chuyển sang elevenlabs.',
+      placeHolder: 'sk_...',
+      password: true,
+      ignoreFocusOut: true,
+    });
+    const key = value?.trim();
+    if (!key) return;
+    const c = vscode.workspace.getConfiguration('noIdle');
+    await c.update('elevenLabsApiKey', key, vscode.ConfigurationTarget.Global);
+    await c.update('ttsProvider', 'elevenlabs', vscode.ConfigurationTarget.Global);
+    void vscode.window.showInformationMessage('NoIdle: đã lưu key ElevenLabs và chuyển giọng đọc sang ElevenLabs. Chạy "NoIdle: Đọc thử giọng" để nghe.');
   }
 
   /** Key trong Settings (Ctrl+,) được ưu tiên; không có thì dùng key đã lưu ở SecretStorage từ bản cũ. */
@@ -269,7 +298,14 @@ export function activate(ctx: vscode.ExtensionContext): void {
       handsFree: cfg.handsFree,
       pronunciations: cfg.pronunciations,
       voiceSayWorkspace: cfg.voiceSayWorkspace,
+      voiceStyle: cfg.voiceStyle,
       language: cfg.language,
+      tts: {
+        provider: cfg.ttsProvider,
+        elevenLabsApiKey: cfg.elevenLabsApiKey,
+        elevenLabsVoiceId: cfg.elevenLabsVoiceId,
+        elevenLabsModel: cfg.elevenLabsModel,
+      },
     };
     await fs.promises.mkdir(path.dirname(hookConfigPath), { recursive: true });
     await fs.promises.writeFile(hookConfigPath, JSON.stringify(data, null, 2), 'utf8');
@@ -384,14 +420,18 @@ export function activate(ctx: vscode.ExtensionContext): void {
         : 'Xin chào, đây là giọng đọc của NoIdle. Xong rồi, đã sửa README.md và gọi API, test pass hết.';
     await fs.promises.writeFile(file, pronounce(sample, cfg.pronunciations, lang === 'vi'), 'utf8');
     const voice = effectiveVoice(cfg.voice, lang);
-    const child = spawn('node', [hookScript, 'play', file, '--voice', voice, '--rate', cfg.voiceRate, '--player', playerPath()], {
+    // --config để play biết giọng ElevenLabs nếu đang chọn; ghi lại file trước cho chắc.
+    await writeHookConfig();
+    const args = [hookScript, 'play', file, '--voice', voice, '--rate', cfg.voiceRate, '--player', playerPath(), '--config', hookConfigPath];
+    const child = spawn('node', args, {
       detached: true,
       stdio: 'ignore',
       windowsHide: true,
     });
     child.on('error', (e) => void vscode.window.showErrorMessage(`NoIdle: không chạy được node để đọc: ${e.message}`));
     child.unref();
-    void vscode.window.showInformationMessage(`NoIdle: đang đọc thử bằng giọng ${voice}. Không nghe thấy gì thì xem log tại %TEMP%\\noidle-tts\\hook.log`);
+    const label = cfg.ttsProvider === 'elevenlabs' ? `ElevenLabs ${cfg.elevenLabsVoiceId} (${cfg.elevenLabsModel})` : voice;
+    void vscode.window.showInformationMessage(`NoIdle: đang đọc thử bằng giọng ${label}. Không nghe thấy gì thì xem log tại %TEMP%\\noidle-tts\\hook.log`);
   }
 
   /** Bỏ qua bản đang đọc: hook tắt player của vé đầu hàng; bản kế tiếp trong hàng đợi phát tiếp. */
@@ -914,6 +954,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('noIdle.pickMic', pickMic),
     vscode.commands.registerCommand('noIdle.saveLastAudio', saveLastAudio),
     vscode.commands.registerCommand('noIdle.testVoice', testVoice),
+    vscode.commands.registerCommand('noIdle.setElevenLabsApiKey', setElevenLabsApiKey),
     vscode.commands.registerCommand('noIdle.skipSpeech', skipSpeech),
     vscode.commands.registerCommand('noIdle.toggleMute', toggleMute),
     vscode.commands.registerCommand('noIdle.toggleHandsFree', toggleHandsFree),

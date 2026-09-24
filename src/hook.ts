@@ -9,7 +9,7 @@
  *                             Hands-free: play xong thì báo extension mở mic (tín hiệu listen), hook không tự nghe.
  *                             Config voiceMute thì speak và notify thoát ngay, không đọc gì; đổi cờ có hiệu lực ngay.
  *   play <textfile> --kind speak|notify --session <id> [--listen <cwd> --claude-pid <pid>]
- *                             Tổng hợp giọng bằng Edge TTS, phát bằng ffplay. Xếp hàng theo thứ tự đến;
+ *                             Tổng hợp giọng bằng Edge TTS (hoặc ElevenLabs theo file --config), phát bằng ffplay. Xếp hàng theo thứ tự đến;
  *                             câu trả lời mới của cùng một phiên thì cắt câu trả lời cũ của phiên đó.
  *                             Có --listen thì phát xong gửi tín hiệu listen cho cửa sổ VS Code của cwd đó, kèm chuỗi
  *                             pid tổ tiên của Claude (--claude-pid) để extension chọn đúng terminal đang chạy Claude.
@@ -25,7 +25,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { spawn } from 'child_process';
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
-import { lastAssistantText, pickSpeech, promptContext, promptReminder, splitSentences, announcement, workspaceName, spoken, HookInput } from './speech';
+import { lastAssistantText, pickSpeech, hasSpeakSection, promptContext, promptReminder, splitSentences, announcement, doneAnnouncement, workspaceName, spoken, HookInput } from './speech';
 import { langOf, isAuto, detectLang, effectiveVoice, type Lang } from './lang';
 import { parseApproval, isDangerous, voiceApprovable, parseChoice, permissionRequestOutput } from './decision';
 import { signalWindow, askWindow, readRegistry, micHolder, MIC_LOCK_MAX_AGE_MS, type SignalSource } from './signal';
@@ -33,6 +33,7 @@ import { ancestorsOf, parentMap } from './proctree';
 import { hedged } from './hedge';
 import { pronounce } from './pronounce';
 import { prefetchInOrder } from './prefetch';
+import { synthElevenLabs, rateToSpeed, fetchUsage, writeUsage, formatUsage } from './elevenlabs';
 
 const DEFAULT_VOICE = 'vi-VN-HoaiMyNeural';
 
@@ -46,6 +47,11 @@ interface HookConfig {
   handsFree?: boolean;
   /** Bảng của người dùng: thuật ngữ → cách đọc, ghi đè bảng mặc định trong pronounce.ts. */
   pronunciations?: Record<string, string>;
+  /**
+   * recap (mặc định): dặn Claude viết phần 🔊 và đọc phần đó. announce: không dặn gì (0 token), Stop chỉ đọc câu cứng
+   * "Workspace X xong." hoặc "đang hỏi bạn."; approve và chọn đáp án vẫn như cũ vì vốn là câu cứng.
+   */
+  voiceStyle?: 'recap' | 'announce';
   /** Mở đầu phần đọc bằng "Workspace X:" — auto: chỉ khi có hơn một cửa sổ VS Code đang mở. */
   voiceSayWorkspace?: 'auto' | 'always' | 'never';
   /**
@@ -53,6 +59,15 @@ interface HookConfig {
    * 'auto' thì đoán theo prompt vừa gửi và nhớ theo phiên (dấu phiên trong SESSION_DIR).
    */
   language?: string;
+  /** Giọng đọc: mặc định Edge; elevenlabs thì hook gọi ElevenLabs bằng key trong file này, lỗi thì lùi về Edge. */
+  tts?: TtsConfig;
+}
+
+interface TtsConfig {
+  provider?: 'edge' | 'elevenlabs';
+  elevenLabsApiKey?: string;
+  elevenLabsVoiceId?: string;
+  elevenLabsModel?: string;
 }
 
 /** Ngôn ngữ cho một sự kiện không có prompt (speak, notify): setting cố định, hoặc ngôn ngữ đã nhớ của phiên khi auto. */
@@ -346,7 +361,11 @@ async function modePrompt(): Promise<void> {
   // Mute thì không dặn Claude viết phần 🔊, nhưng vẫn báo submitted để tắt mic nếu đang mở.
   const cfg = loadConfig();
   if (cfg.voiceMute) log('prompt: đang mute, không chèn hướng dẫn');
-  else {
+  else if (cfg.voiceStyle === 'announce') {
+    // Vẫn cập nhật dấu phiên (số prompt, ngôn ngữ) để speak/notify chọn đúng ngôn ngữ, nhưng không chèn hướng dẫn.
+    promptContextFor(input.session_id, cfg, promptText);
+    log('prompt: voiceStyle announce, không chèn hướng dẫn');
+  } else {
     const additionalContext = promptContextFor(input.session_id, cfg, promptText);
     process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext } }));
   }
@@ -367,10 +386,7 @@ async function modeSpeak(): Promise<void> {
   if (!input.transcript_path) return;
   // Một hook khác vừa chặn Stop và Claude làm tiếp: không đọc lại để khỏi lặp.
   if (input.stop_hook_active) return;
-  if (input.session_id && readMark(input.session_id).backgroundTurn) {
-    log(`speak: background task turn, session ${input.session_id}, ignored`);
-    return;
-  }
+  const background = !!input.session_id && readMark(input.session_id).backgroundTurn === true;
   const cfg = loadConfig();
   if (cfg.voiceMute) {
     log('speak: đang mute, bỏ qua');
@@ -383,15 +399,28 @@ async function modeSpeak(): Promise<void> {
     log(`không đọc được transcript: ${(err as Error).message}`);
     return;
   }
-  let text = pickSpeech(lastAssistantText(transcript));
+  const answer = lastAssistantText(transcript);
+  // Lượt do task nền (lệnh chạy nền, subagent xong) kích hoạt: chỉ đọc khi Claude chủ ý viết phần 🔊
+  // (báo tiến độ cho người đang nghe), không đọc văn xuôi thay thế và không tự mở mic.
+  if (background && !hasSpeakSection(answer)) {
+    log(`speak: background task turn without 🔊, session ${input.session_id}, ignored`);
+    return;
+  }
   const session = input.session_id ?? '';
   const cwd = input.cwd || process.cwd();
   const lang = sessionLang(cfg, session);
-  // Nhiều workspace cùng chạy thì người nghe không biết câu trả lời của cửa sổ nào: mở đầu bằng tên workspace.
-  if (text && saysWorkspace(cfg)) text = `Workspace ${workspaceName(cwd, lang)}: ${text}`;
+  let text: string;
+  if (cfg.voiceStyle === 'announce') {
+    // Câu cứng luôn có tên workspace, không cần tiền tố "Workspace X:" nữa.
+    text = doneAnnouncement(answer, cwd, lang);
+  } else {
+    text = pickSpeech(answer);
+    // Nhiều workspace cùng chạy thì người nghe không biết câu trả lời của cửa sổ nào: mở đầu bằng tên workspace.
+    if (text && saysWorkspace(cfg)) text = `Workspace ${workspaceName(cwd, lang)}: ${text}`;
+  }
   // Hands-free: extension mở mic sau khi loa phát xong. Tiến trình play gửi tín hiệu listen khi xong;
   // không có gì để đọc thì gửi ngay từ đây.
-  const listenCwd = cfg.handsFree ? cwd : undefined;
+  const listenCwd = cfg.handsFree && !background ? cwd : undefined;
   if (text) spawnPlay(text, 'speak', session, lang, listenCwd);
   else if (listenCwd) {
     const ancestors = await claudeAncestors(process.ppid, session);
@@ -434,6 +463,8 @@ function spawnPlay(raw: string, kind: Ticket['kind'], session: string, lang: Lan
   const voice = voiceFor(lang);
   const args = [__filename, 'play', file, '--voice', voice, '--rate', arg('rate', '+0%'), '--player', arg('player', 'ffplay')];
   args.push('--kind', kind, '--session', session || '-');
+  // play đọc file cấu hình để biết giọng ElevenLabs (key không đi qua dòng lệnh).
+  if (arg('config', '')) args.push('--config', arg('config', ''));
   // Tiến trình play tách rời nên không còn biết cha; đưa pid của Claude Code (cha của hook) để nó tra cây tiến trình.
   if (listenCwd) {
     args.push('--listen', listenCwd, '--source', sourceArg(), '--claude-pid', String(process.ppid));
@@ -611,6 +642,22 @@ function cachePath(voice: string, rate: string, text: string): string {
   return path.join(CACHE_DIR, `${key}.mp3`);
 }
 
+/** Cấu hình giọng ElevenLabs nếu người dùng chọn provider đó và đã có key; không thì undefined (dùng Edge). */
+function elevenConfig(): Required<Pick<TtsConfig, 'elevenLabsApiKey'>> & TtsConfig | undefined {
+  const t = loadConfig().tts;
+  if (!t || t.provider !== 'elevenlabs') return undefined;
+  if (!t.elevenLabsApiKey) {
+    log('tts: chọn ElevenLabs nhưng chưa có key, dùng Edge');
+    return undefined;
+  }
+  return { ...t, elevenLabsApiKey: t.elevenLabsApiKey };
+}
+
+/** Tên giọng ghi vào khoá cache: ElevenLabs thì theo voice id và model, để đổi giọng không dính audio cũ. */
+function cacheVoice(voice: string, eleven: TtsConfig | undefined): string {
+  return eleven ? `eleven|${eleven.elevenLabsVoiceId ?? ''}|${eleven.elevenLabsModel ?? ''}` : voice;
+}
+
 /**
  * Độ trễ của Edge rất thất thường: cùng một câu lúc nửa giây, lúc sáu đến mười hai giây, thỉnh thoảng đóng kết nối
  * giữa chừng. Loa chỉ có đệm bằng phần audio đã tổng hợp trước đó (một khối ~5-13 giây), nên một cú chậm là im tiếng.
@@ -623,9 +670,54 @@ const SYNTH_AHEAD = 3;
 /** Chờ khối hai tối đa bao lâu trước khi phát khối đầu. */
 const FIRST_HOLD_MS = 4000;
 
+/**
+ * ElevenLabs ổn định hơn Edge và tính credit theo ký tự, nên không mở yêu cầu song song (hedge) mà chỉ thử lại
+ * một lần khi lỗi. Vẫn lỗi (key sai, hết credit, mất mạng) thì lùi về Edge cho câu đó để người nghe không mất tiếng.
+ */
+const ELEVEN_ATTEMPTS = 2;
+
+async function synthEleven(eleven: TtsConfig & { elevenLabsApiKey: string }, rate: string, text: string): Promise<Buffer> {
+  return hedged(
+    () =>
+      synthElevenLabs({
+        apiKey: eleven.elevenLabsApiKey,
+        voiceId: eleven.elevenLabsVoiceId,
+        model: eleven.elevenLabsModel,
+        text,
+        speed: rateToSpeed(rate),
+        timeoutMs: SYNTH_TIMEOUT_MS,
+      }),
+    { hedgeMs: SYNTH_TIMEOUT_MS, maxAttempts: ELEVEN_ATTEMPTS, maxInFlight: 1, onEvent: (m) => log(`elevenlabs ${m}`) },
+  );
+}
+
+async function synthEdge(voice: string, rate: string, text: string): Promise<Buffer> {
+  return hedged(() => synthOnce(voice, rate, text), {
+    hedgeMs: HEDGE_MS,
+    maxAttempts: MAX_ATTEMPTS,
+    onEvent: (m) => log(`tts ${m}`),
+  });
+}
+
+/** Lượt này có câu nào tốn credit ElevenLabs không; có thì sau khi đọc xong hỏi lại số credit còn lại cho status bar. */
+let elevenSpent = false;
+
+async function reportElevenUsage(): Promise<void> {
+  const eleven = elevenConfig();
+  if (!eleven || !elevenSpent) return;
+  try {
+    const u = await fetchUsage(eleven.elevenLabsApiKey);
+    writeUsage(u);
+    log(`elevenlabs credit còn ${formatUsage(u)} (${u.tier})`);
+  } catch (err) {
+    log(`elevenlabs không lấy được credit: ${(err as Error).message}`);
+  }
+}
+
 async function synth(voice: string, rate: string, text: string): Promise<Buffer> {
+  const eleven = elevenConfig();
   const cacheable = text.length <= CACHE_MAX_CHARS;
-  const file = cachePath(voice, rate, text);
+  const file = cachePath(cacheVoice(voice, eleven), rate, text);
   if (cacheable) {
     try {
       return fs.readFileSync(file);
@@ -633,11 +725,18 @@ async function synth(voice: string, rate: string, text: string): Promise<Buffer>
       /* chưa có */
     }
   }
-  const audio = await hedged(() => synthOnce(voice, rate, text), {
-    hedgeMs: HEDGE_MS,
-    maxAttempts: MAX_ATTEMPTS,
-    onEvent: (m) => log(`tts ${m}`),
-  });
+  let audio: Buffer;
+  if (eleven) {
+    try {
+      audio = await synthEleven(eleven, rate, text);
+      elevenSpent = true;
+    } catch (err) {
+      log(`elevenlabs lỗi, đọc câu này bằng Edge (${voice}): ${(err as Error).message}`);
+      return synthEdge(voice, rate, text);
+    }
+  } else {
+    audio = await synthEdge(voice, rate, text);
+  }
   if (cacheable) {
     try {
       fs.mkdirSync(CACHE_DIR, { recursive: true });
@@ -668,6 +767,8 @@ async function modePlay(): Promise<void> {
   } catch {
     /* bỏ qua */
   }
+  // Chạy song song với việc mở mic để không làm chậm; tiến trình chờ nó xong trước khi thoát.
+  const usage = reportElevenUsage();
   // Hands-free: loa vừa im, giờ mới bảo extension mở mic để không nghe nhầm giọng Claude.
   if (listenCwd) {
     // Người dùng đã gửi prompt mới trong lúc câu này còn đang đọc: Claude đang làm lượt mới, mở mic lúc này thì tiếng
@@ -676,6 +777,7 @@ async function modePlay(): Promise<void> {
     const nowCount = session !== '-' && promptCount ? readMark(session).count : undefined;
     if (nowCount !== undefined && String(nowCount) !== promptCount) {
       log(`listen: phiên ${session} đã có prompt mới (${promptCount} → ${nowCount}), không mở mic`);
+      await usage;
       return;
     }
     await signalWindow(
@@ -684,6 +786,7 @@ async function modePlay(): Promise<void> {
       log,
     );
   }
+  await usage;
 }
 
 /** Tổng hợp từng khối và đưa vào ffplay; trả về khi phát xong hoặc bị cắt. */

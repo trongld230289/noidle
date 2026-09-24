@@ -65,7 +65,7 @@ Mỗi cụm sau khi nhận dạng được gửi thêm một lượt qua LLM tr�
 Bật setting `noIdle.voiceResponse`. Extension sẽ:
 
 1. Thêm hai hook vào `~/.claude/settings.json` (Claude Code) và ghi file `~/.copilot/hooks/noidle.json` (Copilot Chat agent mode trong VS Code 1.110 trở lên): một hook dặn Claude hoặc Copilot kết thúc mỗi câu trả lời bằng một dòng bắt đầu bằng 🔊 tóm tắt ngắn gọn kiểu nói chuyện, một hook đọc dòng đó khi trả lời xong.
-2. Đọc bằng giọng tiếng Việt của Microsoft Edge (miễn phí, cần mạng), phát qua `ffplay` đi kèm ffmpeg.
+2. Đọc bằng giọng tiếng Việt của Microsoft Edge (miễn phí, cần mạng) hoặc ElevenLabs (xem bên dưới), phát qua `ffplay` đi kèm ffmpeg.
 
 Muốn im lặng một lúc mà không phải mở phiên Claude Code mới: bật `noIdle.voiceMute` hoặc chạy lệnh `NoIdle: Tắt/bật tiếng Claude Code`. Hook vẫn đăng ký nhưng không đọc, không báo, không dặn Claude viết phần 🔊 và không mở mic; bật tắt có hiệu lực ngay ở lượt sau. Tắt `noIdle.voiceResponse` thì gỡ hẳn hook, phiên đang mở phải khởi động lại mới nhận.
 
@@ -98,9 +98,21 @@ Phiên Claude Code đang mở cần khởi động lại để nhận hook; Copi
 
 Với Copilot, extension chỉ đọc câu trả lời và mở mic hands-free; chưa có approve hay chọn đáp án bằng giọng vì Copilot không có sự kiện hook tương đương. Không cần bật `chat.useClaudeHooks` của VS Code: Copilot đọc thẳng thư mục `~/.copilot/hooks`.
 
+### Giọng ElevenLabs (tuỳ chọn)
+
+Muốn giọng tự nhiên hơn và đọc trộn Việt Anh mượt hơn Edge thì chuyển sang ElevenLabs. Gói Free của ElevenLabs có API và 10.000 credit mỗi tháng; model Flash v2.5 (mặc định) tính nửa credit một ký tự, tức khoảng 20.000 ký tự đọc, đủ thử hằng ngày với phần 🔊 ngắn.
+
+1. Đăng ký tại [elevenlabs.io](https://elevenlabs.io), lấy key ở [Settings → API keys](https://elevenlabs.io/app/settings/api-keys).
+2. Giọng mặc định là **George**, giọng có sẵn của ElevenLabs, đọc trộn Việt Anh trong một câu (tiếng Việt hơi ngữ điệu Tây). Giọng có sẵn khác dán vào `noIdle.elevenLabsVoiceId`: Liam `TX3LPaxmHKxFdv7VOQHJ`, Daniel `onwK4e9ZLuTAKqWW03F9`, Charlie `IKne3meq5aSn8XLyUdCD`, Sarah `EXAVITQu4vr4xnSDxMaL`. Giọng Việt trong [Voice Library](https://elevenlabs.io/app/voice-library) như Nhật Phong (`6adFm46eyy74snVn6YrT`) chỉ gọi được qua API từ gói Starter (5 USD/tháng): gói Free trả lỗi 402 "Free users cannot use library voices via the API" và hook lùi về Edge. Có Starter thì mở giọng trong thư viện, Add to my voices, copy Voice ID dán vào setting.
+3. Chạy `NoIdle: Set ElevenLabs API Key`, dán key. Lệnh này lưu key và chuyển `noIdle.ttsProvider` sang `elevenlabs` luôn. Chạy `NoIdle: Đọc thử giọng` để nghe.
+
+Hook đọc key từ file cấu hình riêng của extension, không đưa lên dòng lệnh hook. ElevenLabs không bị mở yêu cầu song song như Edge (mỗi ký tự là credit), chỉ thử lại một lần khi lỗi; vẫn lỗi (key sai, hết credit, giọng thư viện trên gói Free, mất mạng) thì câu đó tự đọc bằng giọng Edge đang chọn và ghi lý do vào `hook.log`. `noIdle.voiceRate` vẫn áp dụng, đổi sang speed 0.7 đến 1.2 của ElevenLabs. Sau mỗi lượt đọc bằng ElevenLabs, hook hỏi số credit còn lại và extension hiện cạnh nút mic trên status bar, kiểu `6.4k/10k` (còn / hạn mức tháng), nền vàng khi còn dưới 10%; chỉ hiện, không đọc thành tiếng, và chỉ khi `ttsProvider` là `elevenlabs`. Script `tts-preview.py` chỉ đọc bằng Edge.
+
 Giọng vi-VN đọc chữ viết tắt và đuôi file tiếng Anh sai, kiểu `README.md` thành "mờ đờ". Hook thay sẵn các thuật ngữ hay gặp bằng âm tiếng Việt trước khi đọc: `.md` thành "chấm em đi", `API` thành "ây pi ai", `JSON` thành "chây sơn", `CI/CD` thành "xi ai xi đi". Thêm từ của bạn hoặc sửa cách đọc mặc định bằng `noIdle.pronunciations`, ví dụ `{"Claude": "cờ lốt", "shipngo": "síp gô"}`; đổi là có hiệu lực ngay ở lượt sau. Bảng mặc định nằm trong `src/pronounce.ts`.
 
 Để tiết kiệm token, hướng dẫn viết phần 🔊 chỉ được chèn đầy đủ ở prompt đầu tiên của mỗi phiên Claude Code (khoảng 400 token); các prompt sau chỉ chèn một dòng nhắc ngắn (khoảng 40 token), và cứ 20 prompt thì chèn lại bản đầy đủ một lần phòng khi context bị nén. Hook đếm theo `session_id` bằng file trong `%TEMP%\noidle-tts\sessions`.
+
+Không muốn tốn token cho phần 🔊 thì đặt `noIdle.voiceStyle` là `announce`: hook không dặn Claude gì cả, trả lời xong chỉ đọc "Workspace X xong" (hoặc "Workspace X đang hỏi bạn" khi câu cuối là câu hỏi). Bạn biết cửa sổ nào cần mình mà không nghe nội dung; approve và chọn đáp án bằng giọng vẫn chạy như thường vì vốn là câu cứng.
 
 Chạy nhiều workspace cùng lúc thì mỗi phần đọc mở đầu bằng "Workspace X:" để biết cửa sổ nào vừa xong (setting `noIdle.voiceSayWorkspace`, mặc định chỉ bật khi có hơn một cửa sổ VS Code). Đang nghe mà muốn bỏ qua thì bấm **F7** hoặc chạy `NoIdle: Bỏ qua đang đọc`: bản đang đọc bị cắt, bản kế tiếp phát tiếp, hands-free vẫn mở mic như thường.
 
@@ -149,6 +161,7 @@ Mở bằng `Ctrl+Shift+P`, gõ `NoIdle`:
 | NoIdle: Gửi lại audio cuối | Gửi lại cụm vừa lỗi mạng hoặc lỗi server. |
 | NoIdle: Chọn micro | Liệt kê micro ffmpeg thấy được và chọn một cái. |
 | NoIdle: Lưu audio cuối ra file (debug) | Ghi lần thu cuối ra file WAV trong thư mục tạm để kiểm tra mic. |
+| NoIdle: Set ElevenLabs API Key | Nhập key ElevenLabs và chuyển giọng đọc sang ElevenLabs. |
 | NoIdle: Đọc thử giọng | Đọc một câu mẫu bằng giọng đã chọn để kiểm tra loa. |
 | NoIdle: Bỏ qua đang đọc | Phím **F7**. Cắt bản đang đọc, bản kế tiếp trong hàng đợi phát tiếp; hands-free vẫn mở mic như thường. |
 
@@ -170,11 +183,16 @@ Gõ `NoIdle` vào ô tìm kiếm của Settings:
 | `noIdle.handsFreeSendDelaySec` | `2.5` | Hands-free: im lặng bao nhiêu giây sau câu cuối thì tự gửi. |
 | `noIdle.voice` | `vi-VN-HoaiMyNeural` | Giọng Việt HoaiMy hoặc NamMinh đọc tiếng Việt chuẩn nhất; giọng Multilingual như Ava, Andrew tự chuyển giữa tiếng Việt và tiếng Anh trong câu, hợp khi nói nhiều thuật ngữ; Christopher, Aria, Jenny, Guy, Sonia, Ryan, Natasha chỉ tiếng Anh. Đọc tiếng Anh mà giọng đang là vi-VN thì tự dùng Ava. |
 | `noIdle.voiceRate` | `+0%` | Tốc độ đọc. |
+| `noIdle.ttsProvider` | `edge` | `edge` (Microsoft, không cần key) hoặc `elevenlabs` (cần key, gói Free 10.000 credit/tháng). Lỗi ElevenLabs thì câu đó đọc bằng Edge. |
+| `noIdle.elevenLabsApiKey` | (trống) | Key ElevenLabs. Nếu dùng Settings Sync hãy thêm vào `settingsSync.ignoredSettings`. |
+| `noIdle.elevenLabsVoiceId` | `JBFqnCBsd6RMkjVDRZzb` | Voice ID ElevenLabs, mặc định George (giọng có sẵn). Giọng Voice Library như Nhật Phong cần gói Starter. |
+| `noIdle.elevenLabsModel` | `eleven_flash_v2_5` | Flash hoặc Turbo v2.5: 0.5 credit/ký tự; Multilingual v2, v3: 1 credit/ký tự. |
 | `noIdle.ffmpegPath` | `ffmpeg` | Đường dẫn ffmpeg nếu không có trong PATH. |
 | `noIdle.micDevice` | trống | Tên micro. Trống thì lấy micro đầu tiên. Nên đặt bằng lệnh `NoIdle: Chọn micro`. |
 | `noIdle.typingDelayMs` | `12` | Nghỉ bao nhiêu ms giữa các ký tự khi gõ vào editor. Đặt `0` để chèn nguyên cụm. |
 | `noIdle.language` | `vi` | Ngôn ngữ làm việc: `vi`, `en` hoặc `auto` (đoán theo prompt mỗi lượt, nhớ theo phiên), chi phối Whisper, LLM sửa câu, hướng dẫn 🔊, câu hook nói, giọng và bảng phiên âm. Để trống thì Whisper tự nhận diện, còn lại như `vi`. |
 | `noIdle.glossary` | `[]` | Từ tiếng Anh hay nói mà Whisper nghe sai, cùng tên project, tên biến, tên người. Whisper và LLM sẽ ưu tiên viết đúng các từ này. |
+| `noIdle.voiceStyle` | `recap` | `recap` dặn Claude viết phần 🔊 tóm tắt và đọc phần đó. `announce` không dặn gì (0 token), trả lời xong chỉ đọc "Workspace X xong" hoặc "Workspace X đang hỏi bạn". |
 | `noIdle.voiceSayWorkspace` | `auto` | Mở đầu phần đọc bằng "Workspace X:". `auto` chỉ khi có hơn một cửa sổ VS Code đang mở, `always`, `never`. |
 | `noIdle.pronunciations` | `{}` | Cách đọc thuật ngữ khi đọc câu trả lời: thuật ngữ → âm tiếng Việt, thêm hoặc ghi đè bảng mặc định (`.md` → "chấm em đi", `API` → "ây pi ai"). |
 | `noIdle.refine` | `true` | Sửa câu bằng LLM sau khi nhận dạng. |

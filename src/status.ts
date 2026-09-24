@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { Lang } from './lang';
+import { formatUsage, type ElevenUsage } from './elevenlabs';
 
 export type State = 'idle' | 'recording' | 'listening' | 'transcribing';
 
@@ -39,6 +40,32 @@ export class StatusBar implements vscode.Disposable {
         this.item.backgroundColor = undefined;
         break;
     }
+  }
+
+  dispose(): void {
+    this.item.dispose();
+  }
+}
+
+/** Credit ElevenLabs còn lại, cạnh nút mic; chỉ hiện khi đang dùng ElevenLabs. Hook ghi số liệu ra file sau mỗi lượt đọc. */
+export class UsageBar implements vscode.Disposable {
+  private readonly item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
+
+  constructor() {
+    this.item.command = 'noIdle.testVoice';
+  }
+
+  update(u: ElevenUsage | undefined): void {
+    if (!u) {
+      this.item.hide();
+      return;
+    }
+    const left = Math.max(0, u.limit - u.used);
+    this.item.text = `$(megaphone) ${formatUsage(u)}`;
+    const reset = u.resetAt ? `, reset ${new Date(u.resetAt).toLocaleDateString('vi-VN')}` : '';
+    this.item.tooltip = `ElevenLabs (${u.tier || '?'}): còn ${left.toLocaleString('vi-VN')} / ${u.limit.toLocaleString('vi-VN')} credit${reset}. Cập nhật sau mỗi lượt đọc. Bấm để đọc thử.`;
+    this.item.backgroundColor = left < u.limit * 0.1 ? new vscode.ThemeColor('statusBarItem.warningBackground') : undefined;
+    this.item.show();
   }
 
   dispose(): void {

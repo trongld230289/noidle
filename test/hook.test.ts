@@ -127,6 +127,24 @@ describe('claude-hook background task notifications', () => {
     await run(['speak', '--config', cfgNormal, '--player', path.join(work, 'no-such-player.exe')], JSON.stringify({ session_id: session, cwd: work, transcript_path: transcript }));
     expect(readLog().slice(resumed)).toContain('play pid');
   });
+
+  it('reads the 🔊 section Claude wrote in a background turn, without opening the mic', async () => {
+    const session = 'background-report';
+    const cfg = path.join(work, 'background-report.json');
+    fs.writeFileSync(cfg, JSON.stringify({ handsFree: true }));
+    const transcript = path.join(work, 'background-report.jsonl');
+    fs.writeFileSync(
+      transcript,
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Review done.\n🔊 The task 4 review found one real bug.' }] } }) + '\n',
+    );
+    await run(['prompt', '--config', cfg], JSON.stringify({ session_id: session, cwd: work, prompt: notification }));
+    const before = readLog().length;
+    await run(['speak', '--config', cfg, '--player', path.join(work, 'no-such-player.exe')], JSON.stringify({ session_id: session, cwd: work, transcript_path: transcript }));
+    const added = readLog().slice(before);
+    expect(added).toContain('play pid');
+    expect(added).toContain('task 4 review');
+    expect(added).not.toContain('signal listen');
+  });
 });
 
 describe('claude-hook pronunciations', () => {
@@ -290,5 +308,38 @@ describe('claude-hook với Copilot Chat', () => {
     expect(r.code).toBe(0);
     // Bảng phát âm mặc định đổi Copilot thành "cô pai lợt".
     expect(readLog().slice(before)).toContain('cô pai lợt đã sửa xong rồi.');
+  });
+});
+
+describe('claude-hook voiceStyle announce', () => {
+  const cfgAnnounce = path.join(work, 'announce.json');
+  const transcript = path.join(work, 'transcript-announce.jsonl');
+  const bogusPlayer = path.join(work, 'no-such-player.exe');
+  const playedText = (added: string) => {
+    const m = /speak → play pid \d+ \([^)]*\): (".*")/.exec(added);
+    return m ? (JSON.parse(m[1]) as string) : '';
+  };
+  beforeAll(() => fs.writeFileSync(cfgAnnounce, JSON.stringify({ voiceStyle: 'announce', voiceSayWorkspace: 'never' })));
+
+  it('prompt: không chèn hướng dẫn 🔊, Claude không tốn token viết phần đọc', async () => {
+    const r = await run(['prompt', '--config', cfgAnnounce], JSON.stringify({ session_id: 'an-1', cwd: work, prompt: 'sửa hàm A' }));
+    expect(r.code).toBe(0);
+    expect(r.stdout.trim()).toBe('');
+  });
+
+  it('speak: đọc câu cứng "Workspace X xong." thay vì nội dung câu trả lời', async () => {
+    fs.writeFileSync(transcript, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Đã sửa xong hàm A, test pass.' }] } }) + '\n');
+    const before = readLog().length;
+    const r = await run(['speak', '--config', cfgAnnounce, '--player', bogusPlayer], JSON.stringify({ session_id: 'an-1', cwd: work, transcript_path: transcript }));
+    expect(r.code).toBe(0);
+    expect(playedText(readLog().slice(before))).toBe(pronounce(`Workspace ${workspaceName(work)} xong.`));
+  });
+
+  it('speak: câu trả lời kết thúc bằng dấu hỏi thì đọc "đang hỏi bạn"', async () => {
+    fs.writeFileSync(transcript, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Có hai cách.\n\nBạn muốn cách nào?' }] } }) + '\n');
+    const before = readLog().length;
+    const r = await run(['speak', '--config', cfgAnnounce, '--player', bogusPlayer], JSON.stringify({ session_id: 'an-1', cwd: work, transcript_path: transcript }));
+    expect(r.code).toBe(0);
+    expect(playedText(readLog().slice(before))).toBe(pronounce(`Workspace ${workspaceName(work)} đang hỏi bạn.`));
   });
 });

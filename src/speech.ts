@@ -37,6 +37,11 @@ function joinTextBlocks(content: unknown): string {
     .join('\n');
 }
 
+/** Claude có chủ ý viết phần 🔊 (một dòng bắt đầu bằng 🔊) hay không. */
+export function hasSpeakSection(text: string): boolean {
+  return text.split(/\r?\n/).some((l) => l.trim().startsWith(SPEAK_MARK));
+}
+
 /**
  * Chọn phần sẽ đọc: ưu tiên các dòng bắt đầu bằng 🔊 (Claude được dặn tóm tắt ở đó);
  * không có thì đọc phần văn xuôi đầu tiên, bỏ code và markdown, cắt ở ranh giới câu.
@@ -279,6 +284,18 @@ export interface HookInput {
 export function workspaceName(cwd?: string, lang: Lang = 'vi'): string {
   const base = (cwd ?? '').replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? '';
   return base.replace(/[-_.]+/g, ' ').trim() || (lang === 'en' ? 'unnamed' : 'không tên');
+}
+
+/**
+ * Câu cứng đọc khi Claude trả lời xong ở chế độ voiceStyle 'announce': chỉ tên workspace và "xong" hay "đang hỏi bạn",
+ * không đọc nội dung nên Claude không phải viết phần 🔊 (không tốn token). Câu hỏi nhận ra bằng dấu hỏi ở cuối
+ * phần văn xuôi (bỏ code và markdown), vì người nghe cần biết cửa sổ đó đang chờ mình.
+ */
+export function doneAnnouncement(answer: string, cwd?: string, lang: Lang = 'vi'): string {
+  const ws = workspaceName(cwd, lang);
+  const asking = stripMarkdown(answer).trim().endsWith('?');
+  if (lang === 'en') return asking ? `Workspace ${ws} is asking you.` : `Workspace ${ws} is done.`;
+  return asking ? `Workspace ${ws} đang hỏi bạn.` : `Workspace ${ws} xong.`;
 }
 
 /**

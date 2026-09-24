@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { lastAssistantText, pickSpeech, stripMarkdown, promptContext, promptReminder } from '../src/speech';
 import { applyHooks, hookCommands } from '../src/claudeHooks';
-import { splitSentences, announcement, workspaceName } from '../src/speech';
+import { splitSentences, announcement, workspaceName, doneAnnouncement } from '../src/speech';
 
 const line = (o: unknown) => JSON.stringify(o);
 
@@ -189,5 +189,22 @@ describe('lastAssistantText với transcript của Copilot', () => {
       line({ type: 'assistant.message', data: { content: '', toolRequests: [{ name: 'x' }] } }),
     ].join('\n');
     expect(lastAssistantText(jsonl)).toBe('Có chữ.');
+  });
+});
+
+describe('doneAnnouncement (voiceStyle announce)', () => {
+  it('says the workspace is done when the answer is a statement', () => {
+    expect(doneAnnouncement('Đã sửa xong hàm A.\n\nTest pass hết.', 'D:\\Project\\vi-voice')).toBe('Workspace vi voice xong.');
+  });
+  it('says the workspace is asking when the answer ends with a question', () => {
+    expect(doneAnnouncement('Có hai cách.\n\nBạn muốn dùng cách nào?', '/x/abc')).toBe('Workspace abc đang hỏi bạn.');
+    expect(doneAnnouncement('Bạn chọn **cách 1** hay cách 2?  \n', '/x/abc')).toBe('Workspace abc đang hỏi bạn.');
+  });
+  it('ignores a trailing code block when deciding statement or question', () => {
+    expect(doneAnnouncement('Chạy lệnh này nhé?\n```sh\nnpm test\n```', '/x/abc')).toBe('Workspace abc đang hỏi bạn.');
+  });
+  it('speaks English when the session language is en', () => {
+    expect(doneAnnouncement('Done.', '/x/abc', 'en')).toBe('Workspace abc is done.');
+    expect(doneAnnouncement('Which one?', '/x/abc', 'en')).toBe('Workspace abc is asking you.');
   });
 });
