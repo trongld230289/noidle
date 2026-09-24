@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { StatusBar, UsageBar } from './status';
-import { flashWindow } from './attention';
+import { flashWindow, applyTint, removeTint, type ColorMap } from './attention';
 import { Recorder, SAMPLE_RATE, CHANNELS } from './recorder';
 import { Segmenter } from './segmenter';
 import { listAudioDevices } from './devices';
@@ -882,7 +882,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     if (s.event === 'ask') return askOnce(Math.max(3, s.timeoutSec ?? 15) * 1000);
     if (s.event === 'submitted') {
       // Người dùng đã quay lại cửa sổ này và gửi tiếp: không cần làm nổi nữa.
-      status.clearAttention();
+      clearAttention();
       // Người dùng vừa gửi prompt (tự gõ Enter sau khi F6, hoặc hands-free): mic nào đang mở cũng tắt,
       // không thì lát nữa nó nghe luôn giọng Claude đọc câu trả lời rồi chèn vào terminal.
       if (session) {
@@ -933,13 +933,53 @@ export function activate(ctx: vscode.ExtensionContext): void {
    * Cửa sổ này có việc cần người dùng. Đang focus thì không cần gì; không thì đổi màu status bar (tự tắt khi
    * cửa sổ được focus) và nháy nút trên taskbar Windows để tìm ra giữa nhiều cửa sổ.
    */
+  /** Giá trị cũ của các khoá title bar đã ghi đè trong colorCustomizations của workspace; undefined = chưa tô. */
+  let tintSaved: ColorMap | undefined;
+  const colorCfg = () => vscode.workspace.getConfiguration('workbench');
+  const workspaceColors = () => colorCfg().inspect<ColorMap>('colorCustomizations')?.workspaceValue;
+
+  async function tintTitleBar(): Promise<void> {
+    if (tintSaved || !vscode.workspace.workspaceFolders?.length) return;
+    const { next, saved } = applyTint(workspaceColors());
+    tintSaved = saved;
+    try {
+      await colorCfg().update('colorCustomizations', next, vscode.ConfigurationTarget.Workspace);
+    } catch (err) {
+      tintSaved = undefined;
+      log(`attention: không tô được title bar: ${(err as Error).message}`);
+    }
+  }
+
+  async function untintTitleBar(): Promise<void> {
+    const saved = tintSaved ?? {};
+    const current = workspaceColors();
+    // Không nhớ gì (extension vừa khởi động lại) mà file vẫn còn màu mình tô thì cũng gỡ.
+    if (!tintSaved && !(current && Object.values(current).some((v) => v === applyTint(undefined).next['titleBar.activeBackground']))) return;
+    tintSaved = undefined;
+    try {
+      await colorCfg().update('colorCustomizations', removeTint(current, saved), vscode.ConfigurationTarget.Workspace);
+    } catch (err) {
+      log(`attention: không gỡ được màu title bar: ${(err as Error).message}`);
+    }
+  }
+  const clearAttention = () => {
+    status.clearAttention();
+    void untintTitleBar();
+  };
+  // Cửa sổ trước đóng lúc đang tô thì màu còn nằm trong settings của workspace: gỡ khi khởi động và khi tắt extension.
+  void untintTitleBar();
+  ctx.subscriptions.push({ dispose: () => void untintTitleBar() });
+
   async function onAttention(reason: AttentionReason): Promise<void> {
     const cfg = config();
     if (vscode.window.state.focused) {
       log(`attention ${reason}: cửa sổ đang focus, bỏ qua`);
       return;
     }
-    if (cfg.attentionColor) status.attention(reason, langOf(cfg.language));
+    if (cfg.attentionColor) {
+      status.attention(reason, langOf(cfg.language));
+      await tintTitleBar();
+    }
     if (cfg.attentionFlash) {
       const name = vscode.workspace.name ?? path.basename(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '');
       if (!name) return;
@@ -949,7 +989,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
   }
   ctx.subscriptions.push(
     vscode.window.onDidChangeWindowState((st) => {
-      if (st.focused) status.clearAttention();
+      if (st.focused) clearAttention();
     }),
   );
 

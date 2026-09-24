@@ -43,6 +43,8 @@ beforeAll(async () => {
     external: ['bufferutil', 'utf-8-validate'],
     logLevel: 'silent',
   });
+  // Lần chạy đầu của bundle mới trên Windows chậm vài giây (Defender quét file): làm nóng ở đây để test đầu không timeout.
+  await run(['skip'], '');
   fs.writeFileSync(cfg, JSON.stringify({ handsFree: true }));
   const pipe =
     process.platform === 'win32'

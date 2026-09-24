@@ -133,3 +133,44 @@ export async function flashWindow(workspaceName: string, deps: FlashDeps = {}): 
   if (code === 3) return 'foreground';
   return 'error';
 }
+
+/**
+ * Tô màu title bar của cửa sổ đang cần người dùng. VS Code không có API đổi màu khung theo cửa sổ, chỉ có
+ * workbench.colorCustomizations ở mức workspace (cách Peacock dùng), nên extension ghi vào đó rồi trả lại khi xong.
+ */
+export const TINT = {
+  activeBackground: '#f0a020',
+  inactiveBackground: '#c98416',
+  foreground: '#1b1200',
+};
+
+export type ColorMap = Record<string, string>;
+
+const TINT_KEYS: ColorMap = {
+  'titleBar.activeBackground': TINT.activeBackground,
+  'titleBar.inactiveBackground': TINT.inactiveBackground,
+  'titleBar.activeForeground': TINT.foreground,
+  'titleBar.inactiveForeground': TINT.foreground,
+};
+
+/** Thêm màu title bar vào bảng màu hiện có; saved giữ giá trị cũ của đúng các khoá bị ghi đè để trả lại. */
+export function applyTint(current: ColorMap | undefined): { next: ColorMap; saved: ColorMap } {
+  const next: ColorMap = { ...(current ?? {}) };
+  const saved: ColorMap = {};
+  for (const [k, v] of Object.entries(TINT_KEYS)) {
+    if (typeof next[k] === 'string') saved[k] = next[k];
+    next[k] = v;
+  }
+  return { next, saved };
+}
+
+/** Bỏ màu đã tô: trả giá trị cũ, xoá khoá mình thêm; khoá người dùng đã tự đổi trong lúc đó thì giữ. Rỗng thì undefined. */
+export function removeTint(current: ColorMap | undefined, saved: ColorMap): ColorMap | undefined {
+  const next: ColorMap = { ...(current ?? {}) };
+  for (const [k, v] of Object.entries(TINT_KEYS)) {
+    if (next[k] !== v) continue;
+    if (k in saved) next[k] = saved[k];
+    else delete next[k];
+  }
+  return Object.keys(next).length ? next : undefined;
+}

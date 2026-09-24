@@ -44,6 +44,8 @@ beforeAll(async () => {
     external: ['bufferutil', 'utf-8-validate'],
     logLevel: 'silent',
   });
+  // Lần chạy đầu của bundle mới trên Windows chậm vài giây (Defender quét file): làm nóng ở đây để test đầu không timeout.
+  await run(['skip'], '');
   fs.writeFileSync(cfgMuted, JSON.stringify({ voiceMute: true, handsFree: true }));
   fs.writeFileSync(cfgNormal, JSON.stringify({ voiceMute: false, handsFree: false }));
 }, 30_000);
@@ -243,6 +245,7 @@ describe('claude-hook workspace prefix', () => {
 });
 
 describe('claude-hook skip', () => {
+  // Vé đặt tên bằng mốc 0 để luôn đứng đầu hàng: tiến trình play nền của các test speak trước có thể ghi vé vào cùng lúc.
   const queueDir = path.join(work, 'tmp', 'noidle-tts', 'queue');
   const idle = () => spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
   const exited = (p: ReturnType<typeof spawn>) =>
@@ -260,7 +263,7 @@ describe('claude-hook skip', () => {
     fs.mkdirSync(queueDir, { recursive: true });
     const play = idle();
     const player = idle();
-    fs.writeFileSync(path.join(queueDir, `${String(Date.now()).padStart(15, '0')}-${play.pid}.json`), JSON.stringify({ pid: play.pid, player: player.pid, kind: 'speak', session: 's' }));
+    fs.writeFileSync(path.join(queueDir, `${'0'.padStart(15, '0')}-${play.pid}.json`), JSON.stringify({ pid: play.pid, player: player.pid, kind: 'speak', session: 's' }));
     const r = await run(['skip'], '');
     expect(r.code).toBe(0);
     expect(await exited(player)).toBe(true);
@@ -272,7 +275,7 @@ describe('claude-hook skip', () => {
     fs.rmSync(queueDir, { recursive: true, force: true });
     fs.mkdirSync(queueDir, { recursive: true });
     const play = idle();
-    fs.writeFileSync(path.join(queueDir, `${String(Date.now()).padStart(15, '0')}-${play.pid}.json`), JSON.stringify({ pid: play.pid, kind: 'speak', session: 's' }));
+    fs.writeFileSync(path.join(queueDir, `${'0'.padStart(15, '0')}-${play.pid}.json`), JSON.stringify({ pid: play.pid, kind: 'speak', session: 's' }));
     const r = await run(['skip'], '');
     expect(r.code).toBe(0);
     expect(await exited(play)).toBe(true);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { windowTitleMatches, flashScript, flashWindow } from '../src/attention';
+import { windowTitleMatches, flashScript, flashWindow, applyTint, removeTint, TINT } from '../src/attention';
 
 describe('attention: tìm cửa sổ VS Code theo tiêu đề', () => {
   it('khớp tiêu đề mặc định "file - workspace - Visual Studio Code"', () => {
@@ -44,5 +44,26 @@ describe('attention: flashWindow', () => {
     expect(await flashWindow('vi-voice', { platform: 'win32', run: run(0) })).toBe('flashed');
     expect(await flashWindow('vi-voice', { platform: 'win32', run: run(2) })).toBe('not-found');
     expect(seen[0]).toContain('FlashWindowEx');
+  });
+});
+
+describe('attention: tô màu title bar qua workbench.colorCustomizations', () => {
+  it('applyTint thêm màu title bar, nhớ giá trị cũ của đúng các khoá đó', () => {
+    const { next, saved } = applyTint({ 'editor.background': '#111', 'titleBar.activeBackground': '#abc' });
+    expect(next['editor.background']).toBe('#111');
+    expect(next['titleBar.activeBackground']).toBe(TINT.activeBackground);
+    expect(next['titleBar.inactiveBackground']).toBe(TINT.inactiveBackground);
+    expect(next['titleBar.activeForeground']).toBe(TINT.foreground);
+    expect(saved).toEqual({ 'titleBar.activeBackground': '#abc' });
+  });
+  it('removeTint trả lại giá trị cũ, xoá khoá mình thêm, không đụng khoá khác; rỗng thì undefined', () => {
+    const { next, saved } = applyTint({ 'editor.background': '#111', 'titleBar.activeBackground': '#abc' });
+    expect(removeTint(next, saved)).toEqual({ 'editor.background': '#111', 'titleBar.activeBackground': '#abc' });
+    expect(removeTint(applyTint(undefined).next, {})).toBeUndefined();
+  });
+  it('removeTint không ghi đè màu người dùng đã đổi trong lúc đang tô', () => {
+    const { next, saved } = applyTint({});
+    const edited = { ...next, 'titleBar.activeBackground': '#123456' };
+    expect(removeTint(edited, saved)).toEqual({ 'titleBar.activeBackground': '#123456' });
   });
 });
