@@ -120,6 +120,25 @@ export function formatUsage(u: ElevenUsage): string {
   return `${short(Math.max(0, u.limit - u.used))}/${short(u.limit)}`;
 }
 
+/** Lỗi ElevenLabs báo hết credit (401/402 quota_exceeded). */
+export function isQuotaError(err: unknown): boolean {
+  return /quota_exceeded/i.test(err instanceof Error ? err.message : String(err));
+}
+
+/** Không biết mốc reset thì coi số liệu "hết credit" còn giá trị bấy nhiêu lâu rồi mới thử lại ElevenLabs. */
+const EXHAUSTED_TTL_MS = 24 * 3_600_000;
+
+/**
+ * Đã hết credit cho câu này chưa (credit tính xấp xỉ theo ký tự). Có thì hook đi thẳng Edge, không gọi ElevenLabs
+ * hai lần lỗi rồi mới lùi như trước. Qua mốc reset (hoặc 24 giờ nếu không biết mốc) thì thử lại để nhận credit mới.
+ */
+export function elevenExhausted(u: ElevenUsage | undefined, textLength: number, now = Date.now()): boolean {
+  if (!u) return false;
+  if (u.limit - u.used >= textLength) return false;
+  const until = u.resetAt || u.at + EXHAUSTED_TTL_MS;
+  return now < until;
+}
+
 export function usageFilePath(): string {
   return path.join(os.tmpdir(), 'noidle-tts', 'elevenlabs-usage.json');
 }

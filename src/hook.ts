@@ -33,7 +33,7 @@ import { ancestorsOf, parentMap } from './proctree';
 import { hedged } from './hedge';
 import { pronounce } from './pronounce';
 import { prefetchInOrder } from './prefetch';
-import { synthElevenLabs, rateToSpeed, fetchUsage, writeUsage, formatUsage } from './elevenlabs';
+import { synthElevenLabs, rateToSpeed, fetchUsage, writeUsage, readUsage, formatUsage, isQuotaError, elevenExhausted } from './elevenlabs';
 
 const DEFAULT_VOICE = 'vi-VN-HoaiMyNeural';
 
@@ -701,10 +701,10 @@ async function synthEdge(voice: string, rate: string, text: string): Promise<Buf
 
 /** Lượt này có câu nào tốn credit ElevenLabs không; có thì sau khi đọc xong hỏi lại số credit còn lại cho status bar. */
 let elevenSpent = false;
+/** Đã báo "hết credit, dùng Edge" trong tiến trình này chưa, để log một lần thay vì mỗi câu. */
+let elevenExhaustedLogged = false;
 
-async function reportElevenUsage(): Promise<void> {
-  const eleven = elevenConfig();
-  if (!eleven || !elevenSpent) return;
+async function refreshElevenUsage(eleven: TtsConfig & { elevenLabsApiKey: string }): Promise<void> {
   try {
     const u = await fetchUsage(eleven.elevenLabsApiKey);
     writeUsage(u);
@@ -712,6 +712,12 @@ async function reportElevenUsage(): Promise<void> {
   } catch (err) {
     log(`elevenlabs không lấy được credit: ${(err as Error).message}`);
   }
+}
+
+async function reportElevenUsage(): Promise<void> {
+  const eleven = elevenConfig();
+  if (!eleven || !elevenSpent) return;
+  await refreshElevenUsage(eleven);
 }
 
 async function synth(voice: string, rate: string, text: string): Promise<Buffer> {
@@ -726,12 +732,22 @@ async function synth(voice: string, rate: string, text: string): Promise<Buffer>
     }
   }
   let audio: Buffer;
-  if (eleven) {
+  if (eleven && elevenExhausted(readUsage(), text.length)) {
+    // Hết credit từ lượt trước: đi thẳng Edge, không gọi ElevenLabs lỗi hai lần cho từng câu.
+    if (!elevenExhaustedLogged) {
+      const u = readUsage();
+      log(`elevenlabs hết credit (${u ? formatUsage(u) : '?'}), đọc bằng Edge (${voice}) tới kỳ reset`);
+      elevenExhaustedLogged = true;
+    }
+    audio = await synthEdge(voice, rate, text);
+  } else if (eleven) {
     try {
       audio = await synthEleven(eleven, rate, text);
       elevenSpent = true;
     } catch (err) {
       log(`elevenlabs lỗi, đọc câu này bằng Edge (${voice}): ${(err as Error).message}`);
+      // Hết credit: ghi số liệu ngay để các câu sau (và status bar) biết mà không gọi lại.
+      if (isQuotaError(err)) await refreshElevenUsage(eleven);
       return synthEdge(voice, rate, text);
     }
   } else {

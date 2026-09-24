@@ -5,6 +5,10 @@
   "version": "2.1.0",
   "publisher": "trongld",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/trongld230289/noidle.git"
+  },
   "engines": {
     "vscode": "^1.100.0"
   },

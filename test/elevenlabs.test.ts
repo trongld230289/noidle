@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { rateToSpeed, elevenRequest, synthElevenLabs, ELEVEN_DEFAULT_VOICE, ELEVEN_DEFAULT_MODEL, fetchUsage, formatUsage, readUsage, writeUsage, usageFilePath } from '../src/elevenlabs';
+import { rateToSpeed, elevenRequest, synthElevenLabs, ELEVEN_DEFAULT_VOICE, ELEVEN_DEFAULT_MODEL, fetchUsage, formatUsage, readUsage, writeUsage, usageFilePath, isQuotaError, elevenExhausted } from '../src/elevenlabs';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -111,5 +111,32 @@ describe('ElevenLabs: credit còn lại', () => {
     expect(readUsage(file)).toBeUndefined();
     fs.rmSync(dir, { recursive: true, force: true });
     expect(usageFilePath()).toBe(path.join(os.tmpdir(), 'noidle-tts', 'elevenlabs-usage.json'));
+  });
+});
+
+describe('ElevenLabs: hết credit thì đi thẳng Edge, không gọi lại mỗi câu', () => {
+  const usage = (used: number, resetAt: number) => ({ used, limit: 10000, resetAt, tier: 'free', at: 1 });
+  const now = 1_000_000;
+
+  it('isQuotaError nhận ra lỗi quota_exceeded của ElevenLabs, không nhận lỗi khác', () => {
+    expect(isQuotaError(new Error('ElevenLabs 401 quota_exceeded: This request exceeds your quota of 10000.'))).toBe(true);
+    expect(isQuotaError(new Error('ElevenLabs 401 invalid_api_key'))).toBe(false);
+    expect(isQuotaError(new Error('fetch failed'))).toBe(false);
+  });
+
+  it('elevenExhausted: credit còn lại ít hơn số ký tự của câu và chưa tới kỳ reset', () => {
+    expect(elevenExhausted(usage(9998, now + 1000), 12, now)).toBe(true);
+    expect(elevenExhausted(usage(9000, now + 1000), 12, now)).toBe(false);
+  });
+
+  it('elevenExhausted: qua mốc reset thì thử lại ElevenLabs, chưa có số liệu thì cũng thử', () => {
+    expect(elevenExhausted(usage(9998, now - 1), 12, now)).toBe(false);
+    expect(elevenExhausted(undefined, 12, now)).toBe(false);
+  });
+
+  it('elevenExhausted: không biết mốc reset thì coi như còn hết trong 24 giờ kể từ lúc lấy số liệu', () => {
+    const u = { ...usage(9998, 0), at: now };
+    expect(elevenExhausted(u, 12, now + 3_600_000)).toBe(true);
+    expect(elevenExhausted(u, 12, now + 25 * 3_600_000)).toBe(false);
   });
 });
