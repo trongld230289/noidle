@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { windowTitleMatches, flashScript, flashWindow, applyTint, removeTint, shellColorFor, tintForeground, normalizeHex, TINT } from '../src/attention';
+import { windowTitleMatches, flashScript, flashWindow, applyTint, removeTint, shellColorFor, tintForeground, normalizeHex, blinkFrames, TINT } from '../src/attention';
 
 describe('attention: tìm cửa sổ VS Code theo tiêu đề', () => {
   it('khớp tiêu đề mặc định "file - workspace - Visual Studio Code"', () => {
@@ -93,5 +93,14 @@ describe('attention: tô màu title bar qua workbench.colorCustomizations', () =
     expect(shellColorFor('light')).toBe('#f8f8f8');
     expect(shellColorFor('hcDark')).toBe('#000000');
     expect(shellColorFor('hcLight')).toBe('#ffffff');
+  });
+});
+
+describe('attention: nháy title bar cùng nhịp taskbar', () => {
+  it('blinkFrames xen kẽ tắt/bật, kết thúc ở trạng thái đã tô để giữ màu', () => {
+    const on = { a: 'on' };
+    const off = { a: 'off' };
+    expect(blinkFrames(on, off, 3)).toEqual([off, on, off, on, off, on]);
+    expect(blinkFrames(on, off, 0)).toEqual([]);
   });
 });
