@@ -28,7 +28,7 @@ import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
 import { lastAssistantText, pickSpeech, hasSpeakSection, promptContext, promptReminder, promptStopRecap, splitSentences, announcement, doneAnnouncement, workspaceName, spoken, HookInput } from './speech';
 import { langOf, isAuto, detectLang, effectiveVoice, type Lang } from './lang';
 import { parseApproval, isDangerous, voiceApprovable, parseChoice, permissionRequestOutput } from './decision';
-import { signalWindow, askWindow, readRegistry, micHolder, MIC_LOCK_MAX_AGE_MS, type SignalSource } from './signal';
+import { signalWindow, askWindow, readRegistry, micHolder, MIC_LOCK_MAX_AGE_MS, type SignalSource, type AttentionReason } from './signal';
 import { ancestorsOf, parentMap } from './proctree';
 import { hedged } from './hedge';
 import { pronounce } from './pronounce';
@@ -401,8 +401,11 @@ async function modeSpeak(): Promise<void> {
   if (input.stop_hook_active) return;
   const background = !!input.session_id && readMark(input.session_id).backgroundTurn === true;
   const cfg = loadConfig();
+  // Làm nổi cửa sổ (nháy taskbar, đổi màu status bar) kể cả khi mute: không có tiếng, chỉ để tìm đúng cửa sổ.
+  const attentionSent = background ? Promise.resolve(false) : attention('done', input.session_id ?? '', input.cwd || process.cwd());
   if (cfg.voiceMute) {
     log('speak: đang mute, bỏ qua');
+    await attentionSent;
     return;
   }
   let transcript: string;
@@ -419,6 +422,7 @@ async function modeSpeak(): Promise<void> {
     log(`speak: background task turn without 🔊, session ${input.session_id}, ignored`);
     return;
   }
+  await attentionSent;
   const session = input.session_id ?? '';
   const cwd = input.cwd || process.cwd();
   const lang = sessionLang(cfg, session);
@@ -499,6 +503,14 @@ function voiceFor(lang: Lang): string {
   return effectiveVoice(arg('voice', DEFAULT_VOICE), lang);
 }
 
+/** Bảo extension của cửa sổ có cwd này làm nổi cửa sổ. Không có cửa sổ hay lỗi thì thôi, không chặn việc đọc. */
+function attention(reason: AttentionReason, session: string, cwd: string): Promise<boolean> {
+  return signalWindow({ event: 'attention', session, cwd, reason }, undefined, log, false).catch((err) => {
+    log(`signal attention lỗi: ${(err as Error).message}`);
+    return false;
+  });
+}
+
 async function modeNotify(): Promise<void> {
   const input = JSON.parse((await readStdin()) || '{}') as HookInput & { session_id?: string };
   const cfg = loadConfig();
@@ -507,6 +519,7 @@ async function modeNotify(): Promise<void> {
   const text = announcement(input, lang);
   log(`notify ${input.hook_event_name ?? '?'} ${input.notification_type ?? input.tool_name ?? ''}: ${JSON.stringify(text)}`);
   if (!text) return;
+  await attention(/approve|approval/i.test(text) ? 'approve' : 'answer', input.session_id ?? '', input.cwd || process.cwd());
   if (cfg.voiceMute) {
     log('notify: đang mute, bỏ qua');
     return;

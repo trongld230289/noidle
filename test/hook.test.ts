@@ -373,3 +373,28 @@ describe('claude-hook đổi voiceStyle giữa phiên', () => {
     expect(await ctx(cfgRecap, 'sw-2')).toContain('tai nghe');
   });
 });
+
+describe('claude-hook tín hiệu attention', () => {
+  const cfg = path.join(work, 'attention.json');
+  const transcript = path.join(work, 'transcript-att.jsonl');
+  const bogusPlayer = path.join(work, 'no-such-player.exe');
+  beforeAll(() => fs.writeFileSync(cfg, JSON.stringify({ voiceStyle: 'announce' })));
+
+  it('speak: Claude xong thì gửi attention (lý do done) cho cửa sổ của cwd', async () => {
+    fs.writeFileSync(transcript, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Xong.' }] } }) + '\n');
+    const before = readLog().length;
+    const r = await run(['speak', '--config', cfg, '--player', bogusPlayer], JSON.stringify({ session_id: 'att-1', cwd: work, transcript_path: transcript }));
+    expect(r.code).toBe(0);
+    expect(readLog().slice(before)).toMatch(/signal attention/);
+  });
+
+  it('notify: cần approve thì gửi attention (lý do approve), kể cả khi mute', async () => {
+    const before = readLog().length;
+    const r = await run(
+      ['notify', '--config', cfgMuted, '--player', bogusPlayer],
+      JSON.stringify({ session_id: 'att-2', cwd: work, hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'ls' } }),
+    );
+    expect(r.code).toBe(0);
+    expect(readLog().slice(before)).toMatch(/signal attention/);
+  });
+});

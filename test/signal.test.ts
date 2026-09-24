@@ -48,6 +48,11 @@ describe('parseSignal', () => {
     expect(parseSignal('{"event":"ask","session":"","cwd":"D:/x","ancestors":"nope"}')?.ancestors).toBeUndefined();
     expect(parseSignal('{"event":"listen","session":"","cwd":"D:/x"}')?.ancestors).toBeUndefined();
   });
+  it('attention: giữ lý do done/approve/answer, lý do lạ thì bỏ', () => {
+    expect(parseSignal('{"event":"attention","session":"s","cwd":"D:/x","reason":"done"}')).toEqual({ event: 'attention', session: 's', cwd: 'D:/x', reason: 'done' });
+    expect(parseSignal('{"event":"attention","session":"s","cwd":"D:/x","reason":"approve"}')?.reason).toBe('approve');
+    expect(parseSignal('{"event":"attention","session":"s","cwd":"D:/x","reason":"weird"}')?.reason).toBeUndefined();
+  });
   it('bỏ JSON hỏng, event lạ, thiếu cwd', () => {
     expect(parseSignal('{')).toBeUndefined();
     expect(parseSignal('{"event":"boom","session":"","cwd":"x"}')).toBeUndefined();
@@ -80,6 +85,14 @@ describe('server/client', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(got).toEqual([{ event: 'listen', session: 's1', cwd: 'D:/x' }]);
     server.close();
+  });
+  it('signalWindow với prune=false giữ entry chết (attention không được xoá cửa sổ chỉ vì chưa trả lời)', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'noidle-sig-'));
+    writeRegistry({ pid: 7, pipe: testPipe(), folders: ['D:/dead'] }, dir);
+    expect(await signalWindow({ event: 'attention', session: '', cwd: 'D:/dead', reason: 'done' }, dir, undefined, false)).toBe(false);
+    expect(readRegistry(dir).map((e) => e.pid)).toEqual([7]);
+    expect(await signalWindow({ event: 'listen', session: '', cwd: 'D:/dead' }, dir)).toBe(false);
+    expect(readRegistry(dir)).toEqual([]);
   });
   it('pipe chết thì trả false, không ném', async () => {
     expect(await sendSignal(testPipe(), { event: 'listen', session: '', cwd: 'x' }, 500)).toBe(false);

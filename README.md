@@ -114,6 +114,8 @@ Giọng vi-VN đọc chữ viết tắt và đuôi file tiếng Anh sai, kiểu 
 
 Không muốn tốn token cho phần 🔊 thì đặt `noIdle.voiceStyle` là `announce`: hook không dặn Claude gì cả, trả lời xong chỉ đọc "Workspace X xong" (hoặc "Workspace X đang hỏi bạn" khi câu cuối là câu hỏi). Bạn biết cửa sổ nào cần mình mà không nghe nội dung; approve và chọn đáp án bằng giọng vẫn chạy như thường vì vốn là câu cứng. Đổi kiểu giữa phiên cũng được: sang `announce` thì hook nhắc Claude một lần thôi viết phần 🔊 (hướng dẫn cũ còn trong lịch sử), quay lại `recap` thì chèn lại hướng dẫn đầy đủ.
 
+Mở nhiều cửa sổ thì nghe tên chưa chắc tìm ra: khi Claude xong, cần approve hoặc cần trả lời mà cửa sổ đó không đang focus, nút của nó trên taskbar Windows nháy cam tới khi bạn bấm vào (`noIdle.attentionFlash`, gọi FlashWindowEx qua PowerShell, chỉ Windows) và nút NoIdle trên status bar của cửa sổ đó đổi màu vàng với chữ "Claude xong" hay "cần approve", tự tắt khi cửa sổ được focus (`noIdle.attentionColor`). Cả hai chạy kể cả khi đang mute.
+
 Chạy nhiều workspace cùng lúc thì mỗi phần đọc mở đầu bằng "Workspace X:" để biết cửa sổ nào vừa xong (setting `noIdle.voiceSayWorkspace`, mặc định chỉ bật khi có hơn một cửa sổ VS Code). Đang nghe mà muốn bỏ qua thì bấm **F7** hoặc chạy `NoIdle: Bỏ qua đang đọc`: bản đang đọc bị cắt, bản kế tiếp phát tiếp, hands-free vẫn mở mic như thường.
 
 Mọi thứ từ dòng 🔊 đến hết câu trả lời sẽ được đọc. Claude được dặn viết phần này đủ nghĩa để nghe xong không cần nhìn màn hình: hỏi thông tin thì kể đủ các mục chính, báo cáo việc đã làm thì hai ba câu. Muốn nghe kỹ hơn nữa thì nói "đọc chi tiết". Nếu Claude không thêm dòng 🔊, extension đọc khoảng 300 ký tự đầu của câu trả lời, bỏ code và markdown. Lỗi đọc được ghi tại `%TEMP%\noidle-tts\hook.log`.
@@ -192,6 +194,8 @@ Gõ `NoIdle` vào ô tìm kiếm của Settings:
 | `noIdle.typingDelayMs` | `12` | Nghỉ bao nhiêu ms giữa các ký tự khi gõ vào editor. Đặt `0` để chèn nguyên cụm. |
 | `noIdle.language` | `vi` | Ngôn ngữ làm việc: `vi`, `en` hoặc `auto` (đoán theo prompt mỗi lượt, nhớ theo phiên), chi phối Whisper, LLM sửa câu, hướng dẫn 🔊, câu hook nói, giọng và bảng phiên âm. Để trống thì Whisper tự nhận diện, còn lại như `vi`. |
 | `noIdle.glossary` | `[]` | Từ tiếng Anh hay nói mà Whisper nghe sai, cùng tên project, tên biến, tên người. Whisper và LLM sẽ ưu tiên viết đúng các từ này. |
+| `noIdle.attentionFlash` | `true` | Nháy nút cửa sổ trên taskbar Windows khi Claude xong, cần approve hoặc cần trả lời mà cửa sổ không đang focus. |
+| `noIdle.attentionColor` | `true` | Đổi màu nút NoIdle trên status bar của cửa sổ đang cần bạn, tắt khi cửa sổ được focus. |
 | `noIdle.voiceStyle` | `recap` | `recap` dặn Claude viết phần 🔊 tóm tắt và đọc phần đó. `announce` không dặn gì (0 token), trả lời xong chỉ đọc "Workspace X xong" hoặc "Workspace X đang hỏi bạn". |
 | `noIdle.voiceSayWorkspace` | `auto` | Mở đầu phần đọc bằng "Workspace X:". `auto` chỉ khi có hơn một cửa sổ VS Code đang mở, `always`, `never`. |
 | `noIdle.pronunciations` | `{}` | Cách đọc thuật ngữ khi đọc câu trả lời: thuật ngữ → âm tiếng Việt, thêm hoặc ghi đè bảng mặc định (`.md` → "chấm em đi", `API` → "ây pi ai"). |

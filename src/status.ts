@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { Lang } from './lang';
 import { formatUsage, type ElevenUsage } from './elevenlabs';
+import type { AttentionReason } from './signal';
 
 export type State = 'idle' | 'recording' | 'listening' | 'transcribing';
 
@@ -8,6 +9,9 @@ export class StatusBar implements vscode.Disposable {
   private readonly item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
 
   private lang: Lang = 'vi';
+  private state: State = 'idle';
+  /** Cửa sổ này đang có việc cần người dùng (Claude xong, approve, trả lời); chỉ hiện khi rảnh, tắt khi cửa sổ được focus. */
+  private attentionReason: AttentionReason | undefined;
 
   constructor() {
     this.item.command = 'noIdle.toggle';
@@ -15,10 +19,37 @@ export class StatusBar implements vscode.Disposable {
     this.item.show();
   }
 
+  /** Đổi màu status bar để tìm đúng cửa sổ trong nhiều cửa sổ; giữ tới khi clearAttention. */
+  attention(reason: AttentionReason, lang: Lang = this.lang): void {
+    this.attentionReason = reason;
+    this.lang = lang;
+    if (this.state === 'idle') this.render();
+  }
+
+  clearAttention(): void {
+    if (!this.attentionReason) return;
+    this.attentionReason = undefined;
+    if (this.state === 'idle') this.render();
+  }
+
   set(state: State, lang: Lang = this.lang): void {
     this.lang = lang;
+    this.state = state;
+    this.render();
+  }
+
+  private render(): void {
+    const state = this.state;
     switch (state) {
       case 'idle':
+        if (this.attentionReason) {
+          const en = this.lang === 'en';
+          const label = { done: en ? 'Claude is done' : 'Claude xong', approve: en ? 'needs approval' : 'cần approve', answer: en ? 'needs your answer' : 'cần bạn trả lời' }[this.attentionReason];
+          this.item.text = `$(bell-dot) ${label}`;
+          this.item.tooltip = en ? 'This window needs you. Clears when the window gets focus' : 'Cửa sổ này đang cần bạn. Tự tắt khi cửa sổ được focus';
+          this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+          break;
+        }
         this.item.text = '$(mic) NoIdle';
         this.item.tooltip = 'F6 để bắt đầu nghe';
         this.item.backgroundColor = undefined;

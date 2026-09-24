@@ -1,8 +1,8 @@
 /**
  * Kênh tín hiệu hook → extension. Mỗi cửa sổ VS Code mở một server trên named pipe và ghi một
  * file đăng ký (pid, pipe, workspace folders) vào WINDOWS_DIR. Hook tìm cửa sổ theo cwd rồi gửi
- * một dòng JSON: listen (mở mic nghe lệnh tiếp), submitted (người dùng đã gửi prompt), hoặc ask (nghe một câu
- * rồi trả chữ về). Khung tin: mỗi thông điệp một dòng kết thúc bằng xuống dòng; ask được server trả lời bằng một dòng
+ * một dòng JSON: listen (mở mic nghe lệnh tiếp), submitted (người dùng đã gửi prompt), ask (nghe một câu
+ * rồi trả chữ về), hoặc attention (làm nổi cửa sổ: Claude xong, cần approve, cần trả lời). Khung tin: mỗi thông điệp một dòng kết thúc bằng xuống dòng; ask được server trả lời bằng một dòng
  * {heard} rồi đóng kết nối, các tín hiệu khác thì đóng ngay.
  */
 import * as fs from 'fs';
@@ -16,7 +16,9 @@ export interface WindowEntry {
   folders: string[];
 }
 
-export type SignalEvent = 'listen' | 'submitted' | 'ask';
+export type SignalEvent = 'listen' | 'submitted' | 'ask' | 'attention';
+/** attention: vì sao cửa sổ cần người dùng. */
+export type AttentionReason = 'done' | 'approve' | 'answer';
 export type SignalSource = 'claude' | 'copilot';
 export interface Signal {
   event: SignalEvent;
@@ -28,6 +30,8 @@ export interface Signal {
   source?: SignalSource;
   /** listen/ask: pid của Claude Code rồi cha, ông... để extension tìm terminal có shell pid trong chuỗi này. */
   ancestors?: number[];
+  /** attention: Claude xong, cần approve hay cần trả lời; extension nháy taskbar và đổi màu status bar. */
+  reason?: AttentionReason;
 }
 
 /** Trả lời của server cho ask; các tín hiệu khác không có trả lời. */
@@ -66,11 +70,12 @@ export function pickWindow(entries: WindowEntry[], cwd: string, caseInsensitive 
 export function parseSignal(line: string): Signal | undefined {
   try {
     const o = JSON.parse(line.trim()) as Partial<Signal>;
-    if ((o.event !== 'listen' && o.event !== 'submitted' && o.event !== 'ask') || typeof o.cwd !== 'string') return undefined;
+    if ((o.event !== 'listen' && o.event !== 'submitted' && o.event !== 'ask' && o.event !== 'attention') || typeof o.cwd !== 'string') return undefined;
     const out: Signal = { event: o.event, session: typeof o.session === 'string' ? o.session : '', cwd: o.cwd };
     if (typeof o.timeoutSec === 'number') out.timeoutSec = o.timeoutSec;
     if (o.source === 'claude' || o.source === 'copilot') out.source = o.source;
     if (Array.isArray(o.ancestors)) out.ancestors = o.ancestors.filter((n): n is number => typeof n === 'number');
+    if (o.reason === 'done' || o.reason === 'approve' || o.reason === 'answer') out.reason = o.reason;
     return out;
   } catch {
     return undefined;
@@ -264,7 +269,8 @@ export function sendSignal(pipe: string, signal: Signal, timeoutMs = 1500): Prom
 }
 
 /** Tìm cửa sổ theo cwd trong registry và gửi tín hiệu. Cửa sổ không trả lời thì xoá entry. */
-export async function signalWindow(signal: Signal, dir = WINDOWS_DIR, log?: (m: string) => void): Promise<boolean> {
+/** prune: cửa sổ không trả lời thì xoá đăng ký (mặc định). Tín hiệu phụ như attention để false, việc dọn để listen/submitted lo. */
+export async function signalWindow(signal: Signal, dir = WINDOWS_DIR, log?: (m: string) => void, prune = true): Promise<boolean> {
   const entry = pickWindow(readRegistry(dir), signal.cwd);
   if (!entry) {
     log?.(`signal ${signal.event}: không có cửa sổ nào cho ${signal.cwd}`);
@@ -272,8 +278,8 @@ export async function signalWindow(signal: Signal, dir = WINDOWS_DIR, log?: (m: 
   }
   const ok = await sendSignal(entry.pipe, signal);
   if (!ok) {
-    log?.(`signal ${signal.event}: cửa sổ pid ${entry.pid} không trả lời, xoá đăng ký`);
-    removeRegistry(entry.pid, dir);
+    log?.(`signal ${signal.event}: cửa sổ pid ${entry.pid} không trả lời${prune ? ', xoá đăng ký' : ''}`);
+    if (prune) removeRegistry(entry.pid, dir);
   } else log?.(`signal ${signal.event} → cửa sổ pid ${entry.pid}`);
   return ok;
 }

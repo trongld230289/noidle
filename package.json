@@ -272,6 +272,18 @@
           "description": "Từ tiếng Anh hay nói mà Whisper nghe sai, cùng tên project, tên biến, tên người. Ví dụ [\"impact\", \"order view\", \"claimNext\"]. Được đưa vào prompt Whisper và LLM để viết đúng.",
           "scope": "application"
         },
+        "noIdle.attentionFlash": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Nháy nút của cửa sổ VS Code trên taskbar Windows khi Claude Code xong, cần approve hoặc cần trả lời mà cửa sổ đó không đang focus (như app cần chú ý), tới khi bạn bấm vào. Để tìm đúng cửa sổ khi mở nhiều workspace. Chỉ Windows; gọi user32 qua PowerShell.",
+          "scope": "application"
+        },
+        "noIdle.attentionColor": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Đổi màu nút NoIdle trên status bar của cửa sổ đang cần bạn (\"Claude xong\", \"cần approve\", \"cần bạn trả lời\"), tự tắt khi cửa sổ được focus.",
+          "scope": "application"
+        },
         "noIdle.voiceStyle": {
           "type": "string",
           "enum": [

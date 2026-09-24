@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { StatusBar, UsageBar } from './status';
+import { flashWindow } from './attention';
 import { Recorder, SAMPLE_RATE, CHANNELS } from './recorder';
 import { Segmenter } from './segmenter';
 import { listAudioDevices } from './devices';
@@ -11,7 +12,7 @@ import { langOf, isAuto, effectiveVoice, type Lang } from './lang';
 import { ELEVEN_DEFAULT_VOICE, ELEVEN_DEFAULT_MODEL, readUsage, usageFilePath } from './elevenlabs';
 import { applyHooks, copilotHooksFile, ClaudeSettings, HookOptions } from './claudeHooks';
 import { inject, InjectorApi, Target } from './injector';
-import { startServer, writeRegistry, removeRegistry, pipeName, Signal, acquireMic, releaseMic, micHolder, signalPid } from './signal';
+import { startServer, writeRegistry, removeRegistry, pipeName, Signal, acquireMic, releaseMic, micHolder, signalPid, type AttentionReason } from './signal';
 import { audioLevel, pcmToWav } from './wav';
 import { pickTerminal } from './proctree';
 import { planMigration } from './migrate';
@@ -76,6 +77,8 @@ function config() {
     pronunciations: c.get<Record<string, string>>('pronunciations', {}) || {},
     voiceSayWorkspace: c.get<'auto' | 'always' | 'never'>('voiceSayWorkspace', 'auto') || 'auto',
     voiceStyle: (c.get<string>('voiceStyle', 'recap') === 'announce' ? 'announce' : 'recap') as 'recap' | 'announce',
+    attentionFlash: c.get<boolean>('attentionFlash', true),
+    attentionColor: c.get<boolean>('attentionColor', true),
     language: c.get<string>('language', 'vi'),
     /** auto: mic để Whisper tự nhận diện, giao diện và giọng theo ngôn ngữ nghe được gần nhất. */
     auto: isAuto(c.get<string>('language', 'vi')),
@@ -875,8 +878,11 @@ export function activate(ctx: vscode.ExtensionContext): void {
    */
   async function onSignal(s: Signal): Promise<string | void> {
     log(`tín hiệu ${s.event} (session ${s.session || '-'})`);
+    if (s.event === 'attention') return onAttention(s.reason ?? 'done');
     if (s.event === 'ask') return askOnce(Math.max(3, s.timeoutSec ?? 15) * 1000);
     if (s.event === 'submitted') {
+      // Người dùng đã quay lại cửa sổ này và gửi tiếp: không cần làm nổi nữa.
+      status.clearAttention();
       // Người dùng vừa gửi prompt (tự gõ Enter sau khi F6, hoặc hands-free): mic nào đang mở cũng tắt,
       // không thì lát nữa nó nghe luôn giọng Claude đọc câu trả lời rồi chèn vào terminal.
       if (session) {
@@ -922,6 +928,30 @@ export function activate(ctx: vscode.ExtensionContext): void {
     await beep();
     await toggle({ target: 'terminal', auto: true, terminal });
   }
+
+  /**
+   * Cửa sổ này có việc cần người dùng. Đang focus thì không cần gì; không thì đổi màu status bar (tự tắt khi
+   * cửa sổ được focus) và nháy nút trên taskbar Windows để tìm ra giữa nhiều cửa sổ.
+   */
+  async function onAttention(reason: AttentionReason): Promise<void> {
+    const cfg = config();
+    if (vscode.window.state.focused) {
+      log(`attention ${reason}: cửa sổ đang focus, bỏ qua`);
+      return;
+    }
+    if (cfg.attentionColor) status.attention(reason, langOf(cfg.language));
+    if (cfg.attentionFlash) {
+      const name = vscode.workspace.name ?? path.basename(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '');
+      if (!name) return;
+      const r = await flashWindow(name);
+      log(`attention ${reason}: nháy taskbar "${name}" → ${r}`);
+    }
+  }
+  ctx.subscriptions.push(
+    vscode.window.onDidChangeWindowState((st) => {
+      if (st.focused) status.clearAttention();
+    }),
+  );
 
   const pipe = pipeName(process.pid);
   const server = startServer(pipe, (s) => onSignal(s).catch((err) => log(`lỗi tín hiệu: ${(err as Error).message}`)));
