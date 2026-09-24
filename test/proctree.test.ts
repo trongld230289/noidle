@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ancestorsOf, parentMap, parseParentTable, pickTerminal } from '../src/proctree';
+import { ancestorsOf, parentMap, parseParentTable, pickTerminal, terminalForAgent } from '../src/proctree';
 
 describe('parseParentTable', () => {
   it('đọc bảng "pid ppid" mỗi dòng, bỏ dòng rác và tiêu đề', () => {
@@ -51,6 +51,22 @@ describe('pickTerminal', () => {
     const a = term('a', 111);
     const b = term('b', 70);
     expect(await pickTerminal([a, b], [100, 90, 80, 70])).toBe(b);
+  });
+
+  describe('terminalForAgent', () => {
+    const active = { name: 'unrelated shell', processId: Promise.resolve(10) };
+    const cli = { name: 'CLI shell', processId: Promise.resolve(20) };
+
+    it('pins CLI input to its process ancestry, even if another terminal is active', async () => {
+      expect(await terminalForAgent([active, cli], [30, 20], active, 'copilot-cli')).toBe(cli);
+    });
+    it('never falls back to an unrelated terminal for an external CLI session', async () => {
+      expect(await terminalForAgent([active], [30, 20], active, 'copilot-cli')).toBeUndefined();
+      expect(await terminalForAgent([active], undefined, active, 'copilot-cli')).toBeUndefined();
+    });
+    it('preserves the existing Claude fallback', async () => {
+      expect(await terminalForAgent([active], undefined, active, 'claude')).toBe(active);
+    });
   });
   it('không khớp thì undefined', async () => {
     expect(await pickTerminal([term('a', 111)], [100, 90])).toBeUndefined();

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hookCommands, applyHooks, copilotHooksFile, HookOptions } from '../src/claudeHooks';
+import { hookCommands, applyHooks, copilotHooksFile, copilotHookPaths, HookOptions } from '../src/claudeHooks';
 
 const opts: HookOptions = {
   enabled: true,
@@ -43,12 +43,88 @@ describe('applyHooks', () => {
 });
 
 describe('copilotHooksFile', () => {
-  it('tạo file hook định dạng Copilot với Stop và UserPromptSubmit dùng cùng lệnh', () => {
+  it('registers one versioned shared file with camelCase events only', () => {
     const file = copilotHooksFile(opts);
     const cmd = hookCommands(opts);
-    expect(file.hooks.Stop).toEqual([{ type: 'command', command: `${cmd.Stop} --source copilot`, timeout: 60 }]);
-    expect(file.hooks.UserPromptSubmit).toEqual([{ type: 'command', command: cmd.UserPromptSubmit }]);
-    // Copilot không có PermissionRequest/AskUserQuestion nên không đăng ký notify.
-    expect(Object.keys(file.hooks)).toEqual(['Stop', 'UserPromptSubmit']);
+    expect(file.version).toBe(1);
+    expect(file.hooks.sessionStart).toEqual([
+      { type: 'command', command: 'node "C:/ext/noidle/dist/claude-hook.js" start --config "C:/ext/noidle/hook-config.json" --source copilot' },
+    ]);
+    expect(file.hooks.agentStop).toEqual([{ type: 'command', command: `${cmd.Stop} --source copilot`, timeoutSec: 60 }]);
+    expect(file.hooks.userPromptSubmitted).toEqual([{ type: 'command', command: `${cmd.UserPromptSubmit} --source copilot` }]);
+    expect(Object.keys(file.hooks).sort()).toEqual([
+      'agentStop', 'notification', 'permissionRequest', 'preToolUse', 'sessionStart', 'userPromptSubmitted',
+    ]);
+    expect(file.hooks.userPromptTransformed).toBeUndefined();
+  });
+
+  it('registers CLI permission, ask_user and elicitation notifications with explicit events', () => {
+    const file = copilotHooksFile(opts);
+    const cmd = hookCommands(opts);
+    expect(file.hooks.permissionRequest).toEqual([
+      { type: 'command', command: `${cmd.Notify} --event PermissionRequest --source copilot`, timeoutSec: 120 },
+    ]);
+    expect(file.hooks.preToolUse).toEqual([
+      { type: 'command', command: `${cmd.Notify} --event PreToolUse --source copilot`, matcher: 'ask_user', timeoutSec: 180 },
+    ]);
+    expect(file.hooks.notification).toEqual([
+      { type: 'command', command: `${cmd.Notify} --event Notification --source copilot`, matcher: 'elicitation_dialog' },
+    ]);
+  });
+
+  it('gates all notification events without disabling lifecycle hooks', () => {
+    expect(Object.keys(copilotHooksFile({ ...opts, notify: false }).hooks).sort()).toEqual([
+      'agentStop', 'sessionStart', 'userPromptSubmitted',
+    ]);
+  });
+
+  it('quotes config and script paths with spaces in every shared hook command', () => {
+    const file = copilotHooksFile({ ...opts, script: 'C:\\My Extension\\claude-hook.js', config: 'D:\\My Config\\hook.json' });
+    for (const hooks of Object.values(file.hooks)) {
+      expect(hooks).toHaveLength(1);
+      expect(hooks[0].command).toContain('node "C:/My Extension/claude-hook.js"');
+      expect(hooks[0].command).toContain('--config "D:/My Config/hook.json"');
+      expect(hooks[0].command).toContain('--source copilot');
+      expect(hooks[0]).not.toHaveProperty('timeout');
+    }
+  });
+
+  it('omits the optional config flag from every command', () => {
+    const file = copilotHooksFile({ ...opts, config: undefined });
+    for (const hooks of Object.values(file.hooks)) expect(hooks[0].command).not.toContain('--config');
+    expect(file.hooks.sessionStart[0].command).toBe('node "C:/ext/noidle/dist/claude-hook.js" start --source copilot');
+  });
+
+  it('does not change Claude hook names, matchers, timeouts or sources', () => {
+    const file = applyHooks({}, opts);
+    expect(file.hooks?.Stop?.[0].hooks?.[0]).toEqual({ type: 'command', command: hookCommands(opts).Stop, timeout: 60 });
+    expect(file.hooks?.PreToolUse?.[0].matcher).toBe('AskUserQuestion');
+    expect(file.hooks?.PermissionRequest?.[0].hooks?.[0].timeout).toBe(120);
+    expect(JSON.stringify(file)).not.toContain('--source');
+    expect(file.hooks?.sessionStart).toBeUndefined();
+  });
+});
+
+describe('copilotHookPaths', () => {
+  it('always includes the shared default file, even with a custom CLI home', () => {
+    expect(copilotHookPaths('C:\\Users\\Alice', 'D:\\CLI Home')).toEqual([
+      'C:\\Users\\Alice\\.copilot\\hooks\\noidle.json', 'D:\\CLI Home\\hooks\\noidle.json',
+    ]);
+  });
+
+  it.each([undefined, '', '   '])('ignores an absent or blank custom home: %s', (home) => {
+    expect(copilotHookPaths('C:\\Users\\Alice', home)).toEqual(['C:\\Users\\Alice\\.copilot\\hooks\\noidle.json']);
+  });
+
+  it.each(['c:\\users\\ALICE\\.COPILOT\\', 'C:/Users/Alice/.copilot', 'C:\\Users\\Alice\\.copilot\\nested\\..'])(
+    'deduplicates equivalent Windows paths: %s', (home) => {
+      expect(copilotHookPaths('C:\\Users\\Alice', home)).toEqual(['C:\\Users\\Alice\\.copilot\\hooks\\noidle.json']);
+    },
+  );
+
+  it('preserves UNC paths and deduplicates their casing', () => {
+    expect(copilotHookPaths('\\\\server\\share\\Alice', '\\\\SERVER\\SHARE\\Alice\\.copilot')).toEqual([
+      '\\\\server\\share\\Alice\\.copilot\\hooks\\noidle.json',
+    ]);
   });
 });

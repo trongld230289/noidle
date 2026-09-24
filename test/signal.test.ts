@@ -40,6 +40,9 @@ describe('pickWindow', () => {
 });
 
 describe('parseSignal', () => {
+  it('preserves the CLI source instead of treating it as Chat or Claude', () => {
+    expect(parseSignal('{"event":"listen","session":"cli","cwd":"D:/x","source":"copilot-cli"}')?.source).toBe('copilot-cli');
+  });
   it('đọc dòng JSON hợp lệ', () => {
     expect(parseSignal('{"event":"listen","session":"s","cwd":"D:/x"}\n')).toEqual({ event: 'listen', session: 's', cwd: 'D:/x' });
   });

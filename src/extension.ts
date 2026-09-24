@@ -10,11 +10,11 @@ import { refine, DEFAULT_REFINE_MODEL, resetRefinePause } from './refiner';
 import { pronounce } from './pronounce';
 import { langOf, isAuto, effectiveVoice, type Lang } from './lang';
 import { ELEVEN_DEFAULT_VOICE, ELEVEN_DEFAULT_MODEL, readUsage, usageFilePath } from './elevenlabs';
-import { applyHooks, copilotHooksFile, ClaudeSettings, HookOptions } from './claudeHooks';
+import { applyHooks, copilotHooksFile, copilotHookPaths, ClaudeSettings, HookOptions } from './claudeHooks';
 import { inject, InjectorApi, Target } from './injector';
 import { startServer, writeRegistry, removeRegistry, pipeName, Signal, acquireMic, releaseMic, micHolder, signalPid, type AttentionReason } from './signal';
 import { audioLevel, pcmToWav } from './wav';
-import { pickTerminal } from './proctree';
+import { terminalForAgent } from './proctree';
 import { planMigration, configProperties } from './migrate';
 import * as fs from 'fs';
 import { execFile, spawn } from 'child_process';
@@ -290,7 +290,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
   const claudeSettingsPath = path.join(os.homedir(), '.claude', 'settings.json');
   const hookScript = path.join(ctx.extensionPath, 'dist', 'claude-hook.js');
   const hookConfigPath = path.join(ctx.globalStorageUri.fsPath, 'hook-config.json');
-  const copilotHooksPath = path.join(os.homedir(), '.copilot', 'hooks', 'noidle.json');
+  const copilotHooksPaths = copilotHookPaths(os.homedir(), process.env.COPILOT_HOME);
 
   /** Ghi cấu hình cho hook: approve bằng giọng và hands-free. Hook không tự mở mic nên không cần key hay mic. */
   async function writeHookConfig(): Promise<void> {
@@ -338,7 +338,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     };
   }
 
-  /** Đồng bộ hook cho cả Claude Code lẫn Copilot Chat theo setting voiceResponse. */
+  /** Đồng bộ hook cho Claude Code, Copilot Chat và Copilot CLI. */
   async function syncHooks(): Promise<void> {
     await writeHookConfig();
     const opts = hookOptions();
@@ -352,23 +352,25 @@ export function activate(ctx: vscode.ExtensionContext): void {
    */
   async function syncCopilotHooks(opts: HookOptions): Promise<void> {
     const data = opts.enabled ? JSON.stringify(copilotHooksFile(opts), null, 2) + '\n' : '';
-    let current = '';
-    try {
-      current = await fs.promises.readFile(copilotHooksPath, 'utf8');
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-        log(`không đọc được ${copilotHooksPath}: ${(err as Error).message}`);
-        return;
+    for (const copilotHooksPath of copilotHooksPaths) {
+      let current = '';
+      try {
+        current = await fs.promises.readFile(copilotHooksPath, 'utf8');
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+          log(`không đọc được ${copilotHooksPath}: ${(err as Error).message}`);
+          continue;
+        }
       }
+      if (current === data) continue;
+      if (data) {
+        await fs.promises.mkdir(path.dirname(copilotHooksPath), { recursive: true });
+        await fs.promises.writeFile(copilotHooksPath, data, 'utf8');
+      } else {
+        await fs.promises.rm(copilotHooksPath, { force: true });
+      }
+      log(`hook Copilot Chat/CLI: ${opts.enabled ? 'đã bật' : 'đã tắt'} (${copilotHooksPath})`);
     }
-    if (current === data) return;
-    if (data) {
-      await fs.promises.mkdir(path.dirname(copilotHooksPath), { recursive: true });
-      await fs.promises.writeFile(copilotHooksPath, data, 'utf8');
-    } else {
-      await fs.promises.rm(copilotHooksPath, { force: true });
-    }
-    log(`hook Copilot: ${opts.enabled ? 'đã bật' : 'đã tắt'} (${copilotHooksPath})`);
   }
 
   /** Ghi hook Stop + UserPromptSubmit vào ~/.claude/settings.json theo setting voiceResponse. */
@@ -393,7 +395,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     log(`hook Claude Code: ${cfg.voiceResponse ? 'đã bật' : 'đã tắt'} (${claudeSettingsPath})`);
     if (cfg.voiceResponse) {
       void vscode.window.showInformationMessage(
-        'NoIdle: đã bật đọc câu trả lời của Claude Code và Copilot. Phiên Claude Code đang mở cần khởi động lại để nhận hook.',
+        'NoIdle: đã bật giọng nói cho Claude Code, Copilot Chat và Copilot CLI. Khởi động lại phiên Claude Code/Copilot CLI để nhận hook.',
       );
     }
   }
@@ -918,14 +920,14 @@ export function activate(ctx: vscode.ExtensionContext): void {
     }
     // Hook gửi kèm chuỗi pid tổ tiên của Claude Code; terminal nào có shell pid trong chuỗi là terminal đang chạy Claude,
     // không phụ thuộc terminal nào đang được chọn hay cửa sổ nào đang focus. Không khớp thì lấy terminal đang chọn.
-    const matched = await pickTerminal(vscode.window.terminals, s.ancestors);
-    const terminal = matched ?? vscode.window.activeTerminal;
+    const terminal = await terminalForAgent(vscode.window.terminals, s.ancestors, vscode.window.activeTerminal, s.source);
     if (!terminal) {
-      log('hands-free: không có terminal đang mở, bỏ qua');
+      log(s.source === 'copilot-cli'
+        ? 'hands-free: không tìm thấy terminal VS Code của Copilot CLI, không mở mic để tránh gõ nhầm shell'
+        : 'hands-free: không có terminal đang mở, bỏ qua');
       return;
     }
-    if (matched) log(`hands-free: terminal "${matched.name}" đang chạy Claude (theo cây tiến trình)`);
-    else log(`hands-free: không tìm thấy terminal của Claude${s.ancestors?.length ? ` trong chuỗi ${s.ancestors.join(' ← ')}` : ' (hook không gửi chuỗi pid)'}, lấy terminal đang chọn "${terminal.name}"`);
+    log(`hands-free: ${s.source === 'copilot-cli' ? 'Copilot CLI' : 'Claude Code'} → terminal "${terminal.name}"`);
     await beep();
     await toggle({ target: 'terminal', auto: true, terminal });
   }

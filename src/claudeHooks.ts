@@ -1,5 +1,7 @@
 /** Đăng ký / gỡ hook của NoIdle trong ~/.claude/settings.json của Claude Code. */
 
+import * as path from 'path';
+
 export const HOOK_MARK = 'claude-hook.js';
 
 export interface HookOptions {
@@ -63,21 +65,31 @@ function isOurs(h: HookCommand): boolean {
   return typeof h.command === 'string' && h.command.includes(HOOK_MARK) && (h.command.includes('noidle') || h.command.includes('vi-voice'));
 }
 
-/**
- * Nội dung file hook cho Copilot Chat trong VS Code (ghi ở ~/.copilot/hooks/noidle.json).
- * Copilot mặc định không đọc ~/.claude/settings.json (setting chat.useClaudeHooks tắt), nên đăng ký riêng
- * theo định dạng của Copilot: mỗi sự kiện là mảng lệnh, không có lớp matcher. Chỉ Stop và UserPromptSubmit:
- * Copilot không có PermissionRequest hay AskUserQuestion nên không có gì để notify.
- */
-export function copilotHooksFile(o: HookOptions): { hooks: Record<string, HookCommand[]> } {
+/** Shared by Copilot CLI and Chat: aliases must appear only once to avoid duplicate speech. */
+export function copilotHooksFile(o: HookOptions): { version: 1; hooks: Record<string, HookCommand[]> } {
   const cmd = hookCommands(o);
-  return {
-    hooks: {
-      // --source copilot: phát xong, tín hiệu listen mang nguồn để extension mở mic vào ô chat Copilot thay vì terminal.
-      Stop: [{ type: 'command', command: `${cmd.Stop} --source copilot`, timeout: 60 }],
-      UserPromptSubmit: [{ type: 'command', command: cmd.UserPromptSubmit }],
-    },
+  const configArg = o.config ? ` --config ${q(o.config)}` : '';
+  const hooks: Record<string, HookCommand[]> = {
+    sessionStart: [{ type: 'command', command: `node ${q(o.script)} start${configArg} --source copilot` }],
+    userPromptSubmitted: [{ type: 'command', command: `${cmd.UserPromptSubmit} --source copilot` }],
+    agentStop: [{ type: 'command', command: `${cmd.Stop} --source copilot`, timeoutSec: 60 }],
   };
+  if (o.notify) {
+    hooks.permissionRequest = [{ type: 'command', command: `${cmd.Notify} --event PermissionRequest --source copilot`, timeoutSec: 120 }];
+    hooks.preToolUse = [{ type: 'command', command: `${cmd.Notify} --event PreToolUse --source copilot`, matcher: 'ask_user', timeoutSec: 180 }];
+    hooks.notification = [{ type: 'command', command: `${cmd.Notify} --event Notification --source copilot`, matcher: 'elicitation_dialog' }];
+  }
+  return { version: 1, hooks };
+}
+
+export function copilotHookPaths(home: string, copilotHome?: string): string[] {
+  const paths = [path.join(home, '.copilot', 'hooks', 'noidle.json')];
+  if (copilotHome?.trim()) {
+    const custom = path.join(copilotHome, 'hooks', 'noidle.json');
+    const comparable = (p: string) => path.win32.normalize(p).toLowerCase();
+    if (comparable(custom) !== comparable(paths[0])) paths.push(custom);
+  }
+  return paths;
 }
 
 /** Trả về bản sao settings đã gỡ hook cũ của NoIdle và (nếu enabled) thêm hook mới. */

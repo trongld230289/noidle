@@ -64,12 +64,12 @@ Mỗi cụm sau khi nhận dạng được gửi thêm một lượt qua LLM tr�
 
 Bật setting `noIdle.voiceResponse`. Extension sẽ:
 
-1. Thêm hai hook vào `~/.claude/settings.json` (Claude Code) và ghi file `~/.copilot/hooks/noidle.json` (Copilot Chat agent mode trong VS Code 1.110 trở lên): một hook dặn Claude hoặc Copilot kết thúc mỗi câu trả lời bằng một dòng bắt đầu bằng 🔊 tóm tắt ngắn gọn kiểu nói chuyện, một hook đọc dòng đó khi trả lời xong.
+1. Đăng ký hook cho Claude Code trong `~/.claude/settings.json` và cho Copilot Chat (VS Code 1.110 trở lên) lẫn GitHub Copilot CLI trong `~/.copilot/hooks/noidle.json`. Hook dặn agent kết thúc bằng phần 🔊 để đọc thành tiếng, đọc khi trả lời xong và xử lý thông báo/câu hỏi nếu được bật. Một file Copilot dùng chung, không đăng ký hai lần cho Chat và CLI.
 2. Đọc bằng giọng tiếng Việt của Microsoft Edge (miễn phí, cần mạng) hoặc ElevenLabs (xem bên dưới), phát qua `ffplay` đi kèm ffmpeg.
 
 Muốn im lặng một lúc mà không phải mở phiên Claude Code mới: bật `noIdle.voiceMute` hoặc chạy lệnh `NoIdle: Tắt/bật tiếng Claude Code`. Hook vẫn đăng ký nhưng không đọc, không báo, không dặn Claude viết phần 🔊 và không mở mic; bật tắt có hiệu lực ngay ở lượt sau. Tắt `noIdle.voiceResponse` thì gỡ hẳn hook, phiên đang mở phải khởi động lại mới nhận.
 
-Khi Claude Code cần bạn approve một lệnh hoặc chờ bạn chọn câu trả lời, extension đọc một câu ngắn kèm tên workspace: "Workspace shipngo cần approve" hoặc "Workspace vi voice cần bạn xác nhận câu trả lời". Chạy nhiều cửa sổ cùng lúc vẫn biết cửa sổ nào đang chờ. Mọi lượt đọc xếp hàng theo thứ tự đến, không chồng tiếng; chỉ khi cùng một phiên có câu trả lời mới thì câu cũ của phiên đó bị cắt. Tắt bằng `noIdle.voiceNotify`.
+Khi Claude Code hoặc Copilot CLI cần bạn approve một lệnh hoặc chờ bạn chọn câu trả lời, extension đọc một câu ngắn kèm tên workspace: "Workspace shipngo cần approve" hoặc "Workspace vi voice cần bạn xác nhận câu trả lời". Chạy nhiều cửa sổ cùng lúc vẫn biết cửa sổ nào đang chờ. Mọi lượt đọc xếp hàng theo thứ tự đến, không chồng tiếng; chỉ khi cùng một phiên có câu trả lời mới thì câu cũ của phiên đó bị cắt. Tắt bằng `noIdle.voiceNotify`.
 
 ### Approve bằng giọng nói
 
@@ -94,9 +94,23 @@ Bật tắt `noIdle.handsFree` có hiệu lực ngay, không cần restart Claud
 
 Hook không bao giờ tự mở mic: khi Claude xong, hook Stop thoát ngay và tiến trình đọc chỉ gửi một tín hiệu qua named pipe cho đúng cửa sổ VS Code (chọn theo thư mục làm việc của phiên Claude Code); lúc cần approve hay chọn đáp án, hook gửi tín hiệu hỏi và chờ extension nghe xong trả chữ về. Vì vậy câu nói là prompt thật do bạn gõ bằng giọng, hiện trong màn hình chat, sửa được trước khi gửi, và Claude Code không phải chờ hook. Mỗi cửa sổ ghi một file đăng ký trong `%TEMP%\noidle-tts\windows`. Tín hiệu listen còn mang chuỗi pid tổ tiên của tiến trình Claude Code (Claude → wrapper → shell của terminal); extension so với pid shell của từng terminal trong cửa sổ để chọn đúng terminal đang chạy Claude, không khớp mới lấy terminal đang chọn. Tra cây tiến trình bằng PowerShell mất hơn một giây nên hook lưu chuỗi theo phiên và chỉ tra lại khi pid Claude đổi.
 
-Phiên Claude Code đang mở cần khởi động lại để nhận hook; Copilot thì nhận ngay ở phiên chat mới. Chạy `NoIdle: Đọc thử giọng` để kiểm tra loa. Đổi giọng nam hoặc nữ bằng `noIdle.voice`, chỉnh tốc độ bằng `noIdle.voiceRate`. Tắt setting thì hook được gỡ khỏi `settings.json` và file hook Copilot bị xoá.
+Phiên Claude Code/Copilot CLI đang mở cần khởi động lại để nhận hook; Copilot Chat nhận ở phiên chat mới. Chạy `NoIdle: Đọc thử giọng` để kiểm tra loa. Đổi giọng nam hoặc nữ bằng `noIdle.voice`, chỉnh tốc độ bằng `noIdle.voiceRate`. Tắt setting thì hook được gỡ khỏi `settings.json` và file hook Copilot bị xoá.
 
-Với Copilot, extension chỉ đọc câu trả lời và mở mic hands-free; chưa có approve hay chọn đáp án bằng giọng vì Copilot không có sự kiện hook tương đương. Không cần bật `chat.useClaudeHooks` của VS Code: Copilot đọc thẳng thư mục `~/.copilot/hooks`.
+Với **Copilot Chat trong VS Code**, extension vẫn chỉ đọc câu trả lời và mở mic vào ô chat; các hook xin quyền/chọn đáp án mới chỉ áp dụng cho **Copilot CLI**. Không cần bật `chat.useClaudeHooks` của VS Code.
+
+### GitHub Copilot CLI
+
+Bật `noIdle.voiceResponse`, `noIdle.voiceNotify`, `noIdle.voiceApprove` và `noIdle.handsFree` để dùng cả đọc phản hồi, thông báo, approve/từ chối và trả lời câu hỏi bằng giọng. Mở `copilot` trong terminal tích hợp của VS Code, cùng workspace; khởi động lại CLI sau khi extension đồng bộ hook. Không phải GitHub CLI `gh`.
+
+CLI đọc xong thì lời nói quay về **đúng terminal chạy CLI**, không mở ô Copilot Chat. Nếu CLI chạy ở terminal bên ngoài hoặc không xác định được terminal theo cây tiến trình, NoIdle không tự chèn vào terminal đang chọn để tránh chạy nhầm lệnh. Đọc thành tiếng vẫn hoạt động; nghe mic và làm nổi cửa sổ cần VS Code đang mở workspace tương ứng.
+
+Hook dùng giao thức camelCase của CLI, nhưng vẫn nhận giao thức snake_case từ Chat. Nếu có `COPILOT_HOME` trong môi trường của VS Code, extension đồng bộ thêm file `hooks\noidle.json` trong thư mục đó; tắt `voiceResponse` gỡ cả hai file do extension quản lý.
+
+CLI gọi `permissionRequest` **trước** bộ kiểm tra quyền của nó, nên có thể hỏi bằng giọng cho cả lệnh vốn được tự cho phép. NoIdle chỉ trả quyền sau khi nghe xác nhận rõ và lệnh vượt qua cùng danh sách an toàn của Claude; lời nói không rõ, tool lạ, file nhạy cảm hay yêu cầu thoát sandbox được để CLI xử lý thủ công. NoIdle không sửa quy tắc quyền của CLI.
+
+Câu hỏi `ask_user` được đọc kèm lựa chọn; nói số, tên hoặc câu tự do nếu câu hỏi cho phép. Chỉ chọn nhiều khi biểu mẫu cho phép chọn nhiều. Giống hook Claude, NoIdle chặn lần gọi tool đặt câu hỏi và đưa câu trả lời vào lý do phản hồi để agent tiếp tục, **không giả lập thao tác chọn trên hộp thoại**. Biểu mẫu không hỗ trợ hoặc câu trả lời không rõ vẫn để chọn tay.
+
+Hướng dẫn 🔊 được cung cấp qua `sessionStart`; CLI 1.0.56 còn nhận nhắc theo mỗi prompt qua `modifiedPrompt`. Các bản CLI bỏ qua output của `userPromptSubmitted` vẫn có hướng dẫn đầu phiên, nhưng cần mở phiên mới sau khi đổi ngôn ngữ/kiểu recap–announce để cập nhật hướng dẫn cho model. Mute, giọng đọc và việc bật/tắt mic vẫn được extension/hook đọc từ cấu hình.
 
 ### Giọng ElevenLabs (tuỳ chọn)
 
@@ -176,7 +190,7 @@ Gõ `NoIdle` vào ô tìm kiếm của Settings:
 | Setting | Mặc định | Ý nghĩa |
 |---|---|---|
 | `noIdle.groqApiKey` | trống | Groq API key. |
-| `noIdle.voiceResponse` | `false` | Đọc câu trả lời của Claude Code và Copilot Chat thành tiếng. |
+| `noIdle.voiceResponse` | `false` | Đọc câu trả lời của Claude Code, Copilot Chat và Copilot CLI thành tiếng. |
 | `noIdle.voiceMute` | `false` | Tạm tắt tiếng Claude Code ngay, không cần restart; hook vẫn đăng ký nhưng im lặng. |
 | `noIdle.voiceNotify` | `true` | Đọc "Workspace X cần approve" hoặc "cần bạn xác nhận câu trả lời" khi Claude Code chờ bạn. |
 | `noIdle.voiceApprove` | `false` | Approve bằng giọng nói sau khi nghe thông báo. |

@@ -4,6 +4,7 @@
  * để chọn đúng terminal đang chạy Claude thay vì terminal đang focus.
  */
 import { execFile } from 'child_process';
+import type { SignalSource } from './signal';
 
 /** Đọc bảng "pid ppid" mỗi dòng (PowerShell hoặc ps); dòng không phải hai số thì bỏ. */
 export function parseParentTable(text: string): Map<number, number> {
@@ -64,4 +65,12 @@ export async function pickTerminal<T extends TerminalLike>(terminals: readonly T
     if (pid !== undefined && want.has(pid)) return terminals[i];
   }
   return undefined;
+}
+
+export async function terminalForAgent<T extends TerminalLike>(
+  terminals: readonly T[], ancestors: number[] | undefined, active: T | undefined, source?: SignalSource,
+): Promise<T | undefined> {
+  const matched = await pickTerminal(terminals, ancestors);
+  // CLI bên ngoài VS Code không được chèn lời nói vào một shell không liên quan.
+  return matched ?? (source === 'copilot-cli' ? undefined : active);
 }

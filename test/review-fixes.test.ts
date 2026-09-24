@@ -88,8 +88,8 @@ describe('inject with a pinned terminal', () => {
 
 describe('Copilot hooks tell the hook where the answer came from', () => {
   const opts: HookOptions = { enabled: true, script: 'C:/x/claude-hook.js', voice: 'v', rate: '+0%', notify: true, player: 'ffplay', config: 'C:/x/c.json' };
-  it('adds --source copilot to the Copilot Stop command only', () => {
-    const copilot = copilotHooksFile(opts).hooks.Stop[0].command;
+  it('adds --source copilot to the shared agentStop command but not Claude Stop', () => {
+    const copilot = copilotHooksFile(opts).hooks.agentStop[0].command;
     expect(copilot).toContain('--source copilot');
     expect(hookCommands(opts).Stop).not.toContain('--source');
   });

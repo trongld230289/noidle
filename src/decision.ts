@@ -222,6 +222,10 @@ const NUMBER_WORDS: Record<string, number> = {
 // So trên chữ còn dấu: bỏ dấu thì "thời gian" thành "thoi" và bị hiểu là "thôi".
 const SKIP_RE = /(^|\s)(bỏ qua|bo qua|không chọn|khong chon|thôi|huỷ|hủy|skip|cancel|để sau|de sau)(\s|$)/iu;
 
+export function isChoiceCancellation(text: string): boolean {
+  return SKIP_RE.test(text.normalize('NFC').toLowerCase().replace(/[.,!?]/g, ' '));
+}
+
 /**
  * Từ câu người dùng nói, tìm các lựa chọn được chọn (chỉ số bắt đầu từ 0) trong danh sách nhãn.
  * Hiểu số ("một", "2", "thứ ba"), chữ cái ("b"), "tất cả", hoặc nhắc lại tên lựa chọn.
@@ -230,7 +234,7 @@ const SKIP_RE = /(^|\s)(bỏ qua|bo qua|không chọn|khong chon|thôi|huỷ|h�
 export function parseChoice(text: string, labels: string[]): number[] | undefined {
   const t = strip(text);
   if (!t) return undefined;
-  if (SKIP_RE.test(text.normalize('NFC').toLowerCase().replace(/[.,!?]/g, ' '))) return [];
+  if (isChoiceCancellation(text)) return [];
   if (/(^|\s)(tat ca|ca hai|ca ba|all)(\s|$)/.test(t)) return labels.map((_, i) => i);
 
   const picked = new Set<number>();

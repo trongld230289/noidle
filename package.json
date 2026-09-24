@@ -70,7 +70,7 @@
           "noIdle.voiceResponse": {
             "type": "boolean",
             "default": false,
-            "markdownDescription": "Công tắc chính: **bật** thì Claude Code (và Copilot Chat) đọc câu trả lời thành tiếng qua tai nghe. **Tắt** thì gỡ hẳn hook, phải mở phiên Claude Code mới mới có tác dụng. Chỉ muốn im tạm thời thì dùng `noIdle.voiceMute`.\n\nCần `node` và `ffplay` (đi kèm ffmpeg) trong PATH.",
+            "markdownDescription": "Công tắc chính: **bật** thì Claude Code, Copilot Chat và GitHub Copilot CLI đọc câu trả lời thành tiếng qua tai nghe. **Tắt** thì gỡ hẳn hook. Khởi động lại phiên Claude Code/Copilot CLI để nhận thay đổi hook. Chỉ muốn im tạm thời thì dùng `noIdle.voiceMute`.\n\nCần `node` và `ffplay` (đi kèm ffmpeg) trong PATH.",
             "scope": "application",
             "order": 0
           },
@@ -99,7 +99,7 @@
           "noIdle.voiceNotify": {
             "type": "boolean",
             "default": true,
-            "markdownDescription": "**Bật** thì đọc một câu ngắn khi Claude cần bạn: \"Workspace X cần approve\", \"Workspace X cần bạn xác nhận câu trả lời\". Chỉ đọc, không mở mic (mở mic là việc của `noIdle.voiceApprove` và `noIdle.handsFree`).",
+            "markdownDescription": "**Bật** thì đăng ký hook thông báo cho Claude Code và Copilot CLI: \"Workspace X cần approve\", \"Workspace X cần bạn xác nhận câu trả lời\". Mở mic là việc của `noIdle.voiceApprove` và `noIdle.handsFree`. Tắt setting này cũng gỡ hook approve/chọn đáp án; cần khởi động lại CLI để nhận thay đổi.",
             "scope": "application",
             "order": 3
           },
@@ -129,14 +129,14 @@
           "noIdle.handsFree": {
             "type": "boolean",
             "default": false,
-            "markdownDescription": "**Bật = mic tự mở sau khi Claude đọc xong**, để bạn nói yêu cầu tiếp theo mà không chạm bàn phím. **Tắt = đọc xong là thôi, không mở mic.** Có hiệu lực ngay. Lệnh nhanh: `NoIdle: Tắt/bật hands-free`.\n\nKhi mic mở: nghe tiếng bíp, nói, chữ hiện trong terminal, ngừng nói khoảng 2,5 giây là tự gửi. Nói **gửi** để gửi ngay, **huỷ** để bỏ. Bấm F6 hoặc im lặng hết giờ là mic tắt. Claude hỏi chọn đáp án thì đọc các lựa chọn và nghe bạn chọn bằng số hoặc tên.\n\n**Mic tự mở khi nào?** Chỉ trong ba trường hợp: (1) Claude đọc xong câu trả lời, nếu bật `noIdle.handsFree`; (2) Claude hỏi chọn đáp án, cũng do `noIdle.handsFree`; (3) Claude xin quyền chạy lệnh, nếu bật `noIdle.voiceApprove`. Tắt cả hai là mic không bao giờ tự mở, chỉ mở khi bạn bấm F6.",
+            "markdownDescription": "**Bật = mic tự mở sau khi agent đọc xong**, để bạn nói yêu cầu tiếp theo. Claude Code/Copilot CLI nhận lời nói trong terminal; Copilot Chat nhận trong ô chat. CLI phải chạy trong terminal tích hợp của VS Code; không xác định đúng terminal thì không tự chèn. **Tắt = đọc xong là thôi, không mở mic.** Lệnh nhanh: `NoIdle: Tắt/bật hands-free`.\n\nNghe tiếng bíp rồi nói; ngừng khoảng 2,5 giây là tự gửi. Nói **gửi** để gửi ngay, **huỷ** để bỏ. Bấm F6 hoặc im lặng hết giờ là mic tắt. Claude Code/Copilot CLI hỏi chọn đáp án thì đọc các lựa chọn và nghe bạn chọn bằng số hoặc tên; cần bật `noIdle.voiceNotify`.\n\nXin quyền chạy lệnh dùng setting riêng `noIdle.voiceApprove`. Tắt cả hai là mic chỉ mở khi bạn bấm F6.",
             "scope": "application",
             "order": 0
           },
           "noIdle.voiceApprove": {
             "type": "boolean",
             "default": false,
-            "markdownDescription": "**Bật = mic tự mở khi Claude xin quyền chạy lệnh**, bạn nói \"đồng ý\", \"ok\" để cho phép hoặc \"từ chối\", \"không\" để chặn. **Tắt = bấm tay như thường.** Im lặng hay nói không rõ thì hộp thoại vẫn hiện.\n\nChỉ lệnh an toàn (đọc file, sửa file, npm test, git status/diff/commit...) mới duyệt được bằng giọng. Lệnh nguy hiểm (xoá file, git push, sudo...) luôn phải bấm tay. Ai ở gần mic cũng nói được, chỉ bật khi cần.\n\n**Mic tự mở khi nào?** Chỉ trong ba trường hợp: (1) Claude đọc xong câu trả lời, nếu bật `noIdle.handsFree`; (2) Claude hỏi chọn đáp án, cũng do `noIdle.handsFree`; (3) Claude xin quyền chạy lệnh, nếu bật `noIdle.voiceApprove`. Tắt cả hai là mic không bao giờ tự mở, chỉ mở khi bạn bấm F6.",
+            "markdownDescription": "**Bật = mic tự mở khi Claude Code/Copilot CLI xin quyền**, bạn nói \"đồng ý\", \"ok\" để cho phép hoặc \"từ chối\", \"không\" để chặn. Cần bật `noIdle.voiceNotify`. **Tắt = bấm tay như thường.** Im lặng hay nói không rõ thì để agent xử lý quyền như thường.\n\nChỉ lệnh trong danh sách an toàn mới duyệt được bằng giọng; lệnh nguy hiểm, tool lạ, file nhạy cảm và yêu cầu thoát sandbox phải bấm tay. Ai ở gần mic cũng nói được, chỉ bật khi cần.\n\nCopilot CLI gọi hook trước bộ kiểm tra quyền, nên có thể hỏi cả lệnh vốn được tự cho phép. Không áp dụng cho Copilot Chat. Đọc xong/chọn đáp án dùng setting riêng `noIdle.handsFree`.",
             "scope": "application",
             "order": 1
           },

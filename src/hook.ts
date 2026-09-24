@@ -1,5 +1,5 @@
 /**
- * Hook cho Claude Code và Copilot Chat (VS Code 1.110+), đóng gói thành dist/claude-hook.js.
+ * Hook cho Claude Code, Copilot Chat và Copilot CLI, đóng gói thành dist/claude-hook.js.
  * Copilot gửi stdin cùng các trường (session_id, transcript_path, stop_hook_active, cwd = thư mục workspace),
  * chỉ khác định dạng transcript (speech.ts hiểu cả hai). Các chế độ:
  *   prompt [--config]         UserPromptSubmit: in hướng dẫn để Claude kết thúc bằng dòng 🔊 (trừ khi config voiceMute).
@@ -27,15 +27,25 @@ import { spawn } from 'child_process';
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
 import { lastAssistantText, pickSpeech, hasSpeakSection, promptContext, promptReminder, promptStopRecap, splitSentences, announcement, doneAnnouncement, workspaceName, spoken, HookInput } from './speech';
 import { langOf, isAuto, detectLang, effectiveVoice, type Lang } from './lang';
-import { parseApproval, isDangerous, voiceApprovable, parseChoice, permissionRequestOutput } from './decision';
+import { parseApproval, isDangerous, voiceApprovable, parseChoice, isChoiceCancellation, permissionRequestOutput } from './decision';
 import { signalWindow, askWindow, readRegistry, micHolder, MIC_LOCK_MAX_AGE_MS, type SignalSource, type AttentionReason } from './signal';
 import { ancestorsOf, parentMap } from './proctree';
 import { hedged } from './hedge';
 import { pronounce } from './pronounce';
 import { prefetchInOrder } from './prefetch';
 import { synthElevenLabs, rateToSpeed, fetchUsage, writeUsage, readUsage, formatUsage, isQuotaError, elevenExhausted } from './elevenlabs';
+import { normalizeCopilotInput, type AgentHookInput } from './copilot';
 
 const DEFAULT_VOICE = 'vi-VN-HoaiMyNeural';
+let inputSource: SignalSource | undefined;
+
+async function readHookInput(event: string): Promise<AgentHookInput> {
+  const value: unknown = JSON.parse((await readStdin()) || '{}');
+  if (arg('source', 'claude') !== 'copilot') return value as AgentHookInput;
+  const normalized = normalizeCopilotInput(value, event);
+  inputSource = normalized.source;
+  return normalized.input;
+}
 
 /** Cấu hình extension ghi ra file cho hook (đường dẫn qua --config). */
 interface HookConfig {
@@ -99,7 +109,7 @@ async function claudeAncestors(claudePid: number, session: string): Promise<numb
 async function askHeard(cwd: string, session: string, timeoutSec: number, label: string): Promise<string> {
   const t0 = Date.now();
   const ancestors = await claudeAncestors(process.ppid, session);
-  const heard = (await askWindow({ event: 'ask', session, cwd, timeoutSec, ancestors }, undefined, log)) ?? '';
+  const heard = (await askWindow({ event: 'ask', session, cwd, timeoutSec, ancestors, source: sourceArg() }, undefined, log)) ?? '';
   log(`${label}: nghe ${JSON.stringify(heard)} (${Date.now() - t0}ms)`);
   return heard.trim();
 }
@@ -351,12 +361,27 @@ function pruneSessionMarks(): void {
   }
 }
 
+async function modeStart(): Promise<void> {
+  const input = await readHookInput('SessionStart');
+  if (sourceArg() !== 'copilot-cli' || input.agent_id) return;
+  const cfg = loadConfig();
+  if (cfg.voiceMute || cfg.voiceStyle === 'announce') return;
+  const lang = isAuto(cfg.language)
+    ? detectLang(input.initial_prompt ?? '') ?? sessionLang(cfg, input.session_id)
+    : langOf(cfg.language);
+  process.stdout.write(JSON.stringify({ additionalContext: promptContext(lang) }));
+}
+
 async function modePrompt(): Promise<void> {
-  let input: { session_id?: string; cwd?: string; prompt?: string; agent_id?: string; agent_type?: string } = {};
-  try {
-    input = JSON.parse((await readStdin()) || '{}') as typeof input;
-  } catch {
-    /* stdin lạ thì vẫn báo theo cwd của tiến trình */
+  let input: AgentHookInput = {};
+  if (arg('source', 'claude') === 'copilot') {
+    input = await readHookInput('UserPromptSubmit');
+  } else {
+    try {
+      input = await readHookInput('UserPromptSubmit');
+    } catch (err) {
+      log(`prompt: invalid input: ${(err as Error).message}`);
+    }
   }
   // Prompt do subagent gửi (Agent tool) cũng qua hook này với cùng session_id: không phải người dùng nói,
   // nên không đếm, không đổi ngôn ngữ phiên, không chèn hướng dẫn 🔊 và không tắt mic đang mở.
@@ -380,20 +405,20 @@ async function modePrompt(): Promise<void> {
   else {
     // announce thường trả rỗng (vẫn cập nhật dấu phiên để speak/notify chọn đúng ngôn ngữ), chỉ có chữ khi vừa đổi kiểu.
     const additionalContext = promptContextFor(input.session_id, cfg, promptText);
-    if (additionalContext) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext } }));
+    if (additionalContext) {
+      const output = sourceArg() === 'copilot-cli'
+        ? { modifiedPrompt: `${promptText}\n\n${additionalContext}` }
+        : { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext } };
+      process.stdout.write(JSON.stringify(output));
+    }
   }
   // Người dùng vừa gửi prompt: bảo extension tắt mic hands-free nếu đang mở. Không có cửa sổ thì thôi.
   const cwd = input.cwd || process.cwd();
-  await signalWindow({ event: 'submitted', session: input.session_id ?? '', cwd }, undefined, log);
+  await signalWindow({ event: 'submitted', session: input.session_id ?? '', cwd, source: sourceArg() }, undefined, log);
 }
 
 async function modeSpeak(): Promise<void> {
-  const input = JSON.parse((await readStdin()) || '{}') as {
-    transcript_path?: string;
-    stop_hook_active?: boolean;
-    session_id?: string;
-    cwd?: string;
-  };
+  const input = await readHookInput('Stop');
   // Ghi nguồn gọi: Claude Code (~/.claude/settings.json) và Copilot (~/.copilot/hooks/noidle.json) đều gọi hook này.
   log(`speak: session ${input.session_id ?? '-'} cwd ${input.cwd ?? '-'} transcript ${input.transcript_path ?? '-'}`);
   if (!input.transcript_path) return;
@@ -438,7 +463,11 @@ async function modeSpeak(): Promise<void> {
   // Hands-free: extension mở mic sau khi loa phát xong. Tiến trình play gửi tín hiệu listen khi xong;
   // không có gì để đọc thì gửi ngay từ đây.
   const listenCwd = cfg.handsFree && !background ? cwd : undefined;
-  if (text) spawnPlay(text, 'speak', session, lang, listenCwd);
+  if (text) {
+    // Shell chạy hook CLI thoát ngay sau hook; lấy chuỗi pid trước khi tách play.
+    const ancestors = listenCwd && sourceArg() === 'copilot-cli' ? await claudeAncestors(process.ppid, session) : undefined;
+    spawnPlay(text, 'speak', session, lang, listenCwd, ancestors);
+  }
   else if (listenCwd) {
     const ancestors = await claudeAncestors(process.ppid, session);
     await signalWindow({ event: 'listen', session, cwd: listenCwd, source: sourceArg(), ancestors }, undefined, log);
@@ -470,7 +499,7 @@ function modeSkip(): void {
 }
 
 /** Tách tiến trình phát rồi thoát ngay để Claude Code không phải chờ. listenCwd: phát xong thì báo extension mở mic. */
-function spawnPlay(raw: string, kind: Ticket['kind'], session: string, lang: Lang, listenCwd?: string): void {
+function spawnPlay(raw: string, kind: Ticket['kind'], session: string, lang: Lang, listenCwd?: string, ancestors?: number[]): void {
   // Giọng vi-VN đọc sai chữ viết tắt và đuôi file tiếng Anh; viết sẵn cách đọc trước khi tổng hợp.
   // Tiếng Anh thì bỏ bảng mặc định (nó phiên âm sang tiếng Việt), chỉ giữ bảng của người dùng.
   const text = pronounce(raw, loadConfig().pronunciations, lang === 'vi');
@@ -485,6 +514,7 @@ function spawnPlay(raw: string, kind: Ticket['kind'], session: string, lang: Lan
   // Tiến trình play tách rời nên không còn biết cha; đưa pid của Claude Code (cha của hook) để nó tra cây tiến trình.
   if (listenCwd) {
     args.push('--listen', listenCwd, '--source', sourceArg(), '--claude-pid', String(process.ppid));
+    if (ancestors?.length) args.push('--ancestors', ancestors.join(','));
     // Số prompt của phiên lúc này; play so lại trước khi mở mic để câu cũ không bật mic khi đã có prompt mới.
     if (session) args.push('--prompt-count', String(readMark(session).count));
   }
@@ -495,7 +525,9 @@ function spawnPlay(raw: string, kind: Ticket['kind'], session: string, lang: Lan
 
 /** Agent gọi hook: --source copilot (file hook Copilot) hay mặc định claude. Đi kèm tín hiệu listen để extension chọn đích. */
 function sourceArg(): SignalSource {
-  return arg('source', 'claude') === 'copilot' ? 'copilot' : 'claude';
+  if (inputSource) return inputSource;
+  const source = arg('source', 'claude');
+  return source === 'copilot-cli' || source === 'copilot' ? source : 'claude';
 }
 
 /** Giọng theo ngôn ngữ: tiếng Anh mà --voice là giọng vi-VN thì đổi sang giọng đa ngôn ngữ. */
@@ -512,12 +544,15 @@ function attention(reason: AttentionReason, session: string, cwd: string): Promi
 }
 
 async function modeNotify(): Promise<void> {
-  const input = JSON.parse((await readStdin()) || '{}') as HookInput & { session_id?: string };
+  const input = await readHookInput(arg('event', 'Notification'));
+  // Các hook bổ sung nằm trong file chung nhưng chỉ áp dụng cho CLI, không đổi UX của Chat.
+  if (sourceArg() === 'copilot') return;
   const cfg = loadConfig();
   const lang = sessionLang(cfg, input.session_id);
   const say = spoken(lang);
   const text = announcement(input, lang);
   log(`notify ${input.hook_event_name ?? '?'} ${input.notification_type ?? input.tool_name ?? ''}: ${JSON.stringify(text)}`);
+  if (input.question_fallback_reason) log(`chọn: dùng hộp thoại thủ công: ${input.question_fallback_reason}`);
   if (!text) return;
   await attention(/approve|approval/i.test(text) ? 'approve' : 'answer', input.session_id ?? '', input.cwd || process.cwd());
   if (cfg.voiceMute) {
@@ -526,7 +561,7 @@ async function modeNotify(): Promise<void> {
   }
   if (input.hook_event_name === 'PermissionRequest' && cfg.voiceApprove) {
     // Danh sách trắng: chỉ tool và lệnh lành mới duyệt bằng giọng; lệnh nguy hiểm hay chưa phân loại thì bấm tay.
-    if (!voiceApprovable(input.tool_name, input.tool_input)) {
+    if (input.tool_input?.requestSandboxBypass === true || !voiceApprovable(input.tool_name, input.tool_input)) {
       const dangerous = isDangerous(input.tool_name, input.tool_input);
       log(`approve: ${input.tool_name} ${dangerous ? 'nguy hiểm' : 'không trong danh sách an toàn'}, không nghe`);
       spawnPlay(dangerous ? say.dangerous(text) : say.notSafe(text), 'notify', input.session_id ?? '', lang);
@@ -546,7 +581,7 @@ async function modeNotify(): Promise<void> {
  * Chọn đáp án bằng giọng: đọc câu hỏi và các lựa chọn, nghe, hiểu số hoặc tên lựa chọn,
  * rồi chặn tool đặt câu hỏi với lý do chứa câu trả lời để Claude làm tiếp. Không rõ thì để hộp thoại hiện.
  */
-async function voiceChoose(text: string, input: HookInput & { session_id?: string }, cfg: HookConfig, lang: Lang): Promise<void> {
+async function voiceChoose(text: string, input: AgentHookInput, cfg: HookConfig, lang: Lang): Promise<void> {
   const session = input.session_id ?? '';
   const questions = (input.tool_input?.questions ?? []).filter((q) => q?.question);
   if (!questions.length) {
@@ -557,9 +592,16 @@ async function voiceChoose(text: string, input: HookInput & { session_id?: strin
   const cwd = input.cwd || process.cwd();
   const say = spoken(lang);
   const answers: string[] = [];
+  const structuredAnswers: Record<string, unknown> = {};
+  if (sourceArg() === 'copilot-cli' && typeof input.tool_input?.message === 'string') {
+    await playNow(input.tool_input.message, 'notify', session, lang);
+  }
   for (const q of questions) {
     // Claude hay tự đánh số trong nhãn ("1. Tra tracking"); bỏ đi để không đọc số hai lần.
-    const labels = (q.options ?? []).map((o) => (o?.label ?? '').trim().replace(/^\d+[.):]\s*/, '')).filter(Boolean);
+    const labels = (q.options ?? []).map((o) => {
+      const label = (o?.label ?? '').trim();
+      return label.replace(/^\d+[.):]\s*/, '') || label;
+    }).filter(Boolean);
     const multi = q.multiSelect ? say.multiSelect : '';
     const spokenOptions = labels.length
       ? ` ${labels.map((l, i) => `${i + 1}, ${l}`).join('. ')}.${multi}${say.chooseAfterBeep}`
@@ -570,9 +612,17 @@ async function voiceChoose(text: string, input: HookInput & { session_id?: strin
       spawnPlay(say.notHeardChoose, 'notify', session, lang);
       return;
     }
+    if (isChoiceCancellation(heard)) {
+      spawnPlay(say.okChoose, 'notify', session, lang);
+      return;
+    }
     if (labels.length) {
       const picked = parseChoice(heard, labels);
       if (picked === undefined) {
+        if (q.allowFreeform === true) {
+          answers.push(say.answerFree(q.question ?? '', heard));
+          continue;
+        }
         spawnPlay(say.unclearChoose, 'notify', session, lang);
         return;
       }
@@ -580,23 +630,46 @@ async function voiceChoose(text: string, input: HookInput & { session_id?: strin
         spawnPlay(say.okChoose, 'notify', session, lang);
         return;
       }
+      if (!q.multiSelect && picked.length > 1) {
+        spawnPlay(say.unclearChoose, 'notify', session, lang);
+        return;
+      }
       const chosen = picked.map((i) => labels[i]);
-      answers.push(say.answerChoice(q.question ?? '', chosen));
+      if (q.key && q.values) {
+        const values = picked.map((i) => q.values?.[i]);
+        structuredAnswers[q.key] = q.multiSelect ? values : values[0];
+      } else {
+        answers.push(say.answerChoice(q.question ?? '', chosen));
+      }
       await playNow(say.chosen(chosen), 'notify', session, lang);
     } else {
-      answers.push(say.answerFree(q.question ?? '', heard));
+      if (q.key) {
+        if (q.valueType === 'number' || q.valueType === 'integer') {
+          const number = Number(heard);
+          if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(heard) || !Number.isFinite(number) || (q.valueType === 'integer' && !Number.isSafeInteger(number))) {
+            spawnPlay(say.unclearChoose, 'notify', session, lang);
+            return;
+          }
+          structuredAnswers[q.key] = number;
+        } else {
+          structuredAnswers[q.key] = heard;
+        }
+      } else {
+        answers.push(say.answerFree(q.question ?? '', heard));
+      }
     }
   }
+  if (Object.keys(structuredAnswers).length) answers.push(JSON.stringify(structuredAnswers));
   log(`chọn → ${answers.join(' | ')}`);
-  process.stdout.write(
-    JSON.stringify({
+  const decision = { permissionDecision: 'deny', permissionDecisionReason: say.chooseReason(answers) };
+  process.stdout.write(JSON.stringify(sourceArg() === 'copilot-cli'
+    ? decision
+    : {
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
-        permissionDecision: 'deny',
-        permissionDecisionReason: say.chooseReason(answers),
+        ...decision,
       },
-    }),
-  );
+    }));
 }
 
 /**
@@ -621,7 +694,10 @@ async function voiceApprove(text: string, input: HookInput & { session_id?: stri
   }
   spawnPlay(decision === 'allow' ? say.approved : say.denied, 'notify', session, lang);
   // PermissionRequest dùng decision.behavior, không phải permissionDecision như PreToolUse.
-  process.stdout.write(JSON.stringify(permissionRequestOutput(decision, say.approveReason(decision, heard))));
+  const reason = say.approveReason(decision, heard);
+  process.stdout.write(JSON.stringify(sourceArg() === 'copilot-cli'
+    ? { behavior: decision, ...(decision === 'deny' ? { message: reason } : {}) }
+    : permissionRequestOutput(decision, reason)));
 }
 
 /** Phát ngay trong tiến trình này và chờ phát xong (vẫn xếp hàng chung). */
@@ -800,7 +876,10 @@ async function modePlay(): Promise<void> {
   const ticket = takeTicket(kind, session === '-' ? '' : session);
   // Tra cây tiến trình song song với lúc chờ và đọc, để không làm chậm việc mở mic.
   const listenCwd = arg('listen', '');
-  const ancestors = listenCwd ? claudeAncestors(Number(arg('claude-pid', '0')), session === '-' ? '' : session) : Promise.resolve([]);
+  const savedAncestors = arg('ancestors', '').split(',').map(Number).filter((pid) => Number.isSafeInteger(pid) && pid > 0);
+  const ancestors = savedAncestors.length
+    ? Promise.resolve(savedAncestors)
+    : listenCwd ? claudeAncestors(Number(arg('claude-pid', '0')), session === '-' ? '' : session) : Promise.resolve([]);
   await waitTurn(ticket);
   // --voice ở đây đã được spawnPlay chọn theo ngôn ngữ.
   await playText(text, ticket, arg('voice', DEFAULT_VOICE));
@@ -912,12 +991,13 @@ async function playText(text: string, ticket: string, voice: string): Promise<vo
 
 async function main(): Promise<void> {
   const mode = process.argv[2];
+  if (mode === 'start') return modeStart();
   if (mode === 'prompt') return modePrompt();
   if (mode === 'speak') return modeSpeak();
   if (mode === 'play') return modePlay();
   if (mode === 'notify') return modeNotify();
   if (mode === 'skip') return modeSkip();
-  process.stderr.write('usage: claude-hook.js prompt | speak | notify | play <file>\n');
+  process.stderr.write('usage: claude-hook.js start | prompt | speak | notify | play <file>\n');
   process.exitCode = 2;
 }
 

@@ -19,14 +19,14 @@ export interface WindowEntry {
 export type SignalEvent = 'listen' | 'submitted' | 'ask' | 'attention';
 /** attention: vì sao cửa sổ cần người dùng. */
 export type AttentionReason = 'done' | 'approve' | 'answer';
-export type SignalSource = 'claude' | 'copilot';
+export type SignalSource = 'claude' | 'copilot' | 'copilot-cli';
 export interface Signal {
   event: SignalEvent;
   session: string;
   cwd: string;
   /** ask: chờ người dùng nói tối đa bao nhiêu giây. */
   timeoutSec?: number;
-  /** listen: agent nào vừa đọc xong, để extension chọn đích chèn (terminal cho Claude Code, ô chat cho Copilot). */
+  /** Terminal cho Claude Code/Copilot CLI; ô chat cho Copilot Chat. */
   source?: SignalSource;
   /** listen/ask: pid của Claude Code rồi cha, ông... để extension tìm terminal có shell pid trong chuỗi này. */
   ancestors?: number[];
@@ -73,7 +73,7 @@ export function parseSignal(line: string): Signal | undefined {
     if ((o.event !== 'listen' && o.event !== 'submitted' && o.event !== 'ask' && o.event !== 'attention') || typeof o.cwd !== 'string') return undefined;
     const out: Signal = { event: o.event, session: typeof o.session === 'string' ? o.session : '', cwd: o.cwd };
     if (typeof o.timeoutSec === 'number') out.timeoutSec = o.timeoutSec;
-    if (o.source === 'claude' || o.source === 'copilot') out.source = o.source;
+    if (o.source === 'claude' || o.source === 'copilot' || o.source === 'copilot-cli') out.source = o.source;
     if (Array.isArray(o.ancestors)) out.ancestors = o.ancestors.filter((n): n is number => typeof n === 'number');
     if (o.reason === 'done' || o.reason === 'approve' || o.reason === 'answer') out.reason = o.reason;
     return out;
