@@ -284,6 +284,13 @@
           "markdownDescription": "Đổi màu title bar (vàng cam) và nút NoIdle trên status bar của cửa sổ đang cần bạn (\"Claude xong\", \"cần approve\", \"cần bạn trả lời\"), tự trả lại khi cửa sổ được focus. Title bar đổi màu bằng cách ghi `workbench.colorCustomizations` vào settings của workspace (như Peacock) rồi gỡ sau; workspace có `.vscode/settings.json` trong git sẽ thấy file đổi trong lúc đang tô.",
           "scope": "application"
         },
+        "noIdle.attentionTintColor": {
+          "type": "string",
+          "default": "#15803d",
+          "pattern": "^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$",
+          "markdownDescription": "Màu title bar khi cửa sổ cần bạn (`noIdle.attentionColor`), dạng hex như `#15803d`. Chữ tự chọn trắng hay tối theo độ sáng của nền. Chỉ thanh trên đổi màu, viền quanh editor và panel giữ màu gốc.",
+          "scope": "application"
+        },
         "noIdle.voiceStyle": {
           "type": "string",
           "enum": [

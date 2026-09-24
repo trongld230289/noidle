@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { StatusBar, UsageBar } from './status';
-import { flashWindow, applyTint, removeTint, type ColorMap } from './attention';
+import { flashWindow, applyTint, removeTint, shellColorFor, normalizeHex, TINT, type ColorMap } from './attention';
 import { Recorder, SAMPLE_RATE, CHANNELS } from './recorder';
 import { Segmenter } from './segmenter';
 import { listAudioDevices } from './devices';
@@ -79,6 +79,7 @@ function config() {
     voiceStyle: (c.get<string>('voiceStyle', 'recap') === 'announce' ? 'announce' : 'recap') as 'recap' | 'announce',
     attentionFlash: c.get<boolean>('attentionFlash', true),
     attentionColor: c.get<boolean>('attentionColor', true),
+    attentionTintColor: normalizeHex(c.get<string>('attentionTintColor', ''), TINT.activeBackground),
     language: c.get<string>('language', 'vi'),
     /** auto: mic để Whisper tự nhận diện, giao diện và giọng theo ngôn ngữ nghe được gần nhất. */
     auto: isAuto(c.get<string>('language', 'vi')),
@@ -937,10 +938,18 @@ export function activate(ctx: vscode.ExtensionContext): void {
   let tintSaved: ColorMap | undefined;
   const colorCfg = () => vscode.workspace.getConfiguration('workbench');
   const workspaceColors = () => colorCfg().inspect<ColorMap>('colorCustomizations')?.workspaceValue;
+  const shellColor = () => {
+    const k = vscode.window.activeColorTheme.kind;
+    return shellColorFor(k === vscode.ColorThemeKind.Light ? 'light' : k === vscode.ColorThemeKind.HighContrast ? 'hcDark' : k === vscode.ColorThemeKind.HighContrastLight ? 'hcLight' : 'dark');
+  };
+
+  /** Màu đã dùng lúc tô, để gỡ đúng màu đó dù người dùng đổi setting giữa chừng. */
+  let tintBg = TINT.activeBackground;
 
   async function tintTitleBar(): Promise<void> {
     if (tintSaved || !vscode.workspace.workspaceFolders?.length) return;
-    const { next, saved } = applyTint(workspaceColors());
+    tintBg = config().attentionTintColor;
+    const { next, saved } = applyTint(workspaceColors(), shellColor(), tintBg);
     tintSaved = saved;
     try {
       await colorCfg().update('colorCustomizations', next, vscode.ConfigurationTarget.Workspace);
@@ -954,10 +963,11 @@ export function activate(ctx: vscode.ExtensionContext): void {
     const saved = tintSaved ?? {};
     const current = workspaceColors();
     // Không nhớ gì (extension vừa khởi động lại) mà file vẫn còn màu mình tô thì cũng gỡ.
-    if (!tintSaved && !(current && Object.values(current).some((v) => v === applyTint(undefined).next['titleBar.activeBackground']))) return;
+    const bg = tintSaved ? tintBg : config().attentionTintColor;
+    if (!tintSaved && current?.['titleBar.activeBackground'] !== bg) return;
     tintSaved = undefined;
     try {
-      await colorCfg().update('colorCustomizations', removeTint(current, saved), vscode.ConfigurationTarget.Workspace);
+      await colorCfg().update('colorCustomizations', removeTint(current, saved, shellColor(), bg), vscode.ConfigurationTarget.Workspace);
     } catch (err) {
       log(`attention: không gỡ được màu title bar: ${(err as Error).message}`);
     }

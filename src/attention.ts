@@ -139,38 +139,75 @@ export async function flashWindow(workspaceName: string, deps: FlashDeps = {}): 
  * workbench.colorCustomizations ở mức workspace (cách Peacock dùng), nên extension ghi vào đó rồi trả lại khi xong.
  */
 export const TINT = {
-  activeBackground: '#f0a020',
-  inactiveBackground: '#c98416',
-  foreground: '#1b1200',
+  /** Mặc định xanh lá, người dùng chọn 24/9/2026; người dùng đổi bằng noIdle.attentionTintColor. */
+  activeBackground: '#15803d',
+  inactiveBackground: '#15803d',
+  foreground: '#ffffff',
 };
 
 export type ColorMap = Record<string, string>;
 
-const TINT_KEYS: ColorMap = {
-  'titleBar.activeBackground': TINT.activeBackground,
-  'titleBar.inactiveBackground': TINT.inactiveBackground,
-  'titleBar.activeForeground': TINT.foreground,
-  'titleBar.inactiveForeground': TINT.foreground,
-};
+/** "#rgb" hoặc "#rrggbb" thành "#rrggbb" thường; không hợp lệ thì trả fallback. */
+export function normalizeHex(value: string | undefined, fallback: string): string {
+  const v = (value ?? '').trim().toLowerCase();
+  if (/^#[0-9a-f]{6}$/.test(v)) return v;
+  if (/^#[0-9a-f]{3}$/.test(v)) return `#${v[1]}${v[1]}${v[2]}${v[2]}${v[3]}${v[3]}`;
+  return fallback;
+}
+
+/** Chữ trắng hay tối tuỳ độ sáng của nền (WCAG relative luminance). */
+export function tintForeground(bg: string): string {
+  const hex = normalizeHex(bg, TINT.activeBackground);
+  const ch = (i: number) => {
+    const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  const lum = 0.2126 * ch(1) + 0.7152 * ch(3) + 0.0722 * ch(5);
+  return lum > 0.4 ? '#1f1a00' : '#ffffff';
+}
+
+function tintKeys(bg: string): ColorMap {
+  const fg = tintForeground(bg);
+  return {
+    'titleBar.activeBackground': bg,
+    'titleBar.inactiveBackground': bg,
+    'titleBar.activeForeground': fg,
+    'titleBar.inactiveForeground': fg,
+  };
+}
+
+/**
+ * VS Code mới vẽ editor, panel, sidebar như các ô nổi trên nền chrome, và nền đó mặc định lấy màu title bar
+ * (CSS: modernUI.shellBackground rơi về titleBar.activeBackground). Chỉ tô title bar thì cả viền quanh các phần
+ * cũng cam; đặt nền chrome bằng màu gốc của theme thì chỉ còn thanh trên đổi màu.
+ */
+const SHELL_KEY = 'modernUI.shellBackground';
+
+/** Màu nền chrome gốc theo loại theme (Dark Modern #181818, Light Modern #f8f8f8); theme khác lệch chút cũng chỉ trong lúc tô. */
+export function shellColorFor(kind: 'dark' | 'light' | 'hcDark' | 'hcLight'): string {
+  return { dark: '#181818', light: '#f8f8f8', hcDark: '#000000', hcLight: '#ffffff' }[kind];
+}
 
 /** Thêm màu title bar vào bảng màu hiện có; saved giữ giá trị cũ của đúng các khoá bị ghi đè để trả lại. */
-export function applyTint(current: ColorMap | undefined): { next: ColorMap; saved: ColorMap } {
+export function applyTint(current: ColorMap | undefined, shell: string, bg = TINT.activeBackground): { next: ColorMap; saved: ColorMap } {
   const next: ColorMap = { ...(current ?? {}) };
   const saved: ColorMap = {};
-  for (const [k, v] of Object.entries(TINT_KEYS)) {
+  for (const [k, v] of Object.entries(tintKeys(bg))) {
     if (typeof next[k] === 'string') saved[k] = next[k];
     next[k] = v;
   }
+  if (typeof next[SHELL_KEY] !== 'string') next[SHELL_KEY] = shell;
   return { next, saved };
 }
 
 /** Bỏ màu đã tô: trả giá trị cũ, xoá khoá mình thêm; khoá người dùng đã tự đổi trong lúc đó thì giữ. Rỗng thì undefined. */
-export function removeTint(current: ColorMap | undefined, saved: ColorMap): ColorMap | undefined {
+export function removeTint(current: ColorMap | undefined, saved: ColorMap, shell: string, bg = TINT.activeBackground): ColorMap | undefined {
   const next: ColorMap = { ...(current ?? {}) };
-  for (const [k, v] of Object.entries(TINT_KEYS)) {
+  for (const [k, v] of Object.entries(tintKeys(bg))) {
     if (next[k] !== v) continue;
     if (k in saved) next[k] = saved[k];
     else delete next[k];
   }
+  if (next[SHELL_KEY] === shell && !(SHELL_KEY in saved)) delete next[SHELL_KEY];
   return Object.keys(next).length ? next : undefined;
 }
