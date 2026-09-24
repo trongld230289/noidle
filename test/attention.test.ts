@@ -59,6 +59,8 @@ describe('attention: tô màu title bar qua workbench.colorCustomizations', () =
   it('applyTint giữ nền chrome (modernUI.shellBackground) màu gốc để chỉ title bar đổi màu, không viền quanh các phần', () => {
     const { next } = applyTint({}, '#181818');
     expect(next['modernUI.shellBackground']).toBe('#181818');
+    // Cửa sổ cần báo thường đang ở phía sau: VS Code dùng khoá inactive cho nền chrome lúc đó.
+    expect(next['modernUI.inactiveShellBackground']).toBe('#181818');
     // Người dùng đã tự đặt nền chrome thì giữ của họ.
     expect(applyTint({ 'modernUI.shellBackground': '#222' }, '#181818').next['modernUI.shellBackground']).toBe('#222');
   });

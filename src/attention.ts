@@ -181,7 +181,8 @@ function tintKeys(bg: string): ColorMap {
  * (CSS: modernUI.shellBackground rơi về titleBar.activeBackground). Chỉ tô title bar thì cả viền quanh các phần
  * cũng cam; đặt nền chrome bằng màu gốc của theme thì chỉ còn thanh trên đổi màu.
  */
-const SHELL_KEY = 'modernUI.shellBackground';
+/** Nền chrome lúc cửa sổ active và inactive; khoá inactive mặc định theo titleBar.inactiveBackground. */
+const SHELL_KEYS = ['modernUI.shellBackground', 'modernUI.inactiveShellBackground'];
 
 /** Màu nền chrome gốc theo loại theme (Dark Modern #181818, Light Modern #f8f8f8); theme khác lệch chút cũng chỉ trong lúc tô. */
 export function shellColorFor(kind: 'dark' | 'light' | 'hcDark' | 'hcLight'): string {
@@ -196,7 +197,7 @@ export function applyTint(current: ColorMap | undefined, shell: string, bg = TIN
     if (typeof next[k] === 'string') saved[k] = next[k];
     next[k] = v;
   }
-  if (typeof next[SHELL_KEY] !== 'string') next[SHELL_KEY] = shell;
+  for (const k of SHELL_KEYS) if (typeof next[k] !== 'string') next[k] = shell;
   return { next, saved };
 }
 
@@ -208,6 +209,6 @@ export function removeTint(current: ColorMap | undefined, saved: ColorMap, shell
     if (k in saved) next[k] = saved[k];
     else delete next[k];
   }
-  if (next[SHELL_KEY] === shell && !(SHELL_KEY in saved)) delete next[SHELL_KEY];
+  for (const k of SHELL_KEYS) if (next[k] === shell && !(k in saved)) delete next[k];
   return Object.keys(next).length ? next : undefined;
 }
