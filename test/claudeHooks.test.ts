@@ -58,14 +58,14 @@ describe('copilotHooksFile', () => {
     expect(file.hooks.userPromptTransformed).toBeUndefined();
   });
 
-  it('registers CLI permission, ask_user and elicitation notifications with explicit events', () => {
+  it('registers shared pre-tool handling and CLI permission notifications with explicit events', () => {
     const file = copilotHooksFile(opts);
     const cmd = hookCommands(opts);
     expect(file.hooks.permissionRequest).toEqual([
       { type: 'command', command: `${cmd.Notify} --event PermissionRequest --source copilot`, timeoutSec: 120 },
     ]);
     expect(file.hooks.preToolUse).toEqual([
-      { type: 'command', command: `${cmd.Notify} --event PreToolUse --source copilot`, matcher: 'ask_user', timeoutSec: 180 },
+      { type: 'command', command: `${cmd.Notify} --event PreToolUse --source copilot`, timeoutSec: 180 },
     ]);
     expect(file.hooks.notification).toEqual([
       { type: 'command', command: `${cmd.Notify} --event Notification --source copilot`, matcher: 'elicitation_dialog' },

@@ -226,6 +226,13 @@ export function isChoiceCancellation(text: string): boolean {
   return SKIP_RE.test(text.normalize('NFC').toLowerCase().replace(/[.,!?]/g, ' '));
 }
 
+export function isAmbiguousChoice(text: string, labels: string[]): boolean {
+  const normalized = strip(text);
+  if (labels.some((label) => strip(label) === normalized)) return false;
+  return text.includes('?') || [...NEGATION, ...DEFER, 'no'].some((phrase) =>
+    new RegExp(`(^|\\s)${phrase}(\\s|$)`).test(normalized));
+}
+
 /**
  * Từ câu người dùng nói, tìm các lựa chọn được chọn (chỉ số bắt đầu từ 0) trong danh sách nhãn.
  * Hiểu số ("một", "2", "thứ ba"), chữ cái ("b"), "tất cả", hoặc nhắc lại tên lựa chọn.

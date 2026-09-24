@@ -27,7 +27,7 @@ import { spawn } from 'child_process';
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
 import { lastAssistantText, pickSpeech, hasSpeakSection, promptContext, promptReminder, promptStopRecap, splitSentences, announcement, doneAnnouncement, workspaceName, spoken, HookInput } from './speech';
 import { langOf, isAuto, detectLang, effectiveVoice, type Lang } from './lang';
-import { parseApproval, isDangerous, voiceApprovable, parseChoice, isChoiceCancellation, permissionRequestOutput } from './decision';
+import { parseApproval, isDangerous, voiceApprovable, parseChoice, isChoiceCancellation, isAmbiguousChoice, permissionRequestOutput } from './decision';
 import { signalWindow, askWindow, readRegistry, micHolder, MIC_LOCK_MAX_AGE_MS, type SignalSource, type AttentionReason } from './signal';
 import { ancestorsOf, parentMap } from './proctree';
 import { hedged } from './hedge';
@@ -108,7 +108,7 @@ async function claudeAncestors(claudePid: number, session: string): Promise<numb
 /** Nhờ extension mở mic nghe một câu; trả '' nếu không có cửa sổ VS Code, im lặng hoặc lỗi. */
 async function askHeard(cwd: string, session: string, timeoutSec: number, label: string): Promise<string> {
   const t0 = Date.now();
-  const ancestors = await claudeAncestors(process.ppid, session);
+  const ancestors = sourceArg() === 'copilot' ? [] : await claudeAncestors(process.ppid, session);
   const heard = (await askWindow({ event: 'ask', session, cwd, timeoutSec, ancestors, source: sourceArg() }, undefined, log)) ?? '';
   log(`${label}: nghe ${JSON.stringify(heard)} (${Date.now() - t0}ms)`);
   return heard.trim();
@@ -545,12 +545,16 @@ function attention(reason: AttentionReason, session: string, cwd: string): Promi
 
 async function modeNotify(): Promise<void> {
   const input = await readHookInput(arg('event', 'Notification'));
-  // Các hook bổ sung nằm trong file chung nhưng chỉ áp dụng cho CLI, không đổi UX của Chat.
-  if (sourceArg() === 'copilot') return;
   const cfg = loadConfig();
+  const chat = sourceArg() === 'copilot';
+  if (chat && (input.hook_event_name !== 'PreToolUse' || !input.chat_voice_tool)) return;
+  if (chat && input.chat_voice_tool === 'approval' && !cfg.voiceApprove) return;
   const lang = sessionLang(cfg, input.session_id);
   const say = spoken(lang);
-  const text = announcement(input, lang);
+  const approval = input.hook_event_name === 'PermissionRequest' || (chat && input.chat_voice_tool === 'approval');
+  const text = approval && chat
+    ? `${announcement({ ...input, hook_event_name: 'PermissionRequest' }, lang)} ${input.tool_name}: ${input.tool_input?.command ?? input.tool_input?.file_path ?? ''}`.trim()
+    : announcement(input, lang);
   log(`notify ${input.hook_event_name ?? '?'} ${input.notification_type ?? input.tool_name ?? ''}: ${JSON.stringify(text)}`);
   if (input.question_fallback_reason) log(`chọn: dùng hộp thoại thủ công: ${input.question_fallback_reason}`);
   if (!text) return;
@@ -559,12 +563,16 @@ async function modeNotify(): Promise<void> {
     log('notify: đang mute, bỏ qua');
     return;
   }
-  if (input.hook_event_name === 'PermissionRequest' && cfg.voiceApprove) {
+  if (approval && cfg.voiceApprove) {
     // Danh sách trắng: chỉ tool và lệnh lành mới duyệt bằng giọng; lệnh nguy hiểm hay chưa phân loại thì bấm tay.
-    if (input.tool_input?.requestSandboxBypass === true || !voiceApprovable(input.tool_name, input.tool_input)) {
+    const elevated = input.tool_input?.requestSandboxBypass === true || (chat &&
+      ['requestSandboxBypass', 'requestUnsandboxedExecution', 'requestAllowNetwork'].some((key) => input[key] === true || input.tool_input?.[key] === true));
+    if (elevated || !voiceApprovable(input.tool_name, input.tool_input)) {
       const dangerous = isDangerous(input.tool_name, input.tool_input);
       log(`approve: ${input.tool_name} ${dangerous ? 'nguy hiểm' : 'không trong danh sách an toàn'}, không nghe`);
-      spawnPlay(dangerous ? say.dangerous(text) : say.notSafe(text), 'notify', input.session_id ?? '', lang);
+      const reason = dangerous ? say.dangerous(text) : say.notSafe(text);
+      manualChatApproval(reason);
+      spawnPlay(reason, 'notify', input.session_id ?? '', lang);
       return;
     }
     await voiceApprove(text, input, cfg, lang);
@@ -597,6 +605,7 @@ async function voiceChoose(text: string, input: AgentHookInput, cfg: HookConfig,
     await playNow(input.tool_input.message, 'notify', session, lang);
   }
   for (const q of questions) {
+    const questionText = sourceArg() === 'copilot' && q.header ? `${q.header}: ${q.question}` : q.question ?? '';
     // Claude hay tự đánh số trong nhãn ("1. Tra tracking"); bỏ đi để không đọc số hai lần.
     const labels = (q.options ?? []).map((o) => {
       const label = (o?.label ?? '').trim();
@@ -604,9 +613,9 @@ async function voiceChoose(text: string, input: AgentHookInput, cfg: HookConfig,
     }).filter(Boolean);
     const multi = q.multiSelect ? say.multiSelect : '';
     const spokenOptions = labels.length
-      ? ` ${labels.map((l, i) => `${i + 1}, ${l}`).join('. ')}.${multi}${say.chooseAfterBeep}`
+      ? ` ${labels.map((label, index) => `${index + 1}, ${label}${q.options?.[index]?.description ? `, ${q.options[index].description}` : ''}`).join('. ')}.${multi}${say.chooseAfterBeep}`
       : say.answerAfterBeep;
-    await playNow(`${q.question}${spokenOptions}`.trim(), 'notify', session, lang);
+    await playNow(`${questionText}${spokenOptions}`.trim(), 'notify', session, lang);
     const heard = await askHeard(cwd, session, timeoutSec, 'chọn');
     if (!heard) {
       spawnPlay(say.notHeardChoose, 'notify', session, lang);
@@ -616,11 +625,15 @@ async function voiceChoose(text: string, input: AgentHookInput, cfg: HookConfig,
       spawnPlay(say.okChoose, 'notify', session, lang);
       return;
     }
+    if (sourceArg() === 'copilot' && isAmbiguousChoice(heard, labels)) {
+      spawnPlay(say.unclearChoose, 'notify', session, lang);
+      return;
+    }
     if (labels.length) {
       const picked = parseChoice(heard, labels);
       if (picked === undefined) {
         if (q.allowFreeform === true) {
-          answers.push(say.answerFree(q.question ?? '', heard));
+          answers.push(say.answerFree(questionText, heard));
           continue;
         }
         spawnPlay(say.unclearChoose, 'notify', session, lang);
@@ -634,12 +647,12 @@ async function voiceChoose(text: string, input: AgentHookInput, cfg: HookConfig,
         spawnPlay(say.unclearChoose, 'notify', session, lang);
         return;
       }
-      const chosen = picked.map((i) => labels[i]);
+      const chosen = picked.map((index) => sourceArg() === 'copilot' ? q.options?.[index]?.label ?? labels[index] : labels[index]);
       if (q.key && q.values) {
         const values = picked.map((i) => q.values?.[i]);
         structuredAnswers[q.key] = q.multiSelect ? values : values[0];
       } else {
-        answers.push(say.answerChoice(q.question ?? '', chosen));
+        answers.push(say.answerChoice(questionText, chosen));
       }
       await playNow(say.chosen(chosen), 'notify', session, lang);
     } else {
@@ -655,7 +668,7 @@ async function voiceChoose(text: string, input: AgentHookInput, cfg: HookConfig,
           structuredAnswers[q.key] = heard;
         }
       } else {
-        answers.push(say.answerFree(q.question ?? '', heard));
+        answers.push(say.answerFree(questionText, heard));
       }
     }
   }
@@ -676,6 +689,13 @@ async function voiceChoose(text: string, input: AgentHookInput, cfg: HookConfig,
  * Approve bằng giọng: đọc thông báo (chờ đọc xong), mở mic nghe một câu, hỏi Whisper,
  * rồi trả quyết định cho Claude Code. Không rõ hoặc im lặng thì không trả gì, hộp thoại hiện như thường.
  */
+function manualChatApproval(reason: string): void {
+  if (sourceArg() !== 'copilot') return;
+  process.stdout.write(JSON.stringify({
+    hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: reason },
+  }));
+}
+
 async function voiceApprove(text: string, input: HookInput & { session_id?: string }, cfg: HookConfig, lang: Lang): Promise<void> {
   const session = input.session_id ?? '';
   const t0 = Date.now();
@@ -683,12 +703,14 @@ async function voiceApprove(text: string, input: HookInput & { session_id?: stri
   await playNow(say.sayApproveOrDeny(text), 'notify', session, lang);
   const heard = await askHeard(input.cwd || process.cwd(), session, Math.max(3, cfg.approveTimeoutSec ?? 15), 'approve');
   if (!heard) {
+    manualChatApproval(say.notHeardPress);
     spawnPlay(say.notHeardPress, 'notify', session, lang);
     return;
   }
   const decision = parseApproval(heard);
   log(`approve: nghe ${JSON.stringify(heard)} → ${decision ?? 'không rõ'} (${Date.now() - t0}ms)`);
   if (!decision) {
+    manualChatApproval(say.unclearPress);
     spawnPlay(say.unclearPress, 'notify', session, lang);
     return;
   }
@@ -697,7 +719,9 @@ async function voiceApprove(text: string, input: HookInput & { session_id?: stri
   const reason = say.approveReason(decision, heard);
   process.stdout.write(JSON.stringify(sourceArg() === 'copilot-cli'
     ? { behavior: decision, ...(decision === 'deny' ? { message: reason } : {}) }
-    : permissionRequestOutput(decision, reason)));
+    : sourceArg() === 'copilot'
+      ? { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: decision, permissionDecisionReason: reason } }
+      : permissionRequestOutput(decision, reason)));
 }
 
 /** Phát ngay trong tiến trình này và chờ phát xong (vẫn xếp hàng chung). */

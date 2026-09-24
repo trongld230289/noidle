@@ -13,7 +13,7 @@ const config = path.join(work, 'config.json');
 const logFile = path.join(tmp, 'noidle-tts', 'hook.log');
 const audioTexts = path.join(work, 'audio-texts.jsonl');
 const signals: Signal[] = [];
-let heard = '';
+let heard: string | string[] = '';
 let server: ReturnType<typeof startServer>;
 
 function run(mode: string, input: unknown, args: string[] = []) {
@@ -72,7 +72,7 @@ beforeAll(async () => {
     : path.join(work, 'cli.sock');
   server = startServer(pipe, (signal) => {
     signals.push(signal);
-    if (signal.event === 'ask') return heard;
+    if (signal.event === 'ask') return typeof heard === 'string' ? heard : heard.shift() ?? '';
   });
   await new Promise<void>((resolve) => server.once('listening', resolve));
   writeRegistry({ pid: process.pid, pipe, folders: [work] }, path.join(tmp, 'noidle-tts', 'windows'));
@@ -249,6 +249,166 @@ describe('Copilot CLI voice permissions', () => {
     expect(result.stdout).toBe('');
     expect(signals.some((s) => s.event === 'ask')).toBe(false);
     expect(signals.some((s) => s.event === 'attention' && s.reason === 'approve')).toBe(true);
+  });
+});
+
+describe('Copilot Chat voice controls', () => {
+  const chat = (tool_name: string, tool_input: unknown) => ({
+    session_id: 'chat-voice', cwd: work, hook_event_name: 'PreToolUse', tool_name, tool_input,
+  });
+  const question = { header: 'Database', question: 'Which database?', allowFreeformInput: false, options: [{ label: 'PostgreSQL' }, { label: 'SQLite' }] };
+
+  it.each([
+    ['yes', 'allow'],
+    ['no', 'deny'],
+  ])('returns a local pre-tool approval decision for %s', async (answer, decision) => {
+    heard = answer;
+    const result = await run('notify', {
+      session_id: `chat-approval-${answer}`, cwd: work, hook_event_name: 'PreToolUse',
+      tool_name: 'run_in_terminal', tool_input: { command: 'git status', explanation: 'Check changes' },
+    }, ['--event', 'PreToolUse']);
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse', permissionDecision: decision,
+        permissionDecisionReason: expect.stringContaining(answer),
+      },
+    });
+    expect(signals.some((signal) => signal.event === 'ask' && signal.source === 'copilot')).toBe(true);
+  }, 20_000);
+
+  it('answers a local question through hook feedback', async () => {
+    heard = 'two';
+    const result = await run('notify', {
+      session_id: 'chat-choice', cwd: work, hook_event_name: 'PreToolUse', tool_name: 'vscode_askQuestions',
+      tool_input: { questions: [{ header: 'Database', question: 'Which database?', allowFreeformInput: false, options: [{ label: 'PostgreSQL' }, { label: 'SQLite' }] }] },
+    }, ['--event', 'PreToolUse']);
+    expect(JSON.parse(result.stdout)).toEqual({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse', permissionDecision: 'deny',
+        permissionDecisionReason: expect.stringContaining('SQLite'),
+      },
+    });
+    expect(signals.some((signal) => signal.event === 'ask' && signal.source === 'copilot')).toBe(true);
+  }, 20_000);
+
+  it.each(['', 'maybe later'])('requires manual confirmation on unclear approval: %j', async (answer) => {
+    heard = answer;
+    const result = await run('notify', chat('run_in_terminal', { command: 'npm test' }), ['--event', 'PreToolUse']);
+    expect(JSON.parse(result.stdout).hookSpecificOutput.permissionDecision).toBe('ask');
+    expect(signals.some((signal) => signal.event === 'ask')).toBe(true);
+  }, 20_000);
+
+  it.each([
+    ['run_in_terminal', { command: 'git push origin main' }],
+    ['run_in_terminal', { command: 'rm -rf src' }],
+    ['run_in_terminal', { command: 'git status', requestSandboxBypass: true }],
+    ['run_in_terminal', { command: 'git status', requestUnsandboxedExecution: true }],
+    ['run_in_terminal', { command: 'git status', requestAllowNetwork: true }],
+    ['create_file', { filePath: 'D:\\repo\\.env', content: 'secret' }],
+  ])('requires manual approval without opening the mic: %s %j', async (tool, args) => {
+    heard = 'yes';
+    const result = await run('notify', chat(tool, args), ['--event', 'PreToolUse']);
+    expect(JSON.parse(result.stdout).hookSpecificOutput.permissionDecision).toBe('ask');
+    expect(signals.some((signal) => signal.event === 'ask')).toBe(false);
+  });
+
+  it.each(['create_file', 'replace_string_in_file'])('allows a known ordinary file operation only after confirmation: %s', async (tool) => {
+    heard = 'yes';
+    const result = await run('notify', chat(tool, { filePath: 'D:\\repo\\src\\example.ts', content: 'text', oldString: 'old', newString: 'new' }), ['--event', 'PreToolUse']);
+    expect(JSON.parse(result.stdout).hookSpecificOutput.permissionDecision).toBe('allow');
+    expect(signals.some((signal) => signal.event === 'ask')).toBe(true);
+  }, 20_000);
+
+  it.each(['Bash', 'Read', 'mcp__server__run_in_terminal', 'apply_patch', 'multi_replace_string_in_file'])('does not approve unknown or unvalidated tools: %s', async (tool) => {
+    heard = 'yes';
+    const result = await run('notify', { ...chat(tool, { command: 'git status', file_path: 'safe.ts' }), chat_voice_tool: 'approval' }, ['--event', 'PreToolUse']);
+    expect(result.stdout).toBe('');
+    expect(signals).toEqual([]);
+  });
+
+  it.each([
+    [{ voiceApprove: false }, 'run_in_terminal', { command: 'git status' }],
+    [{ voiceMute: true }, 'run_in_terminal', { command: 'git status' }],
+    [{ handsFree: false }, 'vscode_askQuestions', { questions: [question] }],
+    [{ voiceMute: true }, 'vscode_askQuestions', { questions: [question] }],
+  ])('respects disabled voice controls: %j', async (settings, tool, args) => {
+    configure(settings);
+    heard = 'yes';
+    expect((await run('notify', chat(tool, args), ['--event', 'PreToolUse'])).stdout).toBe('');
+    expect(signals.some((signal) => signal.event === 'ask')).toBe(false);
+  });
+
+  it.each([
+    ['one and two', { multiSelect: true }, ['PostgreSQL', 'SQLite']],
+    ['all', { multiSelect: true }, ['PostgreSQL', 'SQLite']],
+    ['SQLite', {}, ['SQLite']],
+    ['MariaDB', { allowFreeformInput: true }, ['MariaDB']],
+    ['Use a local cache', { options: undefined, allowFreeformInput: true }, ['Use a local cache']],
+  ])('passes a valid spoken question answer with its header: %s', async (answer, extra, expected) => {
+    heard = answer;
+    const result = await run('notify', chat('vscode_askQuestions', { questions: [{ ...question, ...extra }] }), ['--event', 'PreToolUse']);
+    const output = JSON.parse(result.stdout).hookSpecificOutput;
+    expect(output.permissionDecision).toBe('deny');
+    expect(output.permissionDecisionReason).toContain('Database');
+    for (const label of expected) expect(output.permissionDecisionReason).toContain(label);
+  }, 20_000);
+
+  it.each(['', 'cancel', 'not sure', 'one and two'])('falls back to the question UI without a fabricated answer: %j', async (answer) => {
+    heard = answer;
+    expect((await run('notify', chat('vscode_askQuestions', { questions: [question] }), ['--event', 'PreToolUse'])).stdout).toBe('');
+  }, 20_000);
+
+  it('does not return partial answers when a later question is malformed', async () => {
+    heard = 'one';
+    const result = await run('notify', chat('vscode_askQuestions', { questions: [question, { question: 'Invalid' }] }), ['--event', 'PreToolUse']);
+    expect(result.stdout).toBe('');
+    expect(signals.some((signal) => signal.event === 'ask')).toBe(false);
+  });
+
+  it.each(['do not delete', 'not sure', 'maybe later'])('leaves ambiguous Chat answers manual even with default freeform: %s', async (answer) => {
+    heard = answer;
+    const result = await run('notify', chat('vscode_askQuestions', { questions: [{
+      header: 'Action', question: 'What next?', options: [{ label: 'Delete' }, { label: 'Keep' }],
+    }] }), ['--event', 'PreToolUse']);
+    expect(result.stdout).toBe('');
+  }, 20_000);
+
+  it('accepts an exact negative label instead of guessing from a negative sentence', async () => {
+    heard = 'No';
+    const result = await run('notify', chat('vscode_askQuestions', { questions: [{
+      header: 'Confirm', question: 'Continue?', options: [{ label: 'Yes' }, { label: 'No' }],
+    }] }), ['--event', 'PreToolUse']);
+    expect(JSON.parse(result.stdout).hookSpecificOutput.permissionDecisionReason).toContain('No');
+  }, 20_000);
+
+  it('speaks question headers and option descriptions before listening', async () => {
+    heard = ['one', 'two'];
+    const result = await run('notify', chat('vscode_askQuestions', { questions: [
+      { ...question, header: 'Production', options: [{ label: 'PostgreSQL', description: 'Managed database' }, { label: 'SQLite' }] },
+      { ...question, header: 'Staging' },
+    ] }), ['--event', 'PreToolUse']);
+    const reason = JSON.parse(result.stdout).hookSpecificOutput.permissionDecisionReason;
+    expect(reason).toContain('Production');
+    expect(reason).toContain('Staging');
+    const audio = fs.readFileSync(audioTexts, 'utf8');
+    expect(audio).toContain('Production: Which database?');
+    expect(audio).toContain('Staging: Which database?');
+    expect(audio).toContain('Managed database');
+  }, 20_000);
+
+  it('does not return partial answers when the second valid question is cancelled', async () => {
+    heard = ['one', 'cancel'];
+    const result = await run('notify', chat('vscode_askQuestions', { questions: [question, { ...question, header: 'Replica' }] }), ['--event', 'PreToolUse']);
+    expect(result.stdout).toBe('');
+    expect(signals.filter((signal) => signal.event === 'ask')).toHaveLength(2);
+  }, 20_000);
+
+  it('does not open the CLI approval mic from the shared pre-tool hook', async () => {
+    heard = 'yes';
+    const result = await run('notify', cli('cli-pre-tool', { toolName: 'powershell', toolArgs: { command: 'git status' } }), ['--event', 'PreToolUse']);
+    expect(result.stdout).toBe('');
+    expect(signals).toEqual([]);
   });
 });
 

@@ -179,6 +179,60 @@ describe('normalizeCopilotInput tool safety', () => {
   });
 });
 
+describe('local Chat voice normalization', () => {
+  const chat = (tool_name: string, tool_input: unknown, extra: Record<string, unknown> = {}) =>
+    normalizeCopilotInput({ session_id: 'chat', hook_event_name: 'PreToolUse', tool_name, tool_input, ...extra }, 'PreToolUse').input;
+
+  it('normalizes native terminal commands without stripping security flags', () => {
+    expect(chat('run_in_terminal', { command: 'npm test', requestUnsandboxedExecution: true })).toMatchObject({
+      tool_name: 'Bash', chat_voice_tool: 'approval', tool_input: { command: 'npm test', requestUnsandboxedExecution: true },
+    });
+  });
+
+  it.each(['create_file', 'replace_string_in_file'])('normalizes native file paths for %s', (tool) => {
+    const args = Object.freeze({ filePath: 'D:\\repo\\.env', content: 'secret', oldString: 'old', newString: 'new' });
+    const input = chat(tool, args);
+    expect(input.chat_voice_tool).toBe('approval');
+    expect(input.tool_input?.file_path).toBe(args.filePath);
+    expect(voiceApprovable(input.tool_name, input.tool_input)).toBe(false);
+    expect(args).not.toHaveProperty('file_path');
+  });
+
+  it.each(['Bash', 'Read', 'AskUserQuestion', 'mcp__server__run_in_terminal', 'custom_tool'])('does not trust forged voice routing for %s', (tool) => {
+    expect(chat(tool, { command: 'git status' }, { chat_voice_tool: 'approval' }).chat_voice_tool).toBeUndefined();
+  });
+
+  it.each([{ filePath: '' }, { filePath: [] }, { filePath: '.env', file_path: 'safe.ts' }])('rejects invalid or conflicting Chat file paths: %j', (args) => {
+    expect(() => chat('create_file', args)).toThrow();
+  });
+
+  it('keeps Chat question headers, supporting text, descriptions and freeform policy', () => {
+    const input = chat('vscode_askQuestions', { questions: [{
+      header: 'DB', question: 'Which database?', message: 'Used for local storage.', multiSelect: true, allowFreeformInput: false,
+      options: [{ label: 'SQLite', description: 'Single file' }, { label: 'PostgreSQL' }],
+    }] });
+    expect(input.chat_voice_tool).toBe('question');
+    expect(input.tool_input?.questions).toEqual([{
+      header: 'DB', question: 'Which database?\nUsed for local storage.', multiSelect: true, allowFreeform: false,
+      options: [{ label: 'SQLite', description: 'Single file' }, { label: 'PostgreSQL' }],
+    }]);
+  });
+
+  it.each([
+    [], null, [{ question: 'Missing header' }], [{ header: 'A', question: 'Choose', multiSelect: 'false' }],
+    [{ header: 'A', question: 'Choose', allowFreeformInput: 'false' }],
+    [{ header: 'A', question: 'Choose', allowFreeformInput: false }],
+    [{ header: 'A', question: 'Choose', options: [{ label: 'A' }, { label: 'a' }] }],
+    [{ header: 'A', question: 'Choose', options: [{ label: '' }] }],
+    [{ header: 'A', question: 'Choose', options: [{ label: 'A', description: {} }] }],
+    [{ header: 'A', question: 'First?' }, { header: 'A', question: 'Second?' }],
+  ])('leaves the whole malformed Chat form manual: %j', (questions) => {
+    const input = chat('vscode_askQuestions', { questions });
+    expect(input.tool_input?.questions).toEqual([]);
+    expect(input.question_fallback_reason).toEqual(expect.any(String));
+  });
+});
+
 describe('standard CLI ask_user', () => {
   it('normalizes single-choice questions and defaults allow_freeform to true', () => {
     const input = ask({ question: 'Which color?', choices: ['Red', 'Blue'] });

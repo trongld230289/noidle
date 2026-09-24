@@ -4,6 +4,7 @@ type HookQuestion = NonNullable<NonNullable<HookInput['tool_input']>['questions'
 
 export interface VoiceQuestion extends HookQuestion {
   allowFreeform?: boolean;
+  options?: { label?: string; description?: string }[];
   key?: string;
   /** Aligned with options; never substitute spoken labels for these values. */
   values?: unknown[];
@@ -22,6 +23,7 @@ export interface AgentHookInput extends HookInput {
   tool_input?: Omit<NonNullable<HookInput['tool_input']>, 'questions'> & { questions?: VoiceQuestion[] };
   /** A nonempty reason means the whole ask_user form must be answered manually. */
   question_fallback_reason?: string;
+  chat_voice_tool?: 'approval' | 'question';
   [key: string]: unknown;
 }
 
@@ -91,7 +93,30 @@ export function normalizeCopilotInput(value: unknown, event: string): { source: 
   if (!isCli) {
     checkStrings(value, ['transcript_path', 'hook_event_name', 'notification_type', 'tool_name', 'initial_prompt', 'agent_id', 'agent_type']);
     if (has(value, 'tool_input') && !isRecord(value.tool_input)) throw new Error('Invalid Copilot tool_input: expected an object');
-    return { source: 'copilot', input: { ...value, hook_event_name: value.hook_event_name as string ?? eventName(event, undefined) } };
+    const input: AgentHookInput = { ...value, hook_event_name: value.hook_event_name as string ?? eventName(event, undefined) };
+    delete input.chat_voice_tool;
+    delete input.question_fallback_reason;
+    if (value.tool_name === 'run_in_terminal') {
+      if (!isRecord(value.tool_input) || !nonempty(value.tool_input.command)) throw new Error('Invalid Chat terminal command');
+      input.tool_name = 'Bash';
+      input.tool_input = { ...value.tool_input };
+      input.chat_voice_tool = 'approval';
+    } else if (value.tool_name === 'create_file' || value.tool_name === 'replace_string_in_file') {
+      const args = value.tool_input;
+      if (!isRecord(args) || !nonempty(args.filePath)) throw new Error('Invalid Chat filePath');
+      if (has(args, 'file_path') && args.file_path !== args.filePath) throw new Error('Conflicting Chat file paths');
+      input.tool_name = value.tool_name === 'create_file' ? 'Write' : 'Edit';
+      input.tool_input = { ...args, file_path: args.filePath };
+      input.chat_voice_tool = 'approval';
+    } else if (value.tool_name === 'vscode_askQuestions') {
+      input.tool_name = 'AskUserQuestion';
+      input.chat_voice_tool = 'question';
+      const args = isRecord(value.tool_input) ? value.tool_input : {};
+      const parsed = chatQuestions(args);
+      input.tool_input = { ...args, questions: parsed.questions };
+      if (parsed.reason) input.question_fallback_reason = parsed.reason;
+    }
+    return { source: 'copilot', input };
   }
 
   checkStrings(value, ['transcriptPath', 'hookName', 'notificationType', 'toolName', 'initialPrompt', 'agentId', 'agentType']);
@@ -127,6 +152,38 @@ export function normalizeCopilotInput(value: unknown, event: string): { source: 
     }
   }
   return { source: 'copilot-cli', input };
+}
+
+function chatQuestions(args: Record<string, unknown>): { questions: VoiceQuestion[]; reason?: string } {
+  try {
+    if (!Array.isArray(args.questions) || !args.questions.length) throw new Error('Chat requires questions');
+    const headers = new Set<string>();
+    const questions = args.questions.map((entry): VoiceQuestion => {
+      if (!isRecord(entry) || !nonempty(entry.question) || !nonempty(entry.header)) throw new Error('Invalid Chat question');
+      if (headers.has(entry.header)) throw new Error('Duplicate Chat question header');
+      headers.add(entry.header);
+      for (const key of ['multiSelect', 'allowFreeformInput']) {
+        if (has(entry, key) && typeof entry[key] !== 'boolean') throw new Error(`Invalid Chat ${key}`);
+      }
+      if (has(entry, 'message') && typeof entry.message !== 'string') throw new Error('Invalid Chat question message');
+      const options = has(entry, 'options') ? entry.options : [];
+      if (!Array.isArray(options) || options.some((option) => !isRecord(option) || !nonempty(option.label))) {
+        throw new Error('Invalid Chat options');
+      }
+      for (const option of options) checkStrings(option, ['description']);
+      const labels = stringChoices(options.map((option) => option.label), 'Chat options');
+      const allowFreeform = entry.allowFreeformInput !== false;
+      if (!labels.length && !allowFreeform) throw new Error('Chat question has no available answers');
+      return {
+        header: entry.header, question: entry.message ? `${entry.question}\n${entry.message}` : entry.question,
+        options: labels.map((label, index) => ({ label, ...(has(options[index], 'description') ? { description: options[index].description } : {}) })),
+        multiSelect: entry.multiSelect === true, allowFreeform,
+      };
+    });
+    return { questions };
+  } catch (error) {
+    return { questions: [], reason: error instanceof Error ? error.message : 'Unsupported Chat questions' };
+  }
 }
 
 function parseQuestions(args: Record<string, unknown>): { questions: VoiceQuestion[]; reason?: string } {

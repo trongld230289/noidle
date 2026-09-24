@@ -96,7 +96,14 @@ Hook không bao giờ tự mở mic: khi Claude xong, hook Stop thoát ngay và 
 
 Phiên Claude Code/Copilot CLI đang mở cần khởi động lại để nhận hook; Copilot Chat nhận ở phiên chat mới. Chạy `NoIdle: Đọc thử giọng` để kiểm tra loa. Đổi giọng nam hoặc nữ bằng `noIdle.voice`, chỉnh tốc độ bằng `noIdle.voiceRate`. Tắt setting thì hook được gỡ khỏi `settings.json` và file hook Copilot bị xoá.
 
-Với **Copilot Chat trong VS Code**, extension vẫn chỉ đọc câu trả lời và mở mic vào ô chat; các hook xin quyền/chọn đáp án mới chỉ áp dụng cho **Copilot CLI**. Không cần bật `chat.useClaudeHooks` của VS Code.
+### Copilot Chat trong VS Code
+
+Phiên **Local** hỗ trợ cả **duyệt lệnh** và **chọn đáp án bằng giọng**, ngoài đọc câu trả lời và mở mic vào ô chat. Bật `noIdle.voiceResponse`, `noIdle.voiceNotify`, `noIdle.voiceApprove` và `noIdle.handsFree`; cần VS Code hỗ trợ hook, `chat.useHooks` bật và workspace được tin cậy. Không cần bật `chat.useClaudeHooks`. Sau khi cập nhật extension, reload cửa sổ để đồng bộ hook rồi mở phiên Chat mới.
+
+- **Duyệt lệnh:** hook `PreToolUse` đọc tên thao tác và lệnh/đường dẫn, rồi nghe "đồng ý" hoặc "từ chối". Hỗ trợ `run_in_terminal`, `create_file` và `replace_string_in_file`, dùng danh sách an toàn ở trên. Lệnh nguy hiểm, file nhạy cảm và yêu cầu nâng quyền/thoát sandbox chuyển sang xác nhận thủ công, không mở mic. Im lặng hoặc nghe không rõ cũng yêu cầu xác nhận tay. Patch nhiều file, tool MCP và tool chưa phân loại không được NoIdle cấp quyền; giữ cơ chế quyền hiện tại của VS Code. Các tool chỉ đọc/tìm kiếm không bị NoIdle hỏi thêm.
+- **Chọn đáp án:** với `vscode_askQuestions`, hook đọc tiêu đề, câu hỏi, thông tin bổ sung và các lựa chọn; nói số, tên, "tất cả" khi được chọn nhiều, hoặc câu tự do khi biểu mẫu cho phép. Nói huỷ, im lặng, câu phủ định/lưỡng lự hoặc biểu mẫu không hỗ trợ thì quay về hộp thoại. Chỉ trả kết quả sau khi nghe đủ tất cả câu hỏi. Hook chặn lần gọi tool hỏi và đưa đáp án vào lý do để agent tiếp tục, **không tự bấm lựa chọn trên giao diện**.
+
+`PreToolUse` chạy trước khi gọi tool, không phải sự kiện hộp xin quyền: khi bật `voiceApprove`, Chat có thể hỏi cả lệnh vốn đã được tự cho phép. Quyết định từ các hook/chính sách khác vẫn có thể yêu cầu xác nhận hoặc chặn thao tác. Tắt `voiceApprove` để dừng hỏi duyệt bằng giọng, tắt `handsFree` để dừng nghe đáp án; mute thì không mở mic. Các phiên Agent Host dùng giao thức Copilot SDK được xử lý theo luồng CLI, phụ thuộc những sự kiện phiên bản VS Code đó hỗ trợ.
 
 ### GitHub Copilot CLI
 
