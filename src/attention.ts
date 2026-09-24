@@ -211,14 +211,3 @@ export function removeTint(current: ColorMap | undefined, saved: ColorMap, shell
   if (next[SHELL_KEY] === shell && !(SHELL_KEY in saved)) delete next[SHELL_KEY];
   return Object.keys(next).length ? next : undefined;
 }
-
-/** Nhịp nháy title bar, gần nhịp nháy mặc định của taskbar Windows. */
-export const BLINK_MS = 500;
-export const BLINK_TIMES = 4;
-
-/** Các trạng thái ghi lần lượt để title bar nháy: tắt, bật, ... và dừng ở bật để giữ màu tới khi focus. */
-export function blinkFrames<T>(on: T, off: T, times: number): T[] {
-  const out: T[] = [];
-  for (let i = 0; i < times; i++) out.push(off, on);
-  return out;
-}

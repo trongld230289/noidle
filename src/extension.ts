@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { StatusBar, UsageBar } from './status';
-import { flashWindow, applyTint, removeTint, shellColorFor, normalizeHex, blinkFrames, BLINK_MS, BLINK_TIMES, TINT, type ColorMap } from './attention';
+import { flashWindow, applyTint, removeTint, shellColorFor, normalizeHex, TINT, type ColorMap } from './attention';
 import { Recorder, SAMPLE_RATE, CHANNELS } from './recorder';
 import { Segmenter } from './segmenter';
 import { listAudioDevices } from './devices';
@@ -959,27 +959,6 @@ export function activate(ctx: vscode.ExtensionContext): void {
     }
   }
 
-  /**
-   * Nháy title bar vài nhịp cùng lúc taskbar nháy, rồi giữ màu. Mỗi nhịp là một lần ghi colorCustomizations;
-   * cửa sổ được focus giữa chừng (tintSaved về undefined) thì dừng ngay, không tô lại.
-   */
-  async function blinkTitleBar(): Promise<void> {
-    const saved = tintSaved;
-    if (!saved) return;
-    const on = workspaceColors();
-    const off = removeTint(on, saved, shellColor(), tintBg);
-    for (const frame of blinkFrames(on, off, BLINK_TIMES)) {
-      await new Promise((r) => setTimeout(r, BLINK_MS));
-      if (tintSaved !== saved) return;
-      try {
-        await colorCfg().update('colorCustomizations', frame, vscode.ConfigurationTarget.Workspace);
-      } catch (err) {
-        log(`attention: nháy title bar lỗi: ${(err as Error).message}`);
-        return;
-      }
-    }
-  }
-
   async function untintTitleBar(): Promise<void> {
     const saved = tintSaved ?? {};
     const current = workspaceColors();
@@ -1007,18 +986,16 @@ export function activate(ctx: vscode.ExtensionContext): void {
       log(`attention ${reason}: cửa sổ đang focus, bỏ qua`);
       return;
     }
-    const jobs: Promise<void>[] = [];
     if (cfg.attentionColor) {
       status.attention(reason, langOf(cfg.language));
       await tintTitleBar();
-      jobs.push(blinkTitleBar());
     }
     if (cfg.attentionFlash) {
       const name = vscode.workspace.name ?? path.basename(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '');
-      if (name) jobs.push(flashWindow(name).then((r) => log(`attention ${reason}: nháy taskbar "${name}" → ${r}`)));
+      if (!name) return;
+      const r = await flashWindow(name);
+      log(`attention ${reason}: nháy taskbar "${name}" → ${r}`);
     }
-    // Taskbar và title bar nháy cùng lúc.
-    await Promise.all(jobs);
   }
   ctx.subscriptions.push(
     vscode.window.onDidChangeWindowState((st) => {
