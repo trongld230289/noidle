@@ -286,7 +286,7 @@
           "noIdle.elevenLabsApiKey": {
             "type": "string",
             "default": "",
-            "markdownDescription": "ElevenLabs API key, lấy tại [elevenlabs.io/app/settings/api-keys](https://elevenlabs.io/app/settings/api-keys). Gói Free: 10.000 credit mỗi tháng, model Flash v2.5 tính nửa credit một ký tự (khoảng 20.000 ký tự đọc). Lưu dạng chữ thường trong settings.json; nếu dùng Settings Sync hãy thêm `noIdle.elevenLabsApiKey` vào `settingsSync.ignoredSettings`.",
+            "markdownDescription": "Không bắt buộc. Để trống thì đọc bằng giọng Edge miễn phí. Muốn giọng hay hơn:\n\n1. Mở [elevenlabs.io/app/settings/api-keys](https://elevenlabs.io/app/settings/api-keys), đăng nhập.\n2. Bấm **Create API Key**, copy key dán vào ô dưới.\n\nGói miễn phí đọc được khoảng 20.000 ký tự mỗi tháng. Có bật Settings Sync thì thêm `noIdle.elevenLabsApiKey` vào `settingsSync.ignoredSettings`.",
             "scope": "application",
             "order": 3
           },
@@ -335,7 +335,7 @@
           "noIdle.groqApiKey": {
             "type": "string",
             "default": "",
-            "markdownDescription": "Key Groq để chuyển giọng nói thành chữ (bấm F6). Lấy miễn phí tại [console.groq.com/keys](https://console.groq.com/keys), bắt đầu bằng `gsk_`. Dùng Settings Sync thì thêm `noIdle.groqApiKey` vào `settingsSync.ignoredSettings`.",
+            "markdownDescription": "Cần để bấm F6 nói thành chữ. Miễn phí:\n\n1. Mở [console.groq.com/keys](https://console.groq.com/keys), đăng nhập bằng Google hoặc GitHub.\n2. Bấm **Create API Key**.\n3. Copy key (bắt đầu bằng `gsk_`) dán vào ô dưới. Key chỉ hiện một lần.\n\nCó bật Settings Sync thì thêm `noIdle.groqApiKey` vào `settingsSync.ignoredSettings`.",
             "scope": "application",
             "order": 0
           },
