@@ -177,7 +177,7 @@
           "noIdle.attentionFlash": {
             "type": "boolean",
             "default": true,
-            "markdownDescription": "**Bật** thì nút VS Code trên taskbar Windows nháy cam khi cửa sổ này cần bạn (Claude xong, cần approve, cần trả lời) mà bạn đang ở cửa sổ khác. Bấm vào cửa sổ là hết nháy. Chỉ Windows.\n\nMẹo: Settings Windows, Taskbar, \"Combine taskbar buttons\" chọn Never để mỗi workspace có nút riêng.",
+            "markdownDescription": "**Bật** thì cửa sổ này nháy khi cần bạn (Claude xong, cần approve, cần trả lời) mà bạn đang ở cửa sổ khác. Windows: nút VS Code trên taskbar nháy cam. macOS: title bar nháy vài lần. Bấm vào cửa sổ là hết nháy.\n\nMẹo Windows: Settings, Taskbar, \"Combine taskbar buttons\" chọn Never để mỗi workspace có nút riêng.",
             "scope": "application",
             "order": 0
           },
@@ -362,7 +362,7 @@
             "type": "string",
             "default": "",
             "scope": "machine",
-            "markdownDescription": "Micro dùng để nghe. Bỏ trống là lấy mic đầu tiên. Chọn bằng lệnh `NoIdle: Chọn micro`.",
+            "markdownDescription": "Micro dùng để nghe. Bỏ trống thì Windows lấy mic đầu tiên, macOS lấy mic mặc định của máy. Chọn bằng lệnh `NoIdle: Chọn micro`.",
             "order": 2
           },
           "noIdle.refine": {

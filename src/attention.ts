@@ -1,7 +1,7 @@
 /**
  * Làm nổi cửa sổ VS Code của workspace vừa có việc (Claude xong, cần approve, cần trả lời) khi người dùng
  * mở nhiều cửa sổ: nháy nút trên taskbar Windows (FlashWindowEx) cho tới khi cửa sổ đó lên foreground.
- * VS Code không có API cho việc này nên gọi user32 qua PowerShell; các hệ khác chưa hỗ trợ.
+ * VS Code không có API cho việc này nên gọi user32 qua PowerShell. macOS dùng blinkTitleBar ở cuối file.
  * Tất cả cửa sổ VS Code chung một tiến trình chính, nên chọn cửa sổ theo tiêu đề: tiêu đề mặc định luôn có
  * tên workspace giữa hai dấu " - " ("hook.ts - vi-voice - Visual Studio Code").
  */
@@ -211,4 +211,41 @@ export function removeTint(current: ColorMap | undefined, saved: ColorMap, shell
   }
   for (const k of SHELL_KEYS) if (next[k] === shell && !(k in saved)) delete next[k];
   return Object.keys(next).length ? next : undefined;
+}
+
+/** Số lần nháy title bar và nhịp mỗi nửa chu kỳ (ms), gần giống nhịp nháy taskbar của Windows. */
+export const BLINK = { times: 4, halfMs: 450 };
+
+export interface BlinkDeps {
+  /** Tô màu title bar. */
+  on(): Promise<void>;
+  /** Gỡ màu title bar. */
+  off(): Promise<void>;
+  wait(ms: number): Promise<void>;
+  /** true khi không cần nháy nữa (người dùng đã quay về cửa sổ). */
+  cancelled(): boolean;
+}
+
+/**
+ * macOS không có taskbar và không cho tiến trình khác làm nảy icon VS Code trên Dock, nên thay bằng nháy
+ * title bar: tắt bật màu vài lần rồi giữ màu (hold) hoặc gỡ hẳn. Bị huỷ giữa chừng thì gỡ màu và dừng.
+ */
+export async function blinkTitleBar(deps: BlinkDeps, hold: boolean, opts = BLINK): Promise<'done' | 'cancelled'> {
+  for (let i = 0; i < opts.times; i++) {
+    await deps.off();
+    await deps.wait(opts.halfMs);
+    if (deps.cancelled()) return 'cancelled';
+    await deps.on();
+    if (deps.cancelled()) {
+      await deps.off();
+      return 'cancelled';
+    }
+    await deps.wait(opts.halfMs);
+    if (deps.cancelled()) {
+      await deps.off();
+      return 'cancelled';
+    }
+  }
+  if (!hold) await deps.off();
+  return 'done';
 }

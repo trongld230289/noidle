@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { StatusBar, UsageBar } from './status';
-import { flashWindow, applyTint, removeTint, shellColorFor, normalizeHex, TINT, type ColorMap } from './attention';
+import { flashWindow, blinkTitleBar, applyTint, removeTint, shellColorFor, normalizeHex, TINT, type ColorMap } from './attention';
 import { Recorder, SAMPLE_RATE, CHANNELS } from './recorder';
 import { Segmenter } from './segmenter';
 import { listAudioDevices } from './devices';
@@ -33,8 +33,21 @@ const MIC_HANDOVER_MS = 2500;
 /** Hands-free: VAD vẫn thấy tiếng nhưng quá chừng này kể từ chữ cuối mà không ra chữ mới thì coi là tiếng ồn, gửi luôn. */
 const NOISE_GRACE_MS = 8000;
 
-/** Gửi Ctrl+V vào cửa sổ đang focus bằng SendKeys của Windows. */
+/**
+ * Gửi lệnh dán vào cửa sổ đang focus: Ctrl+V bằng SendKeys trên Windows, Cmd+V bằng System Events trên macOS
+ * (macOS cần cấp quyền Accessibility cho VS Code; bị chặn thì lỗi, chữ vẫn nằm trong clipboard).
+ */
 function sendCtrlV(): Promise<void> {
+  if (process.platform === 'darwin') {
+    return new Promise((resolve, reject) => {
+      execFile(
+        'osascript',
+        ['-e', 'tell application "System Events" to keystroke "v" using command down'],
+        { timeout: 5000 },
+        (err) => (err ? reject(new Error(`Không gửi được Cmd+V: ${err.message}`)) : resolve()),
+      );
+    });
+  }
   return new Promise((resolve, reject) => {
     execFile(
       'powershell',
@@ -437,7 +450,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     child.on('error', (e) => void vscode.window.showErrorMessage(`NoIdle: không chạy được node để đọc: ${e.message}`));
     child.unref();
     const label = cfg.ttsProvider === 'elevenlabs' ? `ElevenLabs ${cfg.elevenLabsVoiceId} (${cfg.elevenLabsModel})` : voice;
-    void vscode.window.showInformationMessage(`NoIdle: đang đọc thử bằng giọng ${label}. Không nghe thấy gì thì xem log tại %TEMP%\\noidle-tts\\hook.log`);
+    void vscode.window.showInformationMessage(`NoIdle: đang đọc thử bằng giọng ${label}. Không nghe thấy gì thì xem log tại ${path.join(os.tmpdir(), 'noidle-tts', 'hook.log')}`);
   }
 
   /** Bỏ qua bản đang đọc: hook tắt player của vé đầu hàng; bản kế tiếp trong hàng đợi phát tiếp. */
@@ -727,7 +740,9 @@ export function activate(ctx: vscode.ExtensionContext): void {
         const level = audioLevel(audio);
         void vscode.window.showWarningMessage(
           `NoIdle: không nghe thấy tiếng nói (peak ${level.peakDb.toFixed(0)} dB, rms ${level.rmsDb.toFixed(0)} dB). ` +
-            'Kiểm tra mic trong Windows Settings > Sound > Input, hoặc chạy lệnh "NoIdle: Chọn micro".',
+            (process.platform === 'darwin'
+              ? 'Kiểm tra mic trong System Settings > Sound > Input và quyền mic ở Privacy & Security > Microphone, hoặc chạy lệnh "NoIdle: Chọn micro".'
+              : 'Kiểm tra mic trong Windows Settings > Sound > Input, hoặc chạy lệnh "NoIdle: Chọn micro".'),
         );
       }
       // Không chờ các cụm cuối gửi xong: người dùng có thể bấm F6 nói tiếp ngay.
@@ -934,7 +949,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   /**
    * Cửa sổ này có việc cần người dùng. Đang focus thì không cần gì; không thì đổi màu status bar (tự tắt khi
-   * cửa sổ được focus) và nháy nút trên taskbar Windows để tìm ra giữa nhiều cửa sổ.
+   * cửa sổ được focus) và nháy nút trên taskbar Windows (macOS: nháy title bar) để tìm ra giữa nhiều cửa sổ.
    */
   /** Giá trị cũ của các khoá title bar đã ghi đè trong colorCustomizations của workspace; undefined = chưa tô. */
   let tintSaved: ColorMap | undefined;
@@ -974,7 +989,10 @@ export function activate(ctx: vscode.ExtensionContext): void {
       log(`attention: không gỡ được màu title bar: ${(err as Error).message}`);
     }
   }
+  /** Tăng mỗi lần bắt đầu hoặc huỷ nháy title bar (macOS), để lượt nháy cũ tự dừng. */
+  let blinkRun = 0;
   const clearAttention = () => {
+    blinkRun++;
     status.clearAttention();
     void untintTitleBar();
   };
@@ -992,7 +1010,20 @@ export function activate(ctx: vscode.ExtensionContext): void {
       status.attention(reason, langOf(cfg.language));
       await tintTitleBar();
     }
-    if (cfg.attentionFlash) {
+    if (cfg.attentionFlash && process.platform === 'darwin') {
+      // macOS: không có taskbar, nháy title bar thay thế; attentionColor bật thì nháy xong giữ màu.
+      const my = ++blinkRun;
+      const r = await blinkTitleBar(
+        {
+          on: tintTitleBar,
+          off: untintTitleBar,
+          wait: (ms) => new Promise((res) => setTimeout(res, ms)),
+          cancelled: () => my !== blinkRun || vscode.window.state.focused,
+        },
+        cfg.attentionColor,
+      );
+      log(`attention ${reason}: nháy title bar → ${r}`);
+    } else if (cfg.attentionFlash) {
       const name = vscode.workspace.name ?? path.basename(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '');
       if (!name) return;
       const r = await flashWindow(name);

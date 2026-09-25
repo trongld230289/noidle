@@ -10,8 +10,8 @@ Nhận dạng giọng nói dùng model Whisper large v3 chạy trên [Groq](http
 
 | Thứ cần có | Ghi chú |
 |---|---|
-| Windows | Hiện chỉ hỗ trợ Windows (ghi âm qua DirectShow). |
-| ffmpeg | Dùng để ghi âm từ micro. Cài bằng `winget install ffmpeg` hoặc tải tại https://ffmpeg.org, rồi đảm bảo `ffmpeg` có trong PATH. |
+| Windows hoặc macOS | Windows ghi âm qua DirectShow. macOS ghi âm qua AVFoundation, **chưa test trên máy thật**: lần đầu macOS hỏi quyền micro cho Visual Studio Code, bấm Allow (hoặc bật trong System Settings > Privacy & Security > Microphone). |
+| ffmpeg | Dùng để ghi âm từ micro. Windows: `winget install ffmpeg`. macOS: `brew install ffmpeg`. Hoặc tải tại https://ffmpeg.org, rồi đảm bảo `ffmpeg` có trong PATH. |
 | Groq API key | Miễn phí. Xem cách lấy bên dưới. |
 
 Kiểm tra ffmpeg đã sẵn sàng chưa:
@@ -135,7 +135,7 @@ Giọng vi-VN đọc chữ viết tắt và đuôi file tiếng Anh sai, kiểu 
 
 Không muốn tốn token cho phần 🔊 thì đặt `noIdle.voiceStyle` là `announce`: hook không dặn Claude gì cả, trả lời xong chỉ đọc "Workspace X xong" (hoặc "Workspace X đang hỏi bạn" khi câu cuối là câu hỏi). Bạn biết cửa sổ nào cần mình mà không nghe nội dung; approve và chọn đáp án bằng giọng vẫn chạy như thường vì vốn là câu cứng. Đổi kiểu giữa phiên cũng được: sang `announce` thì hook nhắc Claude một lần thôi viết phần 🔊 (hướng dẫn cũ còn trong lịch sử), quay lại `recap` thì chèn lại hướng dẫn đầy đủ.
 
-Mở nhiều cửa sổ thì nghe tên chưa chắc tìm ra: khi Claude xong, cần approve hoặc cần trả lời mà cửa sổ đó không đang focus, nút của nó trên taskbar Windows nháy cam tới khi bạn bấm vào (`noIdle.attentionFlash`, gọi FlashWindowEx qua PowerShell, chỉ Windows) và title bar (màu `noIdle.attentionTintColor`, mặc định xanh lá) cùng nút NoIdle trên status bar của cửa sổ đó đổi màu với chữ "Claude xong" hay "cần approve", tự trả lại khi cửa sổ được focus (`noIdle.attentionColor`). Chỉ thanh trên đổi màu: VS Code mới lấy màu title bar làm nền chrome sau các phần, nên hook ghi thêm `modernUI.shellBackground` bằng màu gốc của theme để viền quanh editor, panel, sidebar không đổi theo. Title bar đổi màu bằng cách ghi `workbench.colorCustomizations` vào settings của workspace như Peacock rồi gỡ sau, nên workspace có `.vscode/settings.json` trong git sẽ thấy file đó đổi trong lúc đang tô. Cần `window.titleBarStyle` là `custom` (mặc định trên Windows) thì title bar mới nhận màu. Cả hai chạy kể cả khi đang mute.
+Mở nhiều cửa sổ thì nghe tên chưa chắc tìm ra: khi Claude xong, cần approve hoặc cần trả lời mà cửa sổ đó không đang focus, nút của nó trên taskbar Windows nháy cam tới khi bạn bấm vào (`noIdle.attentionFlash`, gọi FlashWindowEx qua PowerShell; macOS không có taskbar và không cho làm nảy icon Dock từ ngoài, nên title bar nháy bốn lần thay thế) và title bar (màu `noIdle.attentionTintColor`, mặc định xanh lá) cùng nút NoIdle trên status bar của cửa sổ đó đổi màu với chữ "Claude xong" hay "cần approve", tự trả lại khi cửa sổ được focus (`noIdle.attentionColor`). Chỉ thanh trên đổi màu: VS Code mới lấy màu title bar làm nền chrome sau các phần, nên hook ghi thêm `modernUI.shellBackground` bằng màu gốc của theme để viền quanh editor, panel, sidebar không đổi theo. Title bar đổi màu bằng cách ghi `workbench.colorCustomizations` vào settings của workspace như Peacock rồi gỡ sau, nên workspace có `.vscode/settings.json` trong git sẽ thấy file đó đổi trong lúc đang tô. Cần `window.titleBarStyle` là `custom` (mặc định trên Windows và macOS) thì title bar mới nhận màu. Cả hai chạy kể cả khi đang mute.
 
 Chạy nhiều workspace cùng lúc thì mỗi phần đọc mở đầu bằng "Workspace X:" để biết cửa sổ nào vừa xong (setting `noIdle.voiceSayWorkspace`, mặc định chỉ bật khi có hơn một cửa sổ VS Code). Đang nghe mà muốn bỏ qua thì bấm **F7** hoặc chạy `NoIdle: Bỏ qua đang đọc`: bản đang đọc bị cắt, bản kế tiếp phát tiếp, hands-free vẫn mở mic như thường.
 
@@ -217,7 +217,7 @@ Gõ `NoIdle` vào ô tìm kiếm của Settings:
 | `noIdle.typingDelayMs` | `12` | Nghỉ bao nhiêu ms giữa các ký tự khi gõ vào editor. Đặt `0` để chèn nguyên cụm. |
 | `noIdle.language` | `vi` | Ngôn ngữ làm việc: `vi`, `en` hoặc `auto` (đoán theo prompt mỗi lượt, nhớ theo phiên), chi phối Whisper, LLM sửa câu, hướng dẫn 🔊, câu hook nói, giọng và bảng phiên âm. Để trống thì Whisper tự nhận diện, còn lại như `vi`. |
 | `noIdle.glossary` | `[]` | Từ tiếng Anh hay nói mà Whisper nghe sai, cùng tên project, tên biến, tên người. Whisper và LLM sẽ ưu tiên viết đúng các từ này. |
-| `noIdle.attentionFlash` | `true` | Nháy nút cửa sổ trên taskbar Windows khi Claude xong, cần approve hoặc cần trả lời mà cửa sổ không đang focus. |
+| `noIdle.attentionFlash` | `true` | Nháy nút cửa sổ trên taskbar Windows (macOS: nháy title bar) khi Claude xong, cần approve hoặc cần trả lời mà cửa sổ không đang focus. |
 | `noIdle.attentionColor` | `true` | Đổi màu title bar và nút NoIdle trên status bar của cửa sổ đang cần bạn, trả lại khi cửa sổ được focus. |
 | `noIdle.attentionTintColor` | `#15803d` | Màu title bar lúc đó, hex; chữ tự chọn trắng hay tối theo nền. |
 | `noIdle.voiceStyle` | `recap` | `recap` dặn Claude viết phần 🔊 tóm tắt và đọc phần đó. `announce` không dặn gì (0 token), trả lời xong chỉ đọc "Workspace X xong" hoặc "Workspace X đang hỏi bạn". |
@@ -234,7 +234,7 @@ Phím tắt mặc định là **F6**. Đổi phím trong `File > Preferences > K
 |---|---|
 | Báo không tìm thấy ffmpeg | Cài ffmpeg, hoặc điền đường dẫn đầy đủ vào `noIdle.ffmpegPath`. |
 | Báo sai key | Chạy `NoIdle: Set Groq API Key`, nhập lại key `gsk_...`. |
-| Không nghe thấy tiếng nói | Kiểm tra mic trong Windows Settings > Sound > Input. Chạy `NoIdle: Chọn micro` để chọn đúng thiết bị. Dùng lệnh lưu audio để nghe thử file thu được. |
+| Không nghe thấy tiếng nói | Kiểm tra mic trong Windows Settings > Sound > Input (macOS: System Settings > Sound > Input, và quyền mic cho Visual Studio Code ở Privacy & Security > Microphone). Chạy `NoIdle: Chọn micro` để chọn đúng thiết bị. Dùng lệnh lưu audio để nghe thử file thu được. |
 | Bấm F6 trong terminal ra ký tự lạ | Kiểm tra `terminal.integrated.commandsToSkipShell` trong Settings có chứa `noIdle.toggle`. |
 | Lỗi mạng hoặc quá giới hạn | Chờ vài giây rồi chạy `NoIdle: Gửi lại audio cuối`. |
 | Chữ vẫn hiện nhưng thiếu dấu câu, thuật ngữ tiếng Anh bị phiên âm | Bước sửa câu đang tắt tạm vì Groq hết hạn mức (HTTP 429), chỉ trong lượt nói đó; lượt nói sau (F6 hoặc hands-free mở mic lại) thử lại ngay. Xem kênh Output **NoIdle**. Muốn kéo dài hạn mức thì đổi `noIdle.refineModel` sang `openai/gpt-oss-20b`. |

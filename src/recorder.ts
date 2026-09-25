@@ -1,14 +1,16 @@
 import { spawn, ChildProcess } from 'child_process';
-import { listAudioDevices } from './devices';
+import { listAudioDevices, micInputArgs, ffmpegInstallHint } from './devices';
 import { pcmToWav } from './wav';
 
 export const SAMPLE_RATE = 16000;
 export const CHANNELS = 1;
 const BYTES_PER_SEC = SAMPLE_RATE * CHANNELS * 2;
+/** macOS chặn mic tới khi người dùng cho phép; ffmpeg chạy dưới VS Code nên quyền nằm ở mục Visual Studio Code. */
+const MAC_MIC_HINT = process.platform === 'darwin' ? ' Kiểm tra quyền mic: System Settings > Privacy & Security > Microphone, bật cho Visual Studio Code rồi mở lại VS Code.' : '';
 
 export interface RecorderOptions {
   ffmpegPath: string;
-  /** Tên thiết bị dshow; bỏ trống thì lấy thiết bị audio đầu tiên. */
+  /** Tên micro (dshow trên Windows, avfoundation trên macOS); bỏ trống thì lấy micro đầu tiên, macOS lấy micro mặc định. */
   device?: string;
   /** Tự tắt ffmpeg sau khoảng này không ghi (ms). */
   idleMs?: number;
@@ -17,7 +19,7 @@ export interface RecorderOptions {
 }
 
 /**
- * Thu mic bằng ffmpeg (dshow) chạy nền. ffmpeg mở một lần và giữ chạy vì mở mic mất ~2s;
+ * Thu mic bằng ffmpeg (dshow trên Windows, avfoundation trên macOS) chạy nền. ffmpeg mở một lần và giữ chạy vì mở mic mất ~2s;
  * lúc rảnh dữ liệu bị bỏ, lúc ghi thì gom lại. Tự tắt sau idleMs.
  */
 export class Recorder {
@@ -83,14 +85,14 @@ export class Recorder {
 
   private async ensureProcess(): Promise<void> {
     if (this.proc && this.ready) return this.ready;
-    if (!this.device) {
+    if (!this.device && process.platform !== 'darwin') {
       const devices = await listAudioDevices(this.opts.ffmpegPath);
       if (devices.length === 0) throw new Error('ffmpeg không thấy micro nào (dshow). Kiểm tra mic đã cắm và bật trong Windows.');
       this.device = devices[0];
     }
     const args = [
       '-hide_banner', '-loglevel', 'info', '-nostdin',
-      '-f', 'dshow', '-audio_buffer_size', '50', '-i', `audio=${this.device}`,
+      ...micInputArgs(this.device),
       '-ac', String(CHANNELS), '-ar', String(SAMPLE_RATE),
       '-f', 's16le', '-flush_packets', '1', 'pipe:1',
     ];
@@ -121,16 +123,16 @@ export class Recorder {
         clearTimeout(timer);
         err ? reject(err) : resolve();
       };
-      const timer = setTimeout(() => done(new Error(`ffmpeg không mở được mic sau 10s. ${lastLine(stderrTail)}`)), 10_000);
+      const timer = setTimeout(() => done(new Error(`ffmpeg không mở được mic sau 10s. ${lastLine(stderrTail)}${MAC_MIC_HINT}`)), 10_000);
       proc.stdout!.once('data', () => done());
       proc.on('error', (e: NodeJS.ErrnoException) => {
         done(new Error(
           e.code === 'ENOENT'
-            ? `Không tìm thấy ffmpeg tại "${this.opts.ffmpegPath}". Cài bằng: winget install Gyan.FFmpeg, rồi mở lại VS Code.`
+            ? `Không tìm thấy ffmpeg tại "${this.opts.ffmpegPath}". Cài bằng: ${ffmpegInstallHint()}, rồi mở lại VS Code.`
             : `Không chạy được ffmpeg: ${e.message}`,
         ));
       });
-      proc.on('exit', (code) => done(new Error(`ffmpeg thoát sớm (mã ${code}). ${lastLine(stderrTail)}`)));
+      proc.on('exit', (code) => done(new Error(`ffmpeg thoát sớm (mã ${code}). ${lastLine(stderrTail)}${MAC_MIC_HINT}`)));
     });
     try {
       await this.ready;
