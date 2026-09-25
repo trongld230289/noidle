@@ -14,3 +14,5 @@ hotkey/**
 hub/**
 .playwright-mcp/**
 *.png
+!images/icon.png
+images/icon.svg
