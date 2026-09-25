@@ -302,7 +302,7 @@ export function doneAnnouncement(answer: string, cwd?: string, lang: Lang = 'vi'
   const ws = workspaceName(cwd, lang);
   const asking = stripMarkdown(answer).trim().endsWith('?');
   if (lang === 'en') return asking ? `Workspace ${ws} is asking you.` : `Workspace ${ws} is done.`;
-  return asking ? `Workspace ${ws} đang hỏi bạn.` : `Workspace ${ws} xong.`;
+  return asking ? `Workspace ${ws} đang hỏi bạn.` : `Workspace ${ws} xong rồi nhé.`;
 }
 
 /**

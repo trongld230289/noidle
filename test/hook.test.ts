@@ -330,12 +330,12 @@ describe('claude-hook voiceStyle announce', () => {
     expect(r.stdout.trim()).toBe('');
   });
 
-  it('speak: đọc câu cứng "Workspace X xong." thay vì nội dung câu trả lời', async () => {
+  it('speak: đọc câu cứng "Workspace X xong rồi nhé." thay vì nội dung câu trả lời', async () => {
     fs.writeFileSync(transcript, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Đã sửa xong hàm A, test pass.' }] } }) + '\n');
     const before = readLog().length;
     const r = await run(['speak', '--config', cfgAnnounce, '--player', bogusPlayer], JSON.stringify({ session_id: 'an-1', cwd: work, transcript_path: transcript }));
     expect(r.code).toBe(0);
-    expect(playedText(readLog().slice(before))).toBe(pronounce(`Workspace ${workspaceName(work)} xong.`));
+    expect(playedText(readLog().slice(before))).toBe(pronounce(`Workspace ${workspaceName(work)} xong rồi nhé.`));
   });
 
   it('speak: câu trả lời kết thúc bằng dấu hỏi thì đọc "đang hỏi bạn"', async () => {

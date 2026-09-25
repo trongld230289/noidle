@@ -194,7 +194,7 @@ describe('lastAssistantText với transcript của Copilot', () => {
 
 describe('doneAnnouncement (voiceStyle announce)', () => {
   it('says the workspace is done when the answer is a statement', () => {
-    expect(doneAnnouncement('Đã sửa xong hàm A.\n\nTest pass hết.', 'D:\\Project\\vi-voice')).toBe('Workspace vi voice xong.');
+    expect(doneAnnouncement('Đã sửa xong hàm A.\n\nTest pass hết.', 'D:\\Project\\vi-voice')).toBe('Workspace vi voice xong rồi nhé.');
   });
   it('says the workspace is asking when the answer ends with a question', () => {
     expect(doneAnnouncement('Có hai cách.\n\nBạn muốn dùng cách nào?', '/x/abc')).toBe('Workspace abc đang hỏi bạn.');

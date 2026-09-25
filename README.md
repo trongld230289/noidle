@@ -8,7 +8,7 @@ Extension VS Code cho người chạy Claude Code, Copilot Chat hoặc Copilot C
 
 ## Bạn có từng thế này?
 
-- **Nhiều workspace, không biết cái nào cần mình.** Một cái xong mà không biết, một cái chờ chọn đáp án, một cái chờ approve. NoIdle đọc "Workspace X xong", "Workspace X cần approve", và cửa sổ đó nháy lên.
+- **Nhiều workspace, không biết cái nào cần mình.** Một cái xong mà không biết, một cái chờ chọn đáp án, một cái chờ approve. NoIdle đọc "Workspace X xong rồi nhé", "Workspace X cần approve", và cửa sổ đó nháy lên.
 - **Làm trên nhiều máy.** Máy nào phát tiếng thì câu đọc cũng có tên workspace, nghe là biết việc nào xong, khỏi dò từng màn hình.
 - **Nằm nghỉ một chút.** Agent xong thì giọng đọc tóm tắt, bạn nói việc tiếp theo, agent làm tiếp.
 - **Đi tưới cây, nấu cơm.** Task xong là loa gọi, đứng đó nói việc kế tiếp hoặc approve, không phải chạy về gõ.
@@ -83,7 +83,7 @@ Khi approve hoặc chọn đáp án, im lặng hoặc nói không rõ thì chuy�
 |---|---|---|
 | Voice Response | tắt | Công tắc chính: đọc câu trả lời của Claude Code, Copilot Chat, Copilot CLI. |
 | Voice Mute | tắt | Im lặng tạm thời, không cần restart. Lệnh nhanh: `NoIdle: Tắt/bật tiếng Claude Code`. |
-| Voice Style | `recap` | `recap`: đọc tóm tắt nội dung (tốn thêm ít token mỗi lượt). `announce`: chỉ đọc "Workspace X xong", không tốn token. |
+| Voice Style | `recap` | `recap`: đọc tóm tắt nội dung (tốn thêm ít token mỗi lượt). `announce`: chỉ đọc "Workspace X xong rồi nhé", không tốn token. |
 | Voice Notify | bật | Đọc "Workspace X cần approve" / "cần bạn trả lời". |
 | Voice Say Workspace | `auto` | Đọc tên workspace ở đầu câu. `auto`: chỉ khi mở hơn một cửa sổ. |
 

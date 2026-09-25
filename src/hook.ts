@@ -59,7 +59,7 @@ interface HookConfig {
   pronunciations?: Record<string, string>;
   /**
    * recap (mặc định): dặn Claude viết phần 🔊 và đọc phần đó. announce: không dặn gì (0 token), Stop chỉ đọc câu cứng
-   * "Workspace X xong." hoặc "đang hỏi bạn."; approve và chọn đáp án vẫn như cũ vì vốn là câu cứng.
+   * "Workspace X xong rồi nhé." hoặc "đang hỏi bạn."; approve và chọn đáp án vẫn như cũ vì vốn là câu cứng.
    */
   voiceStyle?: 'recap' | 'announce';
   /** Mở đầu phần đọc bằng "Workspace X:" — auto: chỉ khi có hơn một cửa sổ VS Code đang mở. */
