@@ -934,11 +934,13 @@ export function activate(ctx: vscode.ExtensionContext): void {
       return;
     }
     // Hook gửi kèm chuỗi pid tổ tiên của Claude Code; terminal nào có shell pid trong chuỗi là terminal đang chạy Claude,
-    // không phụ thuộc terminal nào đang được chọn hay cửa sổ nào đang focus. Không khớp thì lấy terminal đang chọn.
+    // không phụ thuộc terminal nào đang được chọn hay cửa sổ nào đang focus. Chỉ lấy terminal đang chọn khi hook
+    // không tra được cây tiến trình; tra được mà không khớp là agent chạy ngoài VS Code, không mở mic.
     const terminal = await terminalForAgent(vscode.window.terminals, s.ancestors, vscode.window.activeTerminal, s.source);
     if (!terminal) {
-      log(s.source === 'copilot-cli'
-        ? 'hands-free: không tìm thấy terminal VS Code của Copilot CLI, không mở mic để tránh gõ nhầm shell'
+      const agent = s.source === 'copilot-cli' ? 'Copilot CLI' : 'Claude Code';
+      log(s.source === 'copilot-cli' || s.ancestors?.length
+        ? `hands-free: không tìm thấy terminal VS Code của ${agent}, không mở mic để tránh gõ nhầm shell`
         : 'hands-free: không có terminal đang mở, bỏ qua');
       return;
     }

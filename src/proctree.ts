@@ -71,6 +71,10 @@ export async function terminalForAgent<T extends TerminalLike>(
   terminals: readonly T[], ancestors: number[] | undefined, active: T | undefined, source?: SignalSource,
 ): Promise<T | undefined> {
   const matched = await pickTerminal(terminals, ancestors);
-  // CLI bên ngoài VS Code không được chèn lời nói vào một shell không liên quan.
-  return matched ?? (source === 'copilot-cli' ? undefined : active);
+  if (matched) return matched;
+  // Biết cây tiến trình mà không khớp terminal nào: agent chạy ở terminal ngoài VS Code, không chèn lời nói vào
+  // một shell không liên quan. Copilot CLI không bao giờ lùi. Claude chỉ lùi về terminal đang chọn khi hook
+  // không tra được cây tiến trình (không biết agent ở đâu), như trước.
+  if (source === 'copilot-cli' || ancestors?.length) return undefined;
+  return active;
 }

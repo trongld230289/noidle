@@ -67,6 +67,10 @@ describe('pickTerminal', () => {
     it('preserves the existing Claude fallback', async () => {
       expect(await terminalForAgent([active], undefined, active, 'claude')).toBe(active);
     });
+    it('Claude ở terminal ngoài VS Code: không gõ vào terminal không liên quan', async () => {
+      expect(await terminalForAgent([active], [30, 20], active, 'claude')).toBeUndefined();
+      expect(await terminalForAgent([active, cli], [30, 20], active, 'claude')).toBe(cli);
+    });
   });
   it('không khớp thì undefined', async () => {
     expect(await pickTerminal([term('a', 111)], [100, 90])).toBeUndefined();

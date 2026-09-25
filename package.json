@@ -70,7 +70,7 @@
           "noIdle.voiceResponse": {
             "type": "boolean",
             "default": false,
-            "markdownDescription": "Công tắc chính: **bật** thì Claude Code, Copilot Chat và GitHub Copilot CLI đọc câu trả lời thành tiếng qua tai nghe. **Tắt** thì gỡ hẳn hook. Khởi động lại phiên Claude Code/Copilot CLI để nhận thay đổi hook. Chỉ muốn im tạm thời thì dùng `noIdle.voiceMute`.\n\nCần `node` và `ffplay` (đi kèm ffmpeg) trong PATH.",
+            "markdownDescription": "Công tắc chính: **bật** thì Claude Code, Copilot Chat và GitHub Copilot CLI đọc câu trả lời thành tiếng qua loa hoặc tai nghe. **Tắt** thì gỡ hẳn hook. Khởi động lại phiên Claude Code/Copilot CLI để nhận thay đổi hook. Chỉ muốn im tạm thời thì dùng `noIdle.voiceMute`.\n\nCần `node` và `ffplay` (đi kèm ffmpeg) trong PATH.",
             "scope": "application",
             "order": 0
           },
