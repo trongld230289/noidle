@@ -1,6 +1,6 @@
 # NoIdle
 
-Hear when Claude Code or Copilot is done, say what's next. Không phút nào chờ vô ích: agent làm xong là bạn nghe thấy ngay, kèm việc kế tiếp, và nói tiếp qua tai nghe dù đang đứng, đang nằm hay đang ở cửa sổ khác. (Tên cũ: Vi Voice, tới bản 1.11. Bản 2.0 tự chuyển setting `viVoice.*` sang `noIdle.*` lúc khởi động.)
+Hear when Claude Code or Copilot is done, say what's next. Không phút nào chờ vô ích: agent làm xong là bạn nghe thấy ngay, kèm việc kế tiếp, và nói tiếp qua tai nghe dù đang đứng, đang nằm hay đang ở cửa sổ khác. (Tên cũ: Vi Voice. Setting cũ `viVoice.*` được tự chuyển sang `noIdle.*` lúc khởi động.)
 
 Gõ tiếng Việt bằng giọng nói trong VS Code. Bấm **F6**, nói, bấm **F6** lần nữa. Chữ được chèn thẳng vào nơi bạn đang đứng: editor, terminal hoặc ô chat của Copilot.
 

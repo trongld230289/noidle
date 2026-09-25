@@ -2,7 +2,7 @@
   "name": "noidle",
   "displayName": "NoIdle",
   "description": "Hear when Claude Code or Copilot is done, say what's next. Nói tiếng Việt để gõ, nghe agent trả lời, hands-free từ ghế hay giường, không phút nào chờ vô ích.",
-  "version": "2.1.0",
+  "version": "1.0.0",
   "publisher": "trongld",
   "license": "MIT",
   "repository": {
@@ -412,107 +412,107 @@
           "viVoice.groqApiKey": {
             "type": "string",
             "scope": "application",
-            "deprecationMessage": "Đã đổi thành noIdle.groqApiKey (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+            "deprecationMessage": "Đã đổi thành noIdle.groqApiKey. Giá trị cũ được tự chuyển sang lúc extension khởi động."
           },
           "viVoice.voiceResponse": {
             "type": "boolean",
             "scope": "application",
-            "deprecationMessage": "Đã đổi thành noIdle.voiceResponse (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+            "deprecationMessage": "Đã đổi thành noIdle.voiceResponse. Giá trị cũ được tự chuyển sang lúc extension khởi động."
           },
           "viVoice.voiceMute": {
             "type": "boolean",
             "scope": "application",
-            "deprecationMessage": "Đã đổi thành noIdle.voiceMute (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+            "deprecationMessage": "Đã đổi thành noIdle.voiceMute. Giá trị cũ được tự chuyển sang lúc extension khởi động."
           },
           "viVoice.voiceNotify": {
             "type": "boolean",
             "scope": "application",
-            "deprecationMessage": "Đã đổi thành noIdle.voiceNotify (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+            "deprecationMessage": "Đã đổi thành noIdle.voiceNotify. Giá trị cũ được tự chuyển sang lúc extension khởi động."
           },
           "viVoice.voiceApprove": {
             "type": "boolean",
             "scope": "application",
-            "deprecationMessage": "Đã đổi thành noIdle.voiceApprove (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+            "deprecationMessage": "Đã đổi thành noIdle.voiceApprove. Giá trị cũ được tự chuyển sang lúc extension khởi động."
           },
           "viVoice.voiceApproveTimeoutSec": {
             "type": "number",
             "scope": "application",
-            "deprecationMessage": "Đã đổi thành noIdle.voiceApproveTimeoutSec (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+            "deprecationMessage": "Đã đổi thành noIdle.voiceApproveTimeoutSec. Giá trị cũ được tự chuyển sang lúc extension khởi động."
           },
           "viVoice.handsFree": {
             "type": "boolean",
             "scope": "application",
-            "deprecationMessage": "Đã đổi thành noIdle.handsFree (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+            "deprecationMessage": "Đã đổi thành noIdle.handsFree. Giá trị cũ được tự chuyển sang lúc extension khởi động."
           },
           "viVoice.handsFreeTimeoutSec": {
             "type": "number",
             "scope": "application",
-            "deprecationMessage": "Đã đổi thành noIdle.handsFreeTimeoutSec (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+            "deprecationMessage": "Đã đổi thành noIdle.handsFreeTimeoutSec. Giá trị cũ được tự chuyển sang lúc extension khởi động."
           },
           "viVoice.handsFreeAutoSend": {
             "type": "boolean",
             "scope": "application",
-            "deprecationMessage": "Đã đổi thành noIdle.handsFreeAutoSend (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+            "deprecationMessage": "Đã đổi thành noIdle.handsFreeAutoSend. Giá trị cũ được tự chuyển sang lúc extension khởi động."
           },
           "viVoice.handsFreeSendDelaySec": {
             "type": "number",
             "scope": "application",
-            "deprecationMessage": "Đã đổi thành noIdle.handsFreeSendDelaySec (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+            "deprecationMessage": "Đã đổi thành noIdle.handsFreeSendDelaySec. Giá trị cũ được tự chuyển sang lúc extension khởi động."
           },
           "viVoice.voice": {
             "type": "string",
             "scope": "application",
-            "deprecationMessage": "Đã đổi thành noIdle.voice (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+            "deprecationMessage": "Đã đổi thành noIdle.voice. Giá trị cũ được tự chuyển sang lúc extension khởi động."
           },
           "viVoice.voiceRate": {
             "type": "string",
             "scope": "application",
-            "deprecationMessage": "Đã đổi thành noIdle.voiceRate (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+            "deprecationMessage": "Đã đổi thành noIdle.voiceRate. Giá trị cũ được tự chuyển sang lúc extension khởi động."
           },
           "viVoice.ffmpegPath": {
             "type": "string",
             "scope": "machine",
-            "deprecationMessage": "Đã đổi thành noIdle.ffmpegPath (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+            "deprecationMessage": "Đã đổi thành noIdle.ffmpegPath. Giá trị cũ được tự chuyển sang lúc extension khởi động."
           },
           "viVoice.typingDelayMs": {
             "type": "number",
             "scope": "application",
-            "deprecationMessage": "Đã đổi thành noIdle.typingDelayMs (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+            "deprecationMessage": "Đã đổi thành noIdle.typingDelayMs. Giá trị cũ được tự chuyển sang lúc extension khởi động."
           },
           "viVoice.language": {
             "type": "string",
             "scope": "application",
-            "deprecationMessage": "Đã đổi thành noIdle.language (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+            "deprecationMessage": "Đã đổi thành noIdle.language. Giá trị cũ được tự chuyển sang lúc extension khởi động."
           },
           "viVoice.glossary": {
             "type": "array",
             "scope": "application",
-            "deprecationMessage": "Đã đổi thành noIdle.glossary (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+            "deprecationMessage": "Đã đổi thành noIdle.glossary. Giá trị cũ được tự chuyển sang lúc extension khởi động."
           },
           "viVoice.voiceSayWorkspace": {
             "type": "string",
             "scope": "application",
-            "deprecationMessage": "Đã đổi thành noIdle.voiceSayWorkspace (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+            "deprecationMessage": "Đã đổi thành noIdle.voiceSayWorkspace. Giá trị cũ được tự chuyển sang lúc extension khởi động."
           },
           "viVoice.pronunciations": {
             "type": "object",
             "scope": "application",
-            "deprecationMessage": "Đã đổi thành noIdle.pronunciations (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+            "deprecationMessage": "Đã đổi thành noIdle.pronunciations. Giá trị cũ được tự chuyển sang lúc extension khởi động."
           },
           "viVoice.refine": {
             "type": "boolean",
             "scope": "application",
-            "deprecationMessage": "Đã đổi thành noIdle.refine (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+            "deprecationMessage": "Đã đổi thành noIdle.refine. Giá trị cũ được tự chuyển sang lúc extension khởi động."
           },
           "viVoice.refineModel": {
             "type": "string",
             "scope": "application",
-            "deprecationMessage": "Đã đổi thành noIdle.refineModel (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+            "deprecationMessage": "Đã đổi thành noIdle.refineModel. Giá trị cũ được tự chuyển sang lúc extension khởi động."
           },
           "viVoice.micDevice": {
             "type": "string",
             "scope": "machine",
-            "deprecationMessage": "Đã đổi thành noIdle.micDevice (NoIdle 2.0). Giá trị cũ được tự chuyển sang lúc extension khởi động."
+            "deprecationMessage": "Đã đổi thành noIdle.micDevice. Giá trị cũ được tự chuyển sang lúc extension khởi động."
           }
         }
       }
