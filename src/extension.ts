@@ -302,6 +302,9 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   const claudeSettingsPath = path.join(os.homedir(), '.claude', 'settings.json');
   const hookScript = path.join(ctx.extensionPath, 'dist', 'claude-hook.js');
+  // Hook trong settings trỏ vào bản sao ở globalStorage: thư mục extension có số version và bị xoá khi
+  // update, nên trỏ thẳng vào đó thì hook lỗi MODULE_NOT_FOUND tới khi VS Code mở lại và ghi lại đường dẫn.
+  const installedHookScript = path.join(ctx.globalStorageUri.fsPath, 'claude-hook.js');
   const hookConfigPath = path.join(ctx.globalStorageUri.fsPath, 'hook-config.json');
   const copilotHooksPaths = copilotHookPaths(os.homedir(), process.env.COPILOT_HOME);
 
@@ -351,10 +354,29 @@ export function activate(ctx: vscode.ExtensionContext): void {
     };
   }
 
+  /** Chép dist/claude-hook.js ra globalStorage (ghi file tạm rồi rename). Trả về đường dẫn hook nên dùng. */
+  async function installHookScript(): Promise<string> {
+    try {
+      const bundled = await fs.promises.readFile(hookScript);
+      const current = await fs.promises.readFile(installedHookScript).catch(() => undefined);
+      if (!current?.equals(bundled)) {
+        const tmp = `${installedHookScript}.${process.pid}.tmp`;
+        await fs.promises.mkdir(path.dirname(installedHookScript), { recursive: true });
+        await fs.promises.writeFile(tmp, bundled);
+        await fs.promises.rename(tmp, installedHookScript);
+        log(`đã chép hook script ra ${installedHookScript}`);
+      }
+      return installedHookScript;
+    } catch (err) {
+      log(`không chép được hook script, dùng bản trong extension: ${(err as Error).message}`);
+      return hookScript;
+    }
+  }
+
   /** Đồng bộ hook cho Claude Code, Copilot Chat và Copilot CLI. */
   async function syncHooks(): Promise<void> {
     await writeHookConfig();
-    const opts = hookOptions();
+    const opts = { ...hookOptions(), script: await installHookScript() };
     await syncClaudeHooks(opts);
     await syncCopilotHooks(opts);
   }

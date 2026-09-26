@@ -2,7 +2,7 @@
   "name": "noidle",
   "displayName": "NoIdle",
   "description": "Hear when Claude Code or Copilot is done, say what's next. Nói tiếng Việt để gõ, nghe agent trả lời, hands-free từ ghế hay giường, không phút nào chờ vô ích.",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "publisher": "trongld232",
   "icon": "images/icon.png",
   "license": "MIT",
