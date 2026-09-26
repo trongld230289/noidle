@@ -2,7 +2,7 @@
   "name": "noidle",
   "displayName": "NoIdle",
   "description": "Hear when Claude Code or Copilot is done, say what's next. Nói tiếng Việt để gõ, nghe agent trả lời, hands-free từ ghế hay giường, không phút nào chờ vô ích.",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "publisher": "trongld232",
   "icon": "images/icon.png",
   "license": "MIT",
@@ -557,6 +557,7 @@
     ]
   },
   "scripts": {
+    "vscode:prepublish": "npm run build",
     "build": "npm run build:ext && npm run build:hook",
     "build:ext": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node20",
     "build:hook": "esbuild src/hook.ts --bundle --outfile=dist/claude-hook.js --format=cjs --platform=node --target=node20 --external:bufferutil --external:utf-8-validate",
