@@ -51,7 +51,7 @@ Không cần nói thì bỏ qua bước lấy Groq key. Lưu ý: tắt hẳn **V
 **2. Lấy Groq key** (miễn phí, để chuyển giọng nói thành chữ; chỉ nghe, không nói thì bỏ qua bước này):
 1. Mở [console.groq.com/keys](https://console.groq.com/keys), đăng nhập bằng Google hoặc GitHub.
 2. Bấm **Create API Key**, copy key (bắt đầu bằng `gsk_`). Key chỉ hiện một lần.
-3. Bấm **F6** trong VS Code, extension hỏi key thì dán vào.
+3. Dán key khi extension hỏi. Extension chỉ hỏi lúc bạn dùng mic lần đầu: bấm **F6**, hoặc bật **Hands Free** / **Voice Approve**.
 
 **3. Bật đọc câu trả lời:** `Ctrl+,` (Mac: `Cmd+,`), gõ `NoIdle`, bật **Voice Response**. Muốn rảnh tay hoàn toàn thì bật thêm **Hands Free** và **Voice Approve**.
 

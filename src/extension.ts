@@ -226,6 +226,9 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   ctx.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
+      const cfg = config();
+      if (e.affectsConfiguration('noIdle.handsFree') && cfg.handsFree) void askKeyForMicFeature('Hands Free').catch(() => undefined);
+      else if (e.affectsConfiguration('noIdle.voiceApprove') && cfg.voiceApprove) void askKeyForMicFeature('Voice Approve').catch(() => undefined);
       if (e.affectsConfiguration('noIdle.ffmpegPath') || e.affectsConfiguration('noIdle.micDevice')) {
         recorder.dispose();
         recorder = new Recorder(config());
@@ -282,13 +285,14 @@ export function activate(ctx: vscode.ExtensionContext): void {
     return (await resolveApiKey()) ?? setApiKey();
   }
 
-  /** Lần đầu cài, chưa có key: chỉ cho người dùng cách lấy và nhập key. */
-  async function welcomeIfNoKey(): Promise<void> {
-    if (ctx.globalState.get<boolean>(WELCOMED_KEY)) return;
+  /**
+   * Chỉ hỏi key khi người dùng bật tính năng cần mic (Hands Free, Voice Approve) mà chưa có key; không thì mic mở mà
+   * lặng lẽ không nhận dạng được. Chỉ nghe đọc thì không cần key nên lúc cài không hỏi. F6 tự hỏi qua getApiKey.
+   */
+  async function askKeyForMicFeature(feature: string): Promise<void> {
     if (await resolveApiKey()) return;
-    await ctx.globalState.update(WELCOMED_KEY, true);
     const pick = await vscode.window.showInformationMessage(
-      'NoIdle cần Groq API key (miễn phí) để nhận dạng giọng nói. Lấy key tại console.groq.com/keys rồi nhập vào đây.',
+      `NoIdle: ${feature} cần Groq API key (miễn phí) để nhận dạng giọng nói. Lấy key tại console.groq.com/keys rồi nhập vào đây.`,
       'Nhập key',
       'Lấy key miễn phí',
     );
@@ -298,7 +302,6 @@ export function activate(ctx: vscode.ExtensionContext): void {
       await setApiKey();
     }
   }
-  void welcomeIfNoKey().catch(() => undefined);
 
   const claudeSettingsPath = path.join(os.homedir(), '.claude', 'settings.json');
   const hookScript = path.join(ctx.extensionPath, 'dist', 'claude-hook.js');
