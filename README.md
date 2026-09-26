@@ -25,6 +25,21 @@ Extension VS Code cho người chạy Claude Code, Copilot Chat hoặc Copilot C
 
 Ngoài ra: bấm **F6** để nói thành chữ ở bất kỳ đâu trong VS Code (editor, terminal, ô chat), không cần agent. Nói tiếng Việt, tiếng Anh, hoặc để tự nhận.
 
+## Chọn kiểu dùng
+
+"Agent" ở đây là Claude Code, Copilot Chat hoặc Copilot CLI. Chỉ bật những gì bạn cần:
+
+| Bạn muốn | Bật trong Settings | Cần Groq key? |
+|---|---|:-:|
+| Chỉ thấy cửa sổ nào xong, không cần tiếng | **Voice Response** + **Voice Mute** (taskbar vẫn nháy, title bar đổi màu) | Không |
+| Nghe báo ngắn "Workspace A is done", không nghe nội dung | **Voice Response**, **Voice Style** = `announce` (không tốn token) | Không |
+| Nghe agent tóm tắt câu trả lời | **Voice Response**, **Voice Style** = `recap` (mặc định, tốn thêm ít token) | Không |
+| Nghe xong nói luôn việc tiếp theo | Thêm **Hands Free** | Có |
+| Approve lệnh bằng giọng | Thêm **Voice Approve** | Có |
+| Chỉ nói thành chữ bằng F6, không cần agent đọc | Không cần bật gì | Có |
+
+Không cần nói thì bỏ qua bước lấy Groq key. Lưu ý: tắt hẳn **Voice Response** thì cửa sổ cũng không nháy nữa; muốn im lặng mà vẫn nháy thì dùng **Voice Mute**.
+
 ## Cài trong 3 bước
 
 **1. Cài ffmpeg và Node.js** (ffmpeg để ghi âm và phát tiếng, Node.js để chạy phần đọc câu trả lời):
@@ -33,7 +48,7 @@ Ngoài ra: bấm **F6** để nói thành chữ ở bất kỳ đâu trong VS Co
 
 Đã cài Claude Code bằng npm thì đã có Node.js. Mở lại VS Code sau khi cài.
 
-**2. Lấy Groq key** (miễn phí, để chuyển giọng nói thành chữ):
+**2. Lấy Groq key** (miễn phí, để chuyển giọng nói thành chữ; chỉ nghe, không nói thì bỏ qua bước này):
 1. Mở [console.groq.com/keys](https://console.groq.com/keys), đăng nhập bằng Google hoặc GitHub.
 2. Bấm **Create API Key**, copy key (bắt đầu bằng `gsk_`). Key chỉ hiện một lần.
 3. Bấm **F6** trong VS Code, extension hỏi key thì dán vào.
