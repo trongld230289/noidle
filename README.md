@@ -27,18 +27,9 @@ Ngoài ra: bấm **F6** để nói thành chữ ở bất kỳ đâu trong VS Co
 
 ## Chọn kiểu dùng
 
-"Agent" ở đây là Claude Code, Copilot Chat hoặc Copilot CLI. Chỉ bật những gì bạn cần:
-
-| Bạn muốn | Bật trong Settings | Cần Groq key? |
-|---|---|:-:|
-| Chỉ thấy cửa sổ nào xong, không cần tiếng | **Voice Response** + **Voice Mute** (taskbar vẫn nháy, title bar đổi màu) | Không |
-| Nghe báo ngắn "Workspace A is done", không nghe nội dung | **Voice Response**, **Voice Style** = `announce` (không tốn token) | Không |
-| Nghe agent tóm tắt câu trả lời | **Voice Response**, **Voice Style** = `recap` (mặc định, tốn thêm ít token) | Không |
-| Nghe xong nói luôn việc tiếp theo | Thêm **Hands Free** | Có |
-| Approve lệnh bằng giọng | Thêm **Voice Approve** | Có |
-| Chỉ nói thành chữ bằng F6, không cần agent đọc | Không cần bật gì | Có |
-
-Không cần nói thì bỏ qua bước lấy Groq key. Lưu ý: tắt hẳn **Voice Response** thì cửa sổ cũng không nháy nữa; muốn im lặng mà vẫn nháy thì dùng **Voice Mute**.
+- Không cần nói thì không cần lấy Groq key.
+- Không cần nghe agent recap thì bật **Voice Mute**, cửa sổ vẫn nháy.
+- Chỉ cần nghe ngắn gọn "Workspace A is done" thì chọn **Voice Style** = `announce`.
 
 ## Cài trong 3 bước
 
