@@ -19,7 +19,7 @@ Extension VS Code cho người chạy Claude Code, Copilot Chat hoặc Copilot C
 |---|:-:|:-:|:-:|
 | Đọc câu trả lời thành tiếng | ✓ | ✓ | ✓ |
 | Báo cửa sổ nào đang cần bạn (nháy, đổi màu title bar) | ✓ | ✓ | ✓ |
-| Đọc xong tự mở mic, nói là gửi tiếp | ✓ | ✓ (vào ô chat) | ✓ |
+| Đọc xong tự mở mic, nói là gửi tiếp | ✓ | ✓ | ✓ |
 | Approve lệnh bằng giọng | ✓ | ✓ | ✓ |
 | Chọn đáp án bằng giọng | ✓ | ✓ | ✓ |
 
