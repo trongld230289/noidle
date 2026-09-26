@@ -16,8 +16,8 @@ Ghi ngày 2026-09-23. Bản gốc nằm trong bộ nhớ dự án của Claude C
 1. **Chế độ nằm (away mode).** Bật bằng giọng, ví dụ "để tôi nghỉ". Khi bật, hook chèn vào prompt: tự quyết theo mặc định
    hợp lý, không hỏi, ghi lại các quyết định ở cuối. Approve chỉ nhắc lại hai lần cách nhau vài phút rồi thôi, không giữ
    task treo. Rẻ nhất và chặn đúng mục tiêu 2.
-2. **Nút tai nghe thay F6.** Phím play/pause trên tai nghe Bluetooth map thành lệnh mở mic toàn cục (bắt media key của
-   Windows bằng một tiến trình nhỏ), không cần VS Code đang focus, không cần wake word.
+2. ~~**Nút tai nghe thay F6.**~~ Bỏ (2026-09-26): ít giá trị mà dễ loạn. Wake word ("mở mic đi") cũng đã thử và bỏ
+   cùng ngày: bắt được 7/8 bằng VAD + ASR tiếng Việt offline nhưng thêm khoảng 47 MB.
 3. **Hỏi tình hình bằng giọng.** Nói "tình hình sao" là hook đọc: workspace nào đang chạy, workspace nào chờ approve,
    workspace nào xong bao lâu rồi. Dữ liệu có sẵn trong registry cửa sổ và hàng đợi; hub/ (đang tạm dừng) đã hiện dạng
    trang web.
