@@ -110,7 +110,7 @@ Tắt cả Hands Free và Voice Approve thì mic không bao giờ tự mở, ch�
 
 | Setting | Mặc định | Ý nghĩa |
 |---|---|---|
-| Attention Flash | bật | Windows: nút trên taskbar nháy cam. macOS: title bar nháy vài lần. |
+| Attention Flash | bật | Windows: nút trên taskbar nháy cam. Agent chạy ở Windows Terminal, cmd hay PowerShell rời thì nháy cửa sổ đó. macOS: title bar nháy vài lần. |
 | Attention Color | bật | Title bar đổi màu và status bar ghi "Claude xong" / "cần approve" tới khi bạn quay lại. |
 | Attention Tint Color | `#15803d` | Màu title bar lúc đó. |
 

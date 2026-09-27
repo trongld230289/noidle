@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { windowTitleMatches, flashScript, flashWindow, applyTint, removeTint, shellColorFor, tintForeground, normalizeHex, TINT } from '../src/attention';
+import { windowTitleMatches, flashScript, flashWindow, flashHostScript, flashHostWindow, applyTint, removeTint, shellColorFor, tintForeground, normalizeHex, TINT } from '../src/attention';
 
 describe('attention: tìm cửa sổ VS Code theo tiêu đề', () => {
   it('khớp tiêu đề mặc định "file - workspace - Visual Studio Code"', () => {
@@ -95,5 +95,42 @@ describe('attention: tô màu title bar qua workbench.colorCustomizations', () =
     expect(shellColorFor('light')).toBe('#f8f8f8');
     expect(shellColorFor('hcDark')).toBe('#000000');
     expect(shellColorFor('hcLight')).toBe('#ffffff');
+  });
+});
+
+describe('attention: nháy cửa sổ chứa agent theo chuỗi pid (terminal rời)', () => {
+  it('script nhận chuỗi pid, tra cây tiến trình bằng Toolhelp32, liệt kê cửa sổ, bỏ explorer, nhường VS Code cho extension', () => {
+    const s = flashHostScript([1234, 88, 7]);
+    expect(s).toContain('1234, 88, 7');
+    expect(s).toContain('AttachConsole');
+    expect(s).toContain('GetConsoleWindow');
+    expect(s).toContain('GetAncestor');
+    expect(s).toContain('CreateToolhelp32Snapshot');
+    expect(s).toContain('EnumWindows');
+    expect(s).toContain('GetWindowThreadProcessId');
+    expect(s).toContain('FlashWindowEx');
+    expect(s).toContain('explorer.exe');
+    expect(s).toContain('visual studio code');
+  });
+  it('ngoài Windows là unsupported, chuỗi rỗng là not-found; cả hai không chạy gì', async () => {
+    let spawned = 0;
+    const run = async () => { spawned++; return 0; };
+    expect((await flashHostWindow([1], { platform: 'linux', run })).result).toBe('unsupported');
+    expect((await flashHostWindow([], { platform: 'win32', run })).result).toBe('not-found');
+    expect(spawned).toBe(0);
+  });
+  it('Windows: exit 0 flashed, 2 not-found, 3 foreground, 4 vscode (để extension nháy theo tên workspace)', async () => {
+    const run = (code: number) => async () => code;
+    const result = async (code: number) => (await flashHostWindow([1], { platform: 'win32', run: run(code) })).result;
+    expect(await result(0)).toBe('flashed');
+    expect(await result(2)).toBe('not-found');
+    expect(await result(3)).toBe('foreground');
+    expect(await result(4)).toBe('vscode');
+    expect(await result(-1)).toBe('error');
+  });
+  it('script in ra cửa sổ đã chọn (pid, tiêu đề) để hook ghi log', async () => {
+    const run = async () => ({ code: 0, out: 'pid 31388 Web gallery\r\n' });
+    expect(await flashHostWindow([1], { platform: 'win32', run })).toEqual({ result: 'flashed', window: 'pid 31388 Web gallery' });
+    expect(flashHostScript([1])).toContain('[NoIdleHost]::Chosen');
   });
 });

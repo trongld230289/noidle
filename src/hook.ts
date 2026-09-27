@@ -30,6 +30,7 @@ import { langOf, isAuto, detectLang, effectiveVoice, type Lang } from './lang';
 import { parseApproval, isDangerous, voiceApprovable, parseChoice, isChoiceCancellation, isAmbiguousChoice, permissionRequestOutput } from './decision';
 import { signalWindow, askWindow, readRegistry, micHolder, MIC_LOCK_MAX_AGE_MS, type SignalSource, type AttentionReason } from './signal';
 import { ancestorsOf, parentMap } from './proctree';
+import { flashHostWindow } from './attention';
 import { hedged } from './hedge';
 import { pronounce } from './pronounce';
 import { prefetchInOrder } from './prefetch';
@@ -447,7 +448,6 @@ async function modeSpeak(): Promise<void> {
     log(`speak: background task turn without 🔊, session ${input.session_id}, ignored`);
     return;
   }
-  await attentionSent;
   const session = input.session_id ?? '';
   const cwd = input.cwd || process.cwd();
   // announce luôn đọc tiếng Anh ("Workspace X is done."), bất kể ngôn ngữ của phiên.
@@ -473,6 +473,8 @@ async function modeSpeak(): Promise<void> {
     const ancestors = await claudeAncestors(process.ppid, session);
     await signalWindow({ event: 'listen', session, cwd: listenCwd, source: sourceArg(), ancestors }, undefined, log);
   }
+  // Nháy cửa sổ mất gần một giây (PowerShell): tách play trước rồi mới chờ, để giọng đọc không bị chậm theo.
+  await attentionSent;
 }
 
 /** auto: có hơn một cửa sổ VS Code đăng ký (sổ trong WINDOWS_DIR) thì mới cần nói tên. */
@@ -536,8 +538,19 @@ function voiceFor(lang: Lang): string {
   return effectiveVoice(arg('voice', DEFAULT_VOICE), lang);
 }
 
-/** Bảo extension của cửa sổ có cwd này làm nổi cửa sổ. Không có cửa sổ hay lỗi thì thôi, không chặn việc đọc. */
-function attention(reason: AttentionReason, session: string, cwd: string): Promise<boolean> {
+/**
+ * Làm nổi cửa sổ đang chứa agent. Agent ở terminal rời (Windows Terminal, cmd, PowerShell) thì hook tự nháy
+ * cửa sổ đó theo console/cây tiến trình của mình; ở VS Code (hay không tìm thấy) thì nhờ extension của cửa sổ
+ * có cwd này nháy taskbar và tô màu. Không có cửa sổ hay lỗi thì thôi, không chặn việc đọc.
+ * VI_VOICE_HOST_FLASH=0 tắt bước tự nháy (test chạy hook dưới terminal thật, không được nháy nó).
+ */
+async function attention(reason: AttentionReason, session: string, cwd: string): Promise<boolean> {
+  if (process.env.VI_VOICE_HOST_FLASH !== '0' && process.platform === 'win32') {
+    const t0 = Date.now();
+    const host = await flashHostWindow(await claudeAncestors(process.ppid, session));
+    log(`attention ${reason}: nháy cửa sổ chứa agent → ${host.result}${host.window ? ` (${host.window})` : ''} (${Date.now() - t0}ms)`);
+    if (host.result === 'flashed' || host.result === 'foreground') return true;
+  }
   return signalWindow({ event: 'attention', session, cwd, reason }, undefined, log, false).catch((err) => {
     log(`signal attention lỗi: ${(err as Error).message}`);
     return false;

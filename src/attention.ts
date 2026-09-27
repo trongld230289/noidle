@@ -88,33 +88,45 @@ export type FlashResult = 'flashed' | 'not-found' | 'foreground' | 'unsupported'
 
 export interface FlashDeps {
   platform?: NodeJS.Platform;
-  /** Chạy script, trả exit code. Mặc định: ghi ra file tạm rồi gọi powershell -File. */
-  run?: (script: string) => Promise<number>;
+  /** Chạy script, trả exit code (kèm stdout nếu có). Mặc định: ghi ra file tạm rồi gọi powershell -File. */
+  run?: (script: string) => Promise<number | RunResult>;
 }
 
-async function runPowerShell(script: string): Promise<number> {
+/** Kết quả chạy script: exit code và stdout (script nháy cửa sổ chứa agent in ra cửa sổ đã chọn để ghi log). */
+export interface RunResult {
+  code: number;
+  out: string;
+}
+
+async function runPowerShell(script: string, name = 'flash'): Promise<RunResult> {
   const dir = path.join(os.tmpdir(), 'noidle-tts');
   fs.mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, `flash-${process.pid}.ps1`);
+  const file = path.join(dir, `${name}-${process.pid}.ps1`);
   fs.writeFileSync(file, script, 'utf8');
   return new Promise((resolve) => {
     const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], {
-      stdio: 'ignore',
+      stdio: ['ignore', 'pipe', 'ignore'],
       windowsHide: true,
     });
+    let out = '';
+    child.stdout.on('data', (d: Buffer) => (out += d.toString('utf8')));
     const timer = setTimeout(() => {
       child.kill();
-      resolve(-1);
+      resolve({ code: -1, out });
     }, 15_000);
     child.on('error', () => {
       clearTimeout(timer);
-      resolve(-1);
+      resolve({ code: -1, out });
     });
     child.on('exit', (code) => {
       clearTimeout(timer);
-      resolve(code ?? -1);
+      resolve({ code: code ?? -1, out });
     });
   });
+}
+
+function codeOf(r: number | RunResult): number {
+  return typeof r === 'number' ? r : r.code;
 }
 
 /** Nháy nút taskbar của cửa sổ VS Code có tên workspace này. Không ném lỗi; kết quả để ghi log. */
@@ -124,7 +136,7 @@ export async function flashWindow(workspaceName: string, deps: FlashDeps = {}): 
   const run = deps.run ?? runPowerShell;
   let code: number;
   try {
-    code = await run(flashScript(workspaceName));
+    code = codeOf(await run(flashScript(workspaceName)));
   } catch {
     return 'error';
   }
@@ -132,6 +144,160 @@ export async function flashWindow(workspaceName: string, deps: FlashDeps = {}): 
   if (code === 2) return 'not-found';
   if (code === 3) return 'foreground';
   return 'error';
+}
+
+/**
+ * Agent chạy ở terminal rời (Windows Terminal, cmd, PowerShell): không có extension nào để nháy hộ, hook tự nháy
+ * cửa sổ đang chứa tiến trình agent. Hook là con của agent nên chuỗi pid tổ tiên (gần nhất trước) là của nó.
+ *
+ * Bước 1, theo console: gắn vào console của một pid trong chuỗi (AttachConsole; hook có thể bị spawn không có
+ * console) rồi lấy GetConsoleWindow. Windows Terminal (kể cả khi Win11 giao cmd/PowerShell mở rời cho nó qua
+ * "default terminal", lúc đó WT không nằm trong cây tiến trình) trả một PseudoConsoleWindow ẩn mà owner gốc
+ * (GetAncestor GA_ROOTOWNER) là cửa sổ WT. Conhost cổ điển trả thẳng cửa sổ console. Conpty của VS Code thì
+ * owner gốc là chính nó, không có gì để nháy ở bước này.
+ *
+ * Bước 2, theo cây tiến trình (Toolhelp32, vài ms): duyệt chuỗi, lấy cửa sổ hiện của pid đó hoặc của con nó.
+ * Cửa sổ là VS Code thì không nháy ở đây mà trả 4: mọi cửa sổ VS Code chung một pid, extension chọn theo tên
+ * workspace. explorer.exe (desktop, File Explorer) bị bỏ qua để không nháy nhầm khi nó nằm trong chuỗi.
+ * Exit 0 nháy, 2 không thấy, 3 đang ở foreground, 4 là VS Code.
+ */
+export function flashHostScript(pids: number[]): string {
+  const list = pids.filter((p) => Number.isSafeInteger(p) && p > 0).join(', ');
+  return `
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @"
+using System;
+using System.Text;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+public static class NoIdleHost {
+  [StructLayout(LayoutKind.Sequential)]
+  public struct FLASHWINFO { public uint cbSize; public IntPtr hwnd; public uint dwFlags; public uint uCount; public uint dwTimeout; }
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  public struct PROCESSENTRY32W {
+    public uint dwSize; public uint cntUsage; public uint th32ProcessID; public IntPtr th32DefaultHeapID; public uint th32ModuleID;
+    public uint cntThreads; public uint th32ParentProcessID; public int pcPriClassBase; public uint dwFlags;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string szExeFile;
+  }
+  public delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
+  [DllImport("kernel32.dll")] public static extern bool FreeConsole();
+  [DllImport("kernel32.dll")] public static extern bool AttachConsole(uint pid);
+  [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
+  [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hWnd, uint flags);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder text, int count);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern bool FlashWindowEx(ref FLASHWINFO pwfi);
+  [DllImport("kernel32.dll")] public static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint pid);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern bool Process32FirstW(IntPtr snap, ref PROCESSENTRY32W e);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern bool Process32NextW(IntPtr snap, ref PROCESSENTRY32W e);
+  [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
+  public static List<IntPtr> Handles = new List<IntPtr>();
+  public static List<uint> Pids = new List<uint>();
+  public static List<string> Titles = new List<string>();
+  public static bool Collect(IntPtr h, IntPtr l) {
+    if (!IsWindowVisible(h)) return true;
+    var sb = new StringBuilder(512);
+    GetWindowText(h, sb, sb.Capacity);
+    var t = sb.ToString();
+    if (t.Length == 0) return true;
+    uint pid; GetWindowThreadProcessId(h, out pid);
+    Handles.Add(h); Pids.Add(pid); Titles.Add(t);
+    return true;
+  }
+  public static string Chosen = "";
+  public static int FlashHwnd(IntPtr h, IntPtr fg, string title) {
+    uint pid; GetWindowThreadProcessId(h, out pid);
+    Chosen = "pid " + pid + " " + title;
+    if (title.ToLowerInvariant().Contains("visual studio code")) return 4;
+    if (h == fg) return 3;
+    var f = new FLASHWINFO();
+    f.cbSize = (uint)Marshal.SizeOf(f);
+    f.hwnd = h;
+    f.dwFlags = ${FLASHW_ALL | FLASHW_TIMERNOFG};
+    f.uCount = 0;
+    f.dwTimeout = 0;
+    FlashWindowEx(ref f);
+    return 0;
+  }
+  public static string TitleOf(IntPtr h) { var sb = new StringBuilder(512); GetWindowText(h, sb, sb.Capacity); return sb.ToString(); }
+  /** Cửa sổ terminal đang chứa console của một pid trong chuỗi; IntPtr.Zero nếu console không có cửa sổ hiện (conpty của VS Code). */
+  public static IntPtr ConsoleHost(uint[] chain) {
+    FreeConsole();
+    bool attached = false;
+    foreach (uint p in chain) { if (AttachConsole(p)) { attached = true; break; } }
+    if (!attached) return IntPtr.Zero;
+    IntPtr h = GetConsoleWindow();
+    if (h == IntPtr.Zero) return IntPtr.Zero;
+    IntPtr root = GetAncestor(h, 3);
+    if (root != IntPtr.Zero && root != h) return IsWindowVisible(root) ? root : IntPtr.Zero;
+    var cls = new StringBuilder(256); GetClassName(h, cls, cls.Capacity);
+    if (cls.ToString() == "PseudoConsoleWindow") return IntPtr.Zero;
+    return IsWindowVisible(h) ? h : IntPtr.Zero;
+  }
+  public static int Flash(uint[] chain) {
+    IntPtr fg = GetForegroundWindow();
+    IntPtr host = ConsoleHost(chain);
+    if (host != IntPtr.Zero) return FlashHwnd(host, fg, TitleOf(host));
+    var parent = new Dictionary<uint, uint>();
+    var exe = new Dictionary<uint, string>();
+    IntPtr snap = CreateToolhelp32Snapshot(2, 0);
+    if (snap != IntPtr.Zero && snap.ToInt64() != -1) {
+      var e = new PROCESSENTRY32W(); e.dwSize = (uint)Marshal.SizeOf(e);
+      if (Process32FirstW(snap, ref e)) {
+        do { parent[e.th32ProcessID] = e.th32ParentProcessID; exe[e.th32ProcessID] = e.szExeFile.ToLowerInvariant(); } while (Process32NextW(snap, ref e));
+      }
+      CloseHandle(snap);
+    }
+    Handles.Clear(); Pids.Clear(); Titles.Clear();
+    EnumWindows(Collect, IntPtr.Zero);
+    foreach (uint p in chain) {
+      string name; if (exe.TryGetValue(p, out name) && name == "explorer.exe") continue;
+      for (int i = 0; i < Handles.Count; i++) {
+        uint wp = Pids[i]; uint wpp;
+        bool own = wp == p || (parent.TryGetValue(wp, out wpp) && wpp == p);
+        if (own) return FlashHwnd(Handles[i], fg, Titles[i]);
+      }
+    }
+    return 2;
+  }
+}
+"@
+$code = [NoIdleHost]::Flash([uint32[]]@(${list}))
+[Console]::Out.Write([NoIdleHost]::Chosen)
+exit $code
+`;
+}
+
+export type HostFlashResult = FlashResult | 'vscode';
+
+export interface HostFlash {
+  result: HostFlashResult;
+  /** Cửa sổ script đã chọn ("pid N tiêu đề"), để ghi log; rỗng nếu không chọn được. */
+  window: string;
+}
+
+/** Nháy cửa sổ chứa agent theo chuỗi pid tổ tiên (gần nhất trước). 'vscode': để extension nháy theo tên workspace. */
+export async function flashHostWindow(pids: number[], deps: FlashDeps = {}): Promise<HostFlash> {
+  const platform = deps.platform ?? process.platform;
+  if (platform !== 'win32') return { result: 'unsupported', window: '' };
+  const chain = pids.filter((p) => Number.isSafeInteger(p) && p > 0);
+  if (!chain.length) return { result: 'not-found', window: '' };
+  const run = deps.run ?? ((script) => runPowerShell(script, 'flash-host'));
+  let r: number | RunResult;
+  try {
+    r = await run(flashHostScript(chain));
+  } catch {
+    return { result: 'error', window: '' };
+  }
+  const code = codeOf(r);
+  const window = typeof r === 'number' ? '' : r.out.trim();
+  const result: HostFlashResult =
+    code === 0 ? 'flashed' : code === 2 ? 'not-found' : code === 3 ? 'foreground' : code === 4 ? 'vscode' : 'error';
+  return { result, window };
 }
 
 /**
