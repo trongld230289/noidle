@@ -27,6 +27,8 @@ Ngoài ra: bấm **F6** để nói thành chữ ở bất kỳ đâu trong VS Co
 
 ## Chọn kiểu dùng
 
+**Mặc định sau khi cài** (chưa cần key gì): agent xong → cửa sổ nháy, title bar đổi màu → đọc recap câu trả lời. Muốn nói yêu cầu tiếp hoặc chọn đáp án bằng giọng thì bật **Hands Free**, muốn approve bằng giọng thì bật **Voice Approve**; cả hai cần Groq key.
+
 - Không cần nói thì không cần lấy Groq key.
 - Không cần nghe agent recap thì bật **Voice Mute**, cửa sổ vẫn nháy.
 - Chỉ cần nghe ngắn gọn "Workspace A is done" thì chọn **Voice Style** = `announce`.
