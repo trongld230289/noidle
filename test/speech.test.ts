@@ -36,13 +36,18 @@ describe('pendingBackgroundTasks: việc nền còn chạy khi lượt kết th�
   const toolUse = (name: string, input: unknown) => line({ type: 'assistant', message: { content: [{ type: 'tool_use', name, input }] } });
   const text = (t: string) => line({ type: 'assistant', message: { content: [{ type: 'text', text: t }] } });
 
-  it('agent tách nền (isAsync) và lệnh nền (backgroundTaskId) chưa có notification thì còn chờ', () => {
+  it('agent tách nền (isAsync) chưa có notification thì còn chờ; lệnh Bash nền không tính (server chạy hoài)', () => {
     expect(pendingBackgroundTasks([text('Phát Task 1.'), agentLaunch('a1'), text('Chờ báo cáo.')].join('\n'))).toEqual(['a1']);
-    expect(pendingBackgroundTasks([bashLaunch('b1'), agentLaunch('a1')].join('\n')).sort()).toEqual(['a1', 'b1']);
+    expect(pendingBackgroundTasks([bashLaunch('b1'), agentLaunch('a1')].join('\n'))).toEqual(['a1']);
   });
   it('task-notification (kể cả failed) hay TaskStop mang đúng task-id thì hết chờ', () => {
-    expect(pendingBackgroundTasks([agentLaunch('a1'), bashLaunch('b1'), notification('a1'), notification('b1', 'failed')].join('\n'))).toEqual([]);
-    expect(pendingBackgroundTasks([bashLaunch('b1'), toolUse('TaskStop', { task_id: 'b1' })].join('\n'))).toEqual([]);
+    expect(pendingBackgroundTasks([agentLaunch('a1'), agentLaunch('a2'), notification('a1'), notification('a2', 'failed')].join('\n'))).toEqual([]);
+    expect(pendingBackgroundTasks([agentLaunch('a1'), toolUse('TaskStop', { task_id: 'a1' })].join('\n'))).toEqual([]);
+  });
+  it('notification về lúc Claude đang làm nằm ở dòng attachment hay queue-operation, vẫn tính', () => {
+    const attachment = line({ type: 'attachment', attachment: { type: 'task_notification', content: '<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n</task-notification>' } });
+    const queued = line({ type: 'queue-operation', operation: 'enqueue', content: '<task-notification>\n<task-id>a2</task-id>\n<status>completed</status>\n</task-notification>' });
+    expect(pendingBackgroundTasks([agentLaunch('a1'), agentLaunch('a2'), attachment, queued].join('\n'))).toEqual([]);
   });
   it('notification dạng block text cũng tính; SendMessage tới agent đã xong thì agent chạy lại', () => {
     const blockNotification = line({ type: 'user', message: { content: [{ type: 'text', text: '<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n</task-notification>' }] } });

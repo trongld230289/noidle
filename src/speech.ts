@@ -30,10 +30,13 @@ export function lastAssistantText(jsonl: string): string {
 }
 
 /**
- * Việc nền còn chạy: agent tách nền (Agent tool, kết quả có isAsync + agentId) và lệnh chạy nền (Bash
- * run_in_background, kết quả có backgroundTaskId). Xong thì Claude Code gửi một tin <task-notification> mang
- * task-id đó (completed hay failed); TaskStop dừng sớm; SendMessage tới agent đã xong thì nó chạy tiếp và sẽ
- * báo lại. Claude kết thúc lượt mà còn việc nền là đang chờ, chưa phải xong.
+ * Agent nền còn chạy: Agent tool tách nền cho kết quả có isAsync + agentId. Xong thì Claude Code gửi một
+ * <task-notification> mang task-id đó (completed hay failed); TaskStop dừng sớm; SendMessage tới agent đã xong
+ * thì nó chạy tiếp và sẽ báo lại. Claude kết thúc lượt mà còn agent nền là đang chờ, chưa phải xong.
+ *
+ * Notification nằm ở nhiều loại dòng: tin nhắn user khi Claude rảnh, còn lúc Claude đang làm thì là dòng
+ * attachment hay queue-operation. Nên tìm thẻ trên cả dòng thô, không phân biệt loại. Lệnh Bash chạy nền
+ * (backgroundTaskId) không tính: server dev chạy hoài không bao giờ "xong", tính vào là câm mãi.
  */
 export function pendingBackgroundTasks(jsonl: string): string[] {
   const launched = new Set<string>();
@@ -46,22 +49,17 @@ export function pendingBackgroundTasks(jsonl: string): string[] {
     } catch {
       continue;
     }
-    const tr = entry.toolUseResult as { isAsync?: unknown; agentId?: unknown; backgroundTaskId?: unknown } | undefined;
-    if (tr && typeof tr === 'object') {
-      if (tr.isAsync === true && typeof tr.agentId === 'string') {
-        launched.add(tr.agentId);
-        pending.add(tr.agentId);
-      }
-      if (typeof tr.backgroundTaskId === 'string') {
-        launched.add(tr.backgroundTaskId);
-        pending.add(tr.backgroundTaskId);
-      }
+    const tr = entry.toolUseResult as { isAsync?: unknown; agentId?: unknown } | undefined;
+    if (tr && typeof tr === 'object' && tr.isAsync === true && typeof tr.agentId === 'string') {
+      launched.add(tr.agentId);
+      pending.add(tr.agentId);
+    }
+    for (const m of line.matchAll(/<task-notification>[\s\S]*?<task-id>\s*([^<]+?)\s*<\/task-id>/g)) {
+      // Dòng JSON thô: thẻ có thể nằm trong chuỗi đã escape ("\n" là hai ký tự), task-id là chữ số nên không bị ảnh hưởng.
+      pending.delete(m[1].replace(/\\n/g, '').trim());
     }
     const content = entry.message?.content;
-    if (entry.type === 'user') {
-      const text = typeof content === 'string' ? content : joinTextBlocks(content);
-      for (const m of text.matchAll(/<task-notification>[\s\S]*?<task-id>\s*([^<]+?)\s*<\/task-id>/g)) pending.delete(m[1]);
-    } else if (entry.type === 'assistant' && Array.isArray(content)) {
+    if (entry.type === 'assistant' && Array.isArray(content)) {
       for (const b of content as { type?: string; name?: string; input?: { task_id?: unknown; to?: unknown } }[]) {
         if (!b || b.type !== 'tool_use') continue;
         if (b.name === 'TaskStop' && typeof b.input?.task_id === 'string') pending.delete(b.input.task_id);
