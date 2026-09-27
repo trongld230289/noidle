@@ -29,6 +29,14 @@ describe('parseApproval', () => {
       expect(parseApproval(t)).toBe('allow');
     }
   });
+  it('accepts a confirmation said more than once (Whisper hears "Approve, approve, approve" when the user insists)', () => {
+    for (const t of ['Approve, approve', 'Approve, approve, approve, approve, approve', 'đồng ý đồng ý', 'ok approve ok', 'yes approve yes yes', 'duyệt, duyệt đi']) {
+      expect(parseApproval(t)).toBe('allow');
+    }
+    // Lặp từ không làm mất phủ định hay hoãn.
+    expect(parseApproval('approve approve not')).toBe('deny');
+    expect(parseApproval('approve approve later')).toBeUndefined();
+  });
   it('recognises denials and prefers deny when both appear', () => {
     for (const t of ['Từ chối', 'không', 'Không đồng ý', 'dừng lại', 'huỷ đi', 'no', 'thôi']) {
       expect(parseApproval(t)).toBe('deny');

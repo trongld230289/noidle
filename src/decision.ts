@@ -73,7 +73,8 @@ export function parseApproval(text: string): Approval | undefined {
 
 // Từ đệm được phép đứng quanh lời xác nhận. Không chứa gì mang nghĩa khác.
 const FILLER = ['u', 'o', 'oh', 'a', 'ok', 'okay', 'yes', 'yeah', 'di', 'nhe', 'nha', 'luon', 'please', 'thanks', 'thank you', 'cam on', 'ban', 'em', 'anh', 'chi'];
-const CONFIRM_RE = new RegExp(`^(?:(?:${FILLER.join('|')}) )*(?:${ALLOW.join('|')})(?: (?:${FILLER.join('|')}))*$`);
+// Sau từ đồng ý đầu tiên cho lặp thêm từ đồng ý ("approve, approve, approve": người dùng nói dằn lại khi mic chậm).
+const CONFIRM_RE = new RegExp(`^(?:(?:${FILLER.join('|')}) )*(?:${ALLOW.join('|')})(?: (?:${[...FILLER, ...ALLOW].join('|')}))*$`);
 const QUESTION_START = ['is', 'are', 'can', 'could', 'should', 'do', 'does', 'did', 'will', 'would', 'what', 'why', 'how', 'when', 'co', 'lieu'];
 // "được không", "approve được không", "ok chứ", "ok hả"
 const QUESTION_END = ['khong', 'chu', 'ha', 'a', 'nhi', 'hong'];
