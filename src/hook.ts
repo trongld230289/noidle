@@ -25,7 +25,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { spawn } from 'child_process';
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
-import { lastAssistantText, pickSpeech, hasSpeakSection, pendingBackgroundTasks, promptContext, promptReminder, promptStopRecap, splitSentences, announcement, doneAnnouncement, workspaceName, spoken, HookInput } from './speech';
+import { lastAssistantText, pickSpeech, hasSpeakSection, pendingBackgroundTasks, briefTool, promptContext, promptReminder, promptStopRecap, splitSentences, announcement, doneAnnouncement, workspaceName, spoken, HookInput } from './speech';
 import { langOf, isAuto, detectLang, effectiveVoice, type Lang } from './lang';
 import { parseApproval, isDangerous, voiceApprovable, parseChoice, isChoiceCancellation, isAmbiguousChoice, permissionRequestOutput } from './decision';
 import { signalWindow, askWindow, readRegistry, micHolder, MIC_LOCK_MAX_AGE_MS, type SignalSource, type AttentionReason } from './signal';
@@ -110,7 +110,8 @@ async function claudeAncestors(claudePid: number, session: string): Promise<numb
 async function askHeard(cwd: string, session: string, timeoutSec: number, label: string): Promise<string> {
   const t0 = Date.now();
   const ancestors = sourceArg() === 'copilot' ? [] : await claudeAncestors(process.ppid, session);
-  const heard = (await askWindow({ event: 'ask', session, cwd, timeoutSec, ancestors, source: sourceArg() }, undefined, log)) ?? '';
+  const reason = label === 'approve' ? 'approve' : 'answer';
+  const heard = (await askWindow({ event: 'ask', session, cwd, timeoutSec, ancestors, source: sourceArg(), reason }, undefined, log)) ?? '';
   log(`${label}: nghe ${JSON.stringify(heard)} (${Date.now() - t0}ms)`);
   return heard.trim();
 }
@@ -563,8 +564,9 @@ async function modeNotify(): Promise<void> {
   const lang = sessionLang(cfg, input.session_id);
   const say = spoken(lang);
   const approval = input.hook_event_name === 'PermissionRequest' || (chat && input.chat_voice_tool === 'approval');
+  // Chat: nói thêm tool và vài từ đầu của lệnh (không đọc nguyên câu lệnh dài), có dấu chấm để câu sau tách ra.
   const text = approval && chat
-    ? `${announcement({ ...input, hook_event_name: 'PermissionRequest' }, lang)} ${input.tool_name}: ${input.tool_input?.command ?? input.tool_input?.file_path ?? ''}`.trim()
+    ? `${announcement({ ...input, hook_event_name: 'PermissionRequest' }, lang)} ${briefTool(input.tool_name ?? '', input.tool_input)}.`
     : announcement(input, lang);
   log(`notify ${input.hook_event_name ?? '?'} ${input.notification_type ?? input.tool_name ?? ''}: ${JSON.stringify(text)}`);
   if (input.question_fallback_reason) log(`chọn: dùng hộp thoại thủ công: ${input.question_fallback_reason}`);

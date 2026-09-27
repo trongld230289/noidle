@@ -274,7 +274,7 @@ describe('Copilot Chat voice controls', () => {
         permissionDecisionReason: expect.stringContaining(answer),
       },
     });
-    expect(signals.some((signal) => signal.event === 'ask' && signal.source === 'copilot')).toBe(true);
+    expect(signals.some((signal) => signal.event === 'ask' && signal.source === 'copilot' && signal.reason === 'approve')).toBe(true);
   }, 20_000);
 
   it('answers a local question through hook feedback', async () => {
@@ -289,7 +289,7 @@ describe('Copilot Chat voice controls', () => {
         permissionDecisionReason: expect.stringContaining('SQLite'),
       },
     });
-    expect(signals.some((signal) => signal.event === 'ask' && signal.source === 'copilot')).toBe(true);
+    expect(signals.some((signal) => signal.event === 'ask' && signal.source === 'copilot' && signal.reason === 'answer')).toBe(true);
   }, 20_000);
 
   it.each(['', 'maybe later'])('requires manual confirmation on unclear approval: %j', async (answer) => {
@@ -319,6 +319,32 @@ describe('Copilot Chat voice controls', () => {
     expect(JSON.parse(result.stdout).hookSpecificOutput.permissionDecision).toBe('allow');
     expect(signals.some((signal) => signal.event === 'ask')).toBe(true);
   }, 20_000);
+
+  // Câu báo giữ tên workspace (nhiều cửa sổ thì biết cửa sổ nào xin) và lý do, nhưng lệnh chỉ đọc vài từ đầu.
+  it.each([
+    // Tiếng Việt: bảng cách đọc đổi "Workspace", tên tool và lệnh sang phiên âm, nên chỉ so phần lý do ở cuối.
+    ['vi', 'rm -rf src', /Lệnh này thuộc loại nguy hiểm, bạn bấm tay nhé\.$/],
+    ['en', 'rm -rf src', /^Workspace .+ needs approval\. Bash: rm -rf src\. This command is in the dangerous category, please confirm by hand\.$/],
+    ['vi', `node script.js ${'private-argument '.repeat(40)}`, /Lệnh này chưa nằm trong danh sách an toàn, bạn bấm tay nhé\.$/],
+    ['en', `node script.js ${'private-argument '.repeat(40)}`, /^Workspace .+ needs approval\. Bash: node script\.js private-argument\. This command is not on the safe list, please confirm by hand\.$/],
+  ])('keeps manual approval speech brief without reading the whole command: %s %s', async (language, command, expected) => {
+    configure({ language });
+    fs.rmSync(path.join(tmp, 'noidle-tts', 'cache'), { recursive: true, force: true });
+    heard = 'yes';
+    const result = await run('notify', {
+      ...chat('run_in_terminal', { command }), session_id: `brief-${language}-${command.startsWith('rm') ? 'dangerous' : 'unknown'}`,
+    }, ['--event', 'PreToolUse']);
+    expect(JSON.parse(result.stdout).hookSpecificOutput.permissionDecision).toBe('ask');
+    expect(signals.some((signal) => signal.event === 'ask')).toBe(false);
+    await vi.waitFor(() => {
+      const texts = fs.readFileSync(audioTexts, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+      // Player giả ghi từng câu một dòng; ghép lại để so cả câu báo.
+      const spoken = texts.join(' ');
+      expect(spoken).toMatch(expected);
+      expect(spoken.length).toBeLessThan(160);
+      expect((spoken.match(/private/g) ?? []).length).toBeLessThanOrEqual(1);
+    }, { timeout: 10_000 });
+  }, 15_000);
 
   it.each(['Bash', 'Read', 'mcp__server__run_in_terminal', 'apply_patch', 'multi_replace_string_in_file'])('does not approve unknown or unvalidated tools: %s', async (tool) => {
     heard = 'yes';

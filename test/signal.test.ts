@@ -14,10 +14,41 @@ import {
   pipeName,
   askSignal,
   askWindow,
+  canAutoListen,
   WindowEntry,
 } from '../src/signal';
 
 const w = (pid: number, ...folders: string[]): WindowEntry => ({ pid, pipe: `p${pid}`, folders });
+
+describe('canAutoListen', () => {
+  const enabled = { voiceResponse: true, voiceMute: false, voiceApprove: true, handsFree: true };
+
+  it('checks the current setting for each microphone purpose', () => {
+    expect(canAutoListen({ event: 'ask', reason: 'approve' }, enabled)).toBe(true);
+    expect(canAutoListen({ event: 'ask', reason: 'approve' }, { ...enabled, voiceApprove: false })).toBe(false);
+    expect(canAutoListen({ event: 'ask', reason: 'answer' }, { ...enabled, voiceApprove: false })).toBe(true);
+    expect(canAutoListen({ event: 'ask', reason: 'answer' }, { ...enabled, handsFree: false })).toBe(false);
+    expect(canAutoListen({ event: 'listen' }, { ...enabled, handsFree: false })).toBe(false);
+    expect(canAutoListen({ event: 'listen' }, enabled)).toBe(true);
+  });
+
+  it.each([
+    { voiceResponse: false },
+    { voiceMute: true },
+  ])('blocks every automatic microphone request when disabled: %j', (settings) => {
+    for (const signal of [
+      { event: 'ask', reason: 'approve' },
+      { event: 'ask', reason: 'answer' },
+      { event: 'listen' },
+    ] as const) expect(canAutoListen(signal, { ...enabled, ...settings })).toBe(false);
+  });
+
+  it('rejects old or ambiguous ask signals without a known purpose', () => {
+    expect(canAutoListen({ event: 'ask' }, enabled)).toBe(false);
+    expect(canAutoListen({ event: 'ask', reason: 'done' }, enabled)).toBe(false);
+    expect(canAutoListen({ event: 'attention', reason: 'approve' }, enabled)).toBe(false);
+  });
+});
 
 describe('pickWindow', () => {
   it('chọn folder là tiền tố dài nhất của cwd', () => {

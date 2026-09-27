@@ -352,6 +352,35 @@ export function doneAnnouncement(answer: string, cwd?: string, lang: Lang = 'vi'
  * Câu ngắn để đọc khi Claude Code cần người dùng. Cố ý đơn giản: chỉ tên workspace và việc cần làm,
  * vì người nghe đang làm nhiều cửa sổ, chỉ cần biết quay về đâu. Trả về '' nếu sự kiện không cần báo.
  */
+const BRIEF_WORDS = 3;
+const BRIEF_WORD_MAX = 24;
+
+/**
+ * Câu ngắn về tool đang xin quyền, đọc sau câu "Workspace X cần approve": Copilot Chat gửi nguyên câu lệnh
+ * (có khi dài ba dòng đường dẫn và tham số), đọc hết thì nghe ghê. Chỉ đọc vài từ đầu để biết là lệnh gì:
+ * bỏ "cd <thư mục> &&" mở đầu, đường dẫn chỉ lấy tên file, từ quá dài thì cắt. Tool file thì đọc tên file.
+ */
+export function briefTool(toolName: string, toolInput: Record<string, unknown> | undefined): string {
+  const words: string[] = [];
+  if (typeof toolInput?.command === 'string') {
+    const command = toolInput.command.trim().replace(/^cd\s+(?:"[^"]*"|'[^']*'|\S+)\s*(?:&&|;)\s*/, '');
+    for (const raw of command.split(/\s+/)) {
+      const word = raw.replace(/^["']+|["']+$/g, '');
+      if (!word) continue;
+      words.push(shortWord(word));
+      if (words.length >= BRIEF_WORDS) break;
+    }
+  } else if (typeof toolInput?.file_path === 'string' && toolInput.file_path.trim()) {
+    words.push(shortWord((toolInput.file_path as string).trim()));
+  }
+  return words.length ? `${toolName}: ${words.join(' ')}` : toolName;
+}
+
+function shortWord(word: string): string {
+  const base = /[\\/]/.test(word) ? word.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || word : word;
+  return base.length > BRIEF_WORD_MAX ? `${base.slice(0, BRIEF_WORD_MAX - 1)}…` : base;
+}
+
 export function announcement(input: HookInput, lang: Lang = 'vi'): string {
   const ws = workspaceName(input.cwd, lang);
   const approve = lang === 'en' ? `Workspace ${ws} needs approval.` : `Workspace ${ws} cần approve.`;

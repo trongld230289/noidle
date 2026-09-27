@@ -1,9 +1,30 @@
 import { describe, it, expect } from 'vitest';
-import { lastAssistantText, pickSpeech, stripMarkdown, promptContext, promptReminder, pendingBackgroundTasks } from '../src/speech';
+import { lastAssistantText, pickSpeech, stripMarkdown, promptContext, promptReminder, pendingBackgroundTasks, briefTool } from '../src/speech';
 import { applyHooks, hookCommands } from '../src/claudeHooks';
 import { splitSentences, announcement, workspaceName, doneAnnouncement } from '../src/speech';
 
 const line = (o: unknown) => JSON.stringify(o);
+
+describe('briefTool: câu ngắn về tool đang xin quyền (Copilot Chat)', () => {
+  it('lệnh: tối đa ba từ đầu, không đọc tham số dài', () => {
+    expect(briefTool('Bash', { command: 'git status' })).toBe('Bash: git status');
+    expect(briefTool('Bash', { command: "dotnet test 'd:\\Project\\FREELANCER\\SHIPNGO-API\\src\\Tests.csproj' --filter 'FullyQualifiedName~Create' --nologo -v quiet" })).toBe('Bash: dotnet test Tests.csproj');
+    expect(briefTool('Bash', { command: `node script.js ${'private-argument '.repeat(40)}` })).toBe('Bash: node script.js private-argument');
+  });
+  it('bỏ "cd <thư mục> &&" ở đầu, đường dẫn chỉ đọc tên file, từ quá dài thì cắt', () => {
+    expect(briefTool('Bash', { command: 'cd "D:/Project/Test Token Usage/app" && npm run build' })).toBe('Bash: npm run build');
+    expect(briefTool('Bash', { command: 'cd D:/app; npm test -- test/signal.test.ts' })).toBe('Bash: npm test --');
+    expect(briefTool('Bash', { command: `python ${'a'.repeat(60)}.py` })).toBe(`Bash: python ${'a'.repeat(23)}…`);
+  });
+  it('tool file: chỉ tên file', () => {
+    expect(briefTool('Write', { file_path: 'D:\\repo\\src\\example.ts' })).toBe('Write: example.ts');
+    expect(briefTool('Edit', { file_path: '/home/u/app/index.html' })).toBe('Edit: index.html');
+  });
+  it('không có gì để nói thì chỉ tên tool', () => {
+    expect(briefTool('Bash', {})).toBe('Bash');
+    expect(briefTool('Bash', { command: '   ' })).toBe('Bash');
+  });
+});
 
 describe('pendingBackgroundTasks: việc nền còn chạy khi lượt kết thúc', () => {
   const agentLaunch = (id: string) =>

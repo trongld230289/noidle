@@ -12,7 +12,7 @@ import { langOf, isAuto, effectiveVoice, type Lang } from './lang';
 import { ELEVEN_DEFAULT_VOICE, ELEVEN_DEFAULT_MODEL, readUsage, usageFilePath } from './elevenlabs';
 import { applyHooks, copilotHooksFile, copilotHookPaths, ClaudeSettings, HookOptions } from './claudeHooks';
 import { inject, InjectorApi, Target } from './injector';
-import { startServer, writeRegistry, removeRegistry, pipeName, Signal, acquireMic, releaseMic, micHolder, signalPid, type AttentionReason } from './signal';
+import { startServer, writeRegistry, removeRegistry, pipeName, Signal, acquireMic, releaseMic, micHolder, signalPid, canAutoListen, type AttentionReason } from './signal';
 import { audioLevel, pcmToWav } from './wav';
 import { terminalForAgent } from './proctree';
 import { planMigration, configProperties } from './migrate';
@@ -214,6 +214,9 @@ export function activate(ctx: vscode.ExtensionContext): void {
   const uiLang = (): Lang => (config().auto ? heardLang : config().lang);
   // Đang nghe một câu cho hook (approve / chọn đáp án); F6 và tín hiệu listen bị bỏ qua trong lúc này.
   let asking = false;
+  let askingReason: Signal['reason'];
+  // Tên agent của tín hiệu gần nhất, để status bar ghi "Copilot đang nghe" thay vì luôn "Claude".
+  let agentLabel = 'Claude';
   // Huỷ lượt nghe approve / chọn đáp án đang chạy (khi người dùng gửi prompt hoặc cửa sổ khác xin mic).
   let cancelAsk: (() => void) | undefined;
   // Hàng đợi chèn chữ của phiên gần nhất. Phiên mới nối vào sau để chữ không chen nhau
@@ -227,6 +230,10 @@ export function activate(ctx: vscode.ExtensionContext): void {
   ctx.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
       const cfg = config();
+      if (asking && !canAutoListen({ event: 'ask', reason: askingReason }, cfg)) cancelAsk?.();
+      if (session?.auto && !canAutoListen({ event: 'listen' }, cfg)) {
+        void toggle().catch((err) => log(`không dừng được mic: ${(err as Error).message}`));
+      }
       if (e.affectsConfiguration('noIdle.handsFree') && cfg.handsFree) void askKeyForMicFeature('Hands Free').catch(() => undefined);
       else if (e.affectsConfiguration('noIdle.voiceApprove') && cfg.voiceApprove) void askKeyForMicFeature('Voice Approve').catch(() => undefined);
       if (e.affectsConfiguration('noIdle.ffmpegPath') || e.affectsConfiguration('noIdle.micDevice')) {
@@ -746,7 +753,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
           throw err;
         }
         session = s;
-        status.set(s.auto ? 'listening' : 'recording', uiLang());
+        status.set(s.auto ? 'listening' : 'recording', uiLang(), agentLabel);
         maxTimer = setTimeout(() => void vscode.commands.executeCommand('noIdle.toggle'), MAX_RECORD_MS);
         if (s.auto) armIdle(s);
         return;
@@ -844,25 +851,32 @@ export function activate(ctx: vscode.ExtensionContext): void {
    * Nghe một câu cho hook (approve, chọn đáp án): bíp, mở mic, lấy cụm tiếng nói đầu tiên, gửi Whisper (không qua LLM).
    * Trả '' nếu mic đang bận, không ai nói trong timeoutMs, hoặc lỗi; hook sẽ để hộp thoại hiện như thường.
    */
-  async function askOnce(timeoutMs: number): Promise<string> {
+  async function askOnce(timeoutMs: number, reason: Signal['reason']): Promise<string> {
+    const allowed = () => canAutoListen({ event: 'ask', reason }, config());
+    if (!allowed()) {
+      log('ask: setting hiện tại không cho phép mở mic, bỏ qua');
+      return '';
+    }
     if (session || asking) {
       log('ask: mic đang bận, bỏ qua');
       return '';
     }
     const apiKey = await resolveApiKey();
-    if (!apiKey) return '';
+    if (!apiKey || !allowed() || session || asking) return '';
     // Cửa sổ khác đang nghe (F6 hay hands-free): không mở mic thứ hai, để hộp thoại hiện cho bấm tay.
     if (!acquireMic(process.pid)) {
       log(`ask: cửa sổ khác (pid ${micHolder()}) đang giữ mic, bỏ qua`);
       return '';
     }
     asking = true;
-    status.set('listening', uiLang());
+    askingReason = reason;
+    status.set('listening', uiLang(), agentLabel);
     // Câu báo "cần approve" đã đọc xong và trả vé hàng đợi trước khi hook gửi ask; trong khe đó một câu của phiên khác
     // có thể vừa bắt đầu phát và mic sẽ thu tiếng loa. Cắt như F6; các câu xếp sau tự chờ khoá mic.
     skipSpeech(true);
     try {
       await beep();
+      if (!allowed()) return '';
       const t0 = Date.now();
       let starting: Promise<void> = Promise.resolve();
       const wav = await new Promise<Uint8Array | undefined>((resolve) => {
@@ -896,6 +910,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       // đã trả khoá cho cửa sổ khác. Đợi khởi động xong (có giới hạn) rồi mới dừng và trả khoá.
       await Promise.race([starting.catch(() => undefined), new Promise((r) => setTimeout(r, 3000))]);
       if (recorder.recording) await recorder.stop();
+      if (!allowed()) return '';
       if (!wav) {
         log(`ask: không nghe thấy gì sau ${Date.now() - t0}ms`);
         return '';
@@ -903,6 +918,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       status.set('transcribing');
       const cfg = config();
       const heard = await transcribe(wav, { apiKey, glossary: cfg.glossary, language: cfg.language, promptLang: uiLang() });
+      if (!allowed()) return '';
       log(`ask: nghe ${JSON.stringify(heard)} (${Date.now() - t0}ms)`);
       return heard;
     } catch (err) {
@@ -910,6 +926,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       return '';
     } finally {
       asking = false;
+      askingReason = undefined;
       releaseMic(process.pid);
       status.set('idle');
     }
@@ -921,8 +938,9 @@ export function activate(ctx: vscode.ExtensionContext): void {
    */
   async function onSignal(s: Signal): Promise<string | void> {
     log(`tín hiệu ${s.event} (session ${s.session || '-'})`);
+    if (s.source) agentLabel = s.source === 'claude' ? 'Claude' : 'Copilot';
     if (s.event === 'attention') return onAttention(s.reason ?? 'done');
-    if (s.event === 'ask') return askOnce(Math.max(3, s.timeoutSec ?? 15) * 1000);
+    if (s.event === 'ask') return askOnce(Math.max(3, s.timeoutSec ?? 15) * 1000, s.reason);
     if (s.event === 'submitted') {
       // Người dùng đã quay lại cửa sổ này và gửi tiếp: không cần làm nổi nữa.
       clearAttention();
@@ -941,7 +959,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       }
       return;
     }
-    if (!config().handsFree) return;
+    if (!canAutoListen(s, config())) return;
     if (session || asking) {
       log('hands-free: mic đang bật sẵn, bỏ qua');
       return;
@@ -955,6 +973,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
         return;
       }
       await beep();
+      if (!canAutoListen(s, config())) return;
       await toggle({ target: 'chat', auto: true });
       return;
     }
@@ -971,6 +990,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     }
     log(`hands-free: ${s.source === 'copilot-cli' ? 'Copilot CLI' : 'Claude Code'} → terminal "${terminal.name}"`);
     await beep();
+    if (!canAutoListen(s, config())) return;
     await toggle({ target: 'terminal', auto: true, terminal });
   }
 

@@ -10,6 +10,9 @@ export class StatusBar implements vscode.Disposable {
 
   private lang: Lang = 'vi';
   private state: State = 'idle';
+  /** Agent đang được nghe (Claude hay Copilot), hiện ở trạng thái listening. */
+  private agent = 'Claude';
+  /** Status bar luôn tiếng Anh (UI của extension), không theo noIdle.language, vì đó là ngôn ngữ nói và nghe. */
   /** Cửa sổ này đang có việc cần người dùng (Claude xong, approve, trả lời); chỉ hiện khi rảnh, tắt khi cửa sổ được focus. */
   private attentionReason: AttentionReason | undefined;
 
@@ -32,9 +35,10 @@ export class StatusBar implements vscode.Disposable {
     if (this.state === 'idle') this.render();
   }
 
-  set(state: State, lang: Lang = this.lang): void {
+  set(state: State, lang: Lang = this.lang, agent?: string): void {
     this.lang = lang;
     this.state = state;
+    if (agent) this.agent = agent;
     this.render();
   }
 
@@ -43,31 +47,29 @@ export class StatusBar implements vscode.Disposable {
     switch (state) {
       case 'idle':
         if (this.attentionReason) {
-          const en = this.lang === 'en';
-          const label = { done: en ? 'Claude is done' : 'Claude xong', approve: en ? 'needs approval' : 'cần approve', answer: en ? 'needs your answer' : 'cần bạn trả lời' }[this.attentionReason];
+          const label = { done: `${this.agent} is done`, approve: 'needs approval', answer: 'needs your answer' }[this.attentionReason];
           this.item.text = `$(bell-dot) ${label}`;
-          this.item.tooltip = en ? 'This window needs you. Clears when the window gets focus' : 'Cửa sổ này đang cần bạn. Tự tắt khi cửa sổ được focus';
+          this.item.tooltip = 'This window needs you. Clears when the window gets focus';
           this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
           break;
         }
         this.item.text = '$(mic) NoIdle';
-        this.item.tooltip = 'F6 để bắt đầu nghe';
+        this.item.tooltip = 'F6 to start listening';
         this.item.backgroundColor = undefined;
         break;
       case 'recording':
-        this.item.text = '$(record) Đang nghe…';
-        this.item.tooltip = 'F6 để dừng';
+        this.item.text = '$(record) Listening…';
+        this.item.tooltip = 'F6 to stop';
         this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
         break;
       case 'listening':
-        // Trạng thái duy nhất người dùng tiếng Anh thấy khi rảnh tay, nên có bản tiếng Anh; các trạng thái khác để sau (nls).
-        this.item.text = this.lang === 'en' ? '$(record) Claude is listening…' : '$(record) Claude đang nghe…';
-        this.item.tooltip = this.lang === 'en' ? 'Say your next request, then press Enter. F6 turns the mic off' : 'Nói yêu cầu tiếp theo rồi bấm Enter. F6 để tắt mic';
+        this.item.text = `$(record) ${this.agent} is listening…`;
+        this.item.tooltip = 'Say your next request, then press Enter. F6 turns the mic off';
         this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
         break;
       case 'transcribing':
-        this.item.text = '$(sync~spin) Đang chuyển chữ…';
-        this.item.tooltip = 'Đang gửi lên Groq';
+        this.item.text = '$(sync~spin) Transcribing…';
+        this.item.tooltip = 'Sending to Groq';
         this.item.backgroundColor = undefined;
         break;
     }

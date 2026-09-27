@@ -37,6 +37,18 @@ export interface Signal {
 /** Trả lời của server cho ask; các tín hiệu khác không có trả lời. */
 export type SignalHandler = (s: Signal) => void | string | Promise<void | string>;
 
+export function canAutoListen(
+  signal: Pick<Signal, 'event' | 'reason'>,
+  settings: { voiceResponse: boolean; voiceMute: boolean; voiceApprove: boolean; handsFree: boolean },
+): boolean {
+  if (!settings.voiceResponse || settings.voiceMute) return false;
+  if (signal.event === 'listen') return settings.handsFree;
+  if (signal.event !== 'ask') return false;
+  if (signal.reason === 'approve') return settings.voiceApprove;
+  if (signal.reason === 'answer') return settings.handsFree;
+  return false;
+}
+
 export const WINDOWS_DIR = path.join(os.tmpdir(), 'noidle-tts', 'windows');
 
 export function pipeName(pid: number): string {
