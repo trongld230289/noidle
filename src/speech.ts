@@ -29,6 +29,49 @@ export function lastAssistantText(jsonl: string): string {
   return '';
 }
 
+/**
+ * Việc nền còn chạy: agent tách nền (Agent tool, kết quả có isAsync + agentId) và lệnh chạy nền (Bash
+ * run_in_background, kết quả có backgroundTaskId). Xong thì Claude Code gửi một tin <task-notification> mang
+ * task-id đó (completed hay failed); TaskStop dừng sớm; SendMessage tới agent đã xong thì nó chạy tiếp và sẽ
+ * báo lại. Claude kết thúc lượt mà còn việc nền là đang chờ, chưa phải xong.
+ */
+export function pendingBackgroundTasks(jsonl: string): string[] {
+  const launched = new Set<string>();
+  const pending = new Set<string>();
+  for (const line of jsonl.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    let entry: { type?: string; message?: { content?: unknown }; toolUseResult?: unknown };
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const tr = entry.toolUseResult as { isAsync?: unknown; agentId?: unknown; backgroundTaskId?: unknown } | undefined;
+    if (tr && typeof tr === 'object') {
+      if (tr.isAsync === true && typeof tr.agentId === 'string') {
+        launched.add(tr.agentId);
+        pending.add(tr.agentId);
+      }
+      if (typeof tr.backgroundTaskId === 'string') {
+        launched.add(tr.backgroundTaskId);
+        pending.add(tr.backgroundTaskId);
+      }
+    }
+    const content = entry.message?.content;
+    if (entry.type === 'user') {
+      const text = typeof content === 'string' ? content : joinTextBlocks(content);
+      for (const m of text.matchAll(/<task-notification>[\s\S]*?<task-id>\s*([^<]+?)\s*<\/task-id>/g)) pending.delete(m[1]);
+    } else if (entry.type === 'assistant' && Array.isArray(content)) {
+      for (const b of content as { type?: string; name?: string; input?: { task_id?: unknown; to?: unknown } }[]) {
+        if (!b || b.type !== 'tool_use') continue;
+        if (b.name === 'TaskStop' && typeof b.input?.task_id === 'string') pending.delete(b.input.task_id);
+        if (b.name === 'SendMessage' && typeof b.input?.to === 'string' && launched.has(b.input.to)) pending.add(b.input.to);
+      }
+    }
+  }
+  return [...pending];
+}
+
 function joinTextBlocks(content: unknown): string {
   if (!Array.isArray(content)) return '';
   return content

@@ -25,7 +25,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { spawn } from 'child_process';
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
-import { lastAssistantText, pickSpeech, hasSpeakSection, promptContext, promptReminder, promptStopRecap, splitSentences, announcement, doneAnnouncement, workspaceName, spoken, HookInput } from './speech';
+import { lastAssistantText, pickSpeech, hasSpeakSection, pendingBackgroundTasks, promptContext, promptReminder, promptStopRecap, splitSentences, announcement, doneAnnouncement, workspaceName, spoken, HookInput } from './speech';
 import { langOf, isAuto, detectLang, effectiveVoice, type Lang } from './lang';
 import { parseApproval, isDangerous, voiceApprovable, parseChoice, isChoiceCancellation, isAmbiguousChoice, permissionRequestOutput } from './decision';
 import { signalWindow, askWindow, readRegistry, micHolder, MIC_LOCK_MAX_AGE_MS, type SignalSource, type AttentionReason } from './signal';
@@ -274,7 +274,6 @@ const SESSION_MARK_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
 interface SessionMark {
   count: number;
   lang?: Lang;
-  backgroundTurn?: boolean;
   /** voiceStyle đã áp cho prompt trước của phiên; thiếu (dấu cũ) coi như recap. Đổi giữa phiên thì chèn câu chuyển. */
   style?: 'recap' | 'announce';
   /** Chuỗi pid tổ tiên của Claude Code (pid không đổi trong một phiên), để khỏi tra cây tiến trình mỗi lượt. */
@@ -296,8 +295,8 @@ function readMark(session: string): SessionMark {
   const n = Number(raw);
   if (!Number.isNaN(n)) return { count: n };
   try {
-    const o = JSON.parse(raw) as { count?: unknown; lang?: unknown; backgroundTurn?: unknown; style?: unknown; proc?: { pid?: unknown; chain?: unknown } };
-    const mark: SessionMark = { count: Number(o.count) || 0, lang: o.lang === 'en' ? 'en' : o.lang === 'vi' ? 'vi' : undefined, backgroundTurn: o.backgroundTurn === true };
+    const o = JSON.parse(raw) as { count?: unknown; lang?: unknown; style?: unknown; proc?: { pid?: unknown; chain?: unknown } };
+    const mark: SessionMark = { count: Number(o.count) || 0, lang: o.lang === 'en' ? 'en' : o.lang === 'vi' ? 'vi' : undefined };
     if (o.style === 'announce' || o.style === 'recap') mark.style = o.style;
     if (o.proc && typeof o.proc.pid === 'number' && Array.isArray(o.proc.chain)) {
       mark.proc = { pid: o.proc.pid, chain: o.proc.chain.filter((n): n is number => typeof n === 'number') };
@@ -392,13 +391,8 @@ async function modePrompt(): Promise<void> {
   }
   const promptText = typeof input.prompt === 'string' ? input.prompt : '';
   if (promptText.trimStart().startsWith('<task-notification>')) {
-    if (input.session_id) writeMark(input.session_id, { ...readMark(input.session_id), backgroundTurn: true });
     log(`prompt: background task notification, session ${input.session_id ?? '-'}, ignored`);
     return;
-  }
-  if (input.session_id) {
-    const mark = readMark(input.session_id);
-    if (mark.backgroundTurn) writeMark(input.session_id, { ...mark, backgroundTurn: false });
   }
   // Mute thì không dặn Claude viết phần 🔊, nhưng vẫn báo submitted để tắt mic nếu đang mở.
   const cfg = loadConfig();
@@ -425,15 +419,7 @@ async function modeSpeak(): Promise<void> {
   if (!input.transcript_path) return;
   // Một hook khác vừa chặn Stop và Claude làm tiếp: không đọc lại để khỏi lặp.
   if (input.stop_hook_active) return;
-  const background = !!input.session_id && readMark(input.session_id).backgroundTurn === true;
   const cfg = loadConfig();
-  // Làm nổi cửa sổ (nháy taskbar, đổi màu status bar) kể cả khi mute: không có tiếng, chỉ để tìm đúng cửa sổ.
-  const attentionSent = background ? Promise.resolve(false) : attention('done', input.session_id ?? '', input.cwd || process.cwd());
-  if (cfg.voiceMute) {
-    log('speak: đang mute, bỏ qua');
-    await attentionSent;
-    return;
-  }
   let transcript: string;
   try {
     transcript = fs.readFileSync(input.transcript_path, 'utf8');
@@ -441,13 +427,24 @@ async function modeSpeak(): Promise<void> {
     log(`không đọc được transcript: ${(err as Error).message}`);
     return;
   }
-  const answer = lastAssistantText(transcript);
-  // Lượt do task nền (lệnh chạy nền, subagent xong) kích hoạt: chỉ đọc khi Claude chủ ý viết phần 🔊
-  // (báo tiến độ cho người đang nghe), không đọc văn xuôi thay thế và không tự mở mic.
-  if (background && !hasSpeakSection(answer)) {
-    log(`speak: background task turn without 🔊, session ${input.session_id}, ignored`);
+  // Claude kết thúc lượt mà còn agent hay lệnh chạy nền: nó đang chờ, chưa xong. Claude Code sẽ gọi nó lại
+  // khi việc nền xong. Không báo "done", không nháy, không mở mic; chỉ đọc nếu Claude chủ ý viết phần 🔊
+  // (báo tiến độ cho người đang nghe). Hết việc nền rồi mới báo như thường, kể cả ở lượt do notification mở.
+  const pending = pendingBackgroundTasks(transcript);
+  const waiting = pending.length > 0;
+  // Làm nổi cửa sổ (nháy taskbar, đổi màu status bar) kể cả khi mute: không có tiếng, chỉ để tìm đúng cửa sổ.
+  const attentionSent = waiting ? Promise.resolve(false) : attention('done', input.session_id ?? '', input.cwd || process.cwd());
+  if (cfg.voiceMute) {
+    log('speak: đang mute, bỏ qua');
+    await attentionSent;
     return;
   }
+  const answer = lastAssistantText(transcript);
+  if (waiting && !hasSpeakSection(answer)) {
+    log(`speak: còn ${pending.length} việc nền đang chạy (${pending.join(', ')}), chưa xong nên không báo`);
+    return;
+  }
+  if (waiting) log(`speak: còn ${pending.length} việc nền đang chạy, chỉ đọc phần 🔊, không mở mic`);
   const session = input.session_id ?? '';
   const cwd = input.cwd || process.cwd();
   // announce luôn đọc tiếng Anh ("Workspace X is done."), bất kể ngôn ngữ của phiên.
@@ -463,7 +460,7 @@ async function modeSpeak(): Promise<void> {
   }
   // Hands-free: extension mở mic sau khi loa phát xong. Tiến trình play gửi tín hiệu listen khi xong;
   // không có gì để đọc thì gửi ngay từ đây.
-  const listenCwd = cfg.handsFree && !background ? cwd : undefined;
+  const listenCwd = cfg.handsFree && !waiting ? cwd : undefined;
   if (text) {
     // Shell chạy hook CLI thoát ngay sau hook; lấy chuỗi pid trước khi tách play.
     const ancestors = listenCwd && sourceArg() === 'copilot-cli' ? await claudeAncestors(process.ppid, session) : undefined;

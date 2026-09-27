@@ -1,9 +1,40 @@
 import { describe, it, expect } from 'vitest';
-import { lastAssistantText, pickSpeech, stripMarkdown, promptContext, promptReminder } from '../src/speech';
+import { lastAssistantText, pickSpeech, stripMarkdown, promptContext, promptReminder, pendingBackgroundTasks } from '../src/speech';
 import { applyHooks, hookCommands } from '../src/claudeHooks';
 import { splitSentences, announcement, workspaceName, doneAnnouncement } from '../src/speech';
 
 const line = (o: unknown) => JSON.stringify(o);
+
+describe('pendingBackgroundTasks: việc nền còn chạy khi lượt kết thúc', () => {
+  const agentLaunch = (id: string) =>
+    line({ type: 'user', message: { content: [{ type: 'tool_result', content: 'Async agent launched successfully.' }] }, toolUseResult: { isAsync: true, status: 'async_launched', agentId: id } });
+  const bashLaunch = (id: string) =>
+    line({ type: 'user', message: { content: [{ type: 'tool_result', content: '' }] }, toolUseResult: { stdout: '', backgroundTaskId: id, timedOutAfterMs: 120000 } });
+  const notification = (id: string, status = 'completed') =>
+    line({ type: 'user', message: { content: `<task-notification>\n<task-id>${id}</task-id>\n<status>${status}</status>\n<summary>x</summary>\n</task-notification>` } });
+  const toolUse = (name: string, input: unknown) => line({ type: 'assistant', message: { content: [{ type: 'tool_use', name, input }] } });
+  const text = (t: string) => line({ type: 'assistant', message: { content: [{ type: 'text', text: t }] } });
+
+  it('agent tách nền (isAsync) và lệnh nền (backgroundTaskId) chưa có notification thì còn chờ', () => {
+    expect(pendingBackgroundTasks([text('Phát Task 1.'), agentLaunch('a1'), text('Chờ báo cáo.')].join('\n'))).toEqual(['a1']);
+    expect(pendingBackgroundTasks([bashLaunch('b1'), agentLaunch('a1')].join('\n')).sort()).toEqual(['a1', 'b1']);
+  });
+  it('task-notification (kể cả failed) hay TaskStop mang đúng task-id thì hết chờ', () => {
+    expect(pendingBackgroundTasks([agentLaunch('a1'), bashLaunch('b1'), notification('a1'), notification('b1', 'failed')].join('\n'))).toEqual([]);
+    expect(pendingBackgroundTasks([bashLaunch('b1'), toolUse('TaskStop', { task_id: 'b1' })].join('\n'))).toEqual([]);
+  });
+  it('notification dạng block text cũng tính; SendMessage tới agent đã xong thì agent chạy lại', () => {
+    const blockNotification = line({ type: 'user', message: { content: [{ type: 'text', text: '<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n</task-notification>' }] } });
+    expect(pendingBackgroundTasks([agentLaunch('a1'), blockNotification].join('\n'))).toEqual([]);
+    expect(pendingBackgroundTasks([agentLaunch('a1'), blockNotification, toolUse('SendMessage', { to: 'a1', message: 'tiếp đi' })].join('\n'))).toEqual(['a1']);
+    // SendMessage tới thứ khác (teammate) không phải agent nền.
+    expect(pendingBackgroundTasks([agentLaunch('a1'), blockNotification, toolUse('SendMessage', { to: 'reviewer', message: 'x' })].join('\n'))).toEqual([]);
+  });
+  it('transcript thường (không có việc nền) hay dòng hỏng thì rỗng', () => {
+    expect(pendingBackgroundTasks([text('Xong.'), 'không phải json'].join('\n'))).toEqual([]);
+    expect(pendingBackgroundTasks('')).toEqual([]);
+  });
+});
 
 describe('speech word separation instructions', () => {
   it.each(['vi', 'en'] as const)('guides AI word separation in full prompts (%s)', (lang) => {
