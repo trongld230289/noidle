@@ -27,7 +27,7 @@ Ngoài ra: bấm **F6** để nói thành chữ ở bất kỳ đâu trong VS Co
 
 ## Chọn kiểu dùng
 
-**Mặc định sau khi cài** (chưa cần key gì): agent xong → cửa sổ nháy, title bar đổi màu → đọc recap câu trả lời. Muốn nói yêu cầu tiếp hoặc chọn đáp án bằng giọng thì bật **Hands Free**, muốn approve bằng giọng thì bật **Voice Approve**; cả hai cần Groq key.
+**Mặc định sau khi cài** (chưa cần key gì): agent xong → cửa sổ nháy, title bar đổi màu → đọc recap câu trả lời. Muốn nói yêu cầu tiếp, chọn đáp án và approve lệnh an toàn bằng giọng thì bật **Hands Free**; cần Groq key.
 
 - Không cần nói thì không cần lấy Groq key.
 - Không cần nghe agent recap thì bật **Voice Mute**, cửa sổ vẫn nháy.
@@ -44,9 +44,9 @@ Ngoài ra: bấm **F6** để nói thành chữ ở bất kỳ đâu trong VS Co
 **2. Lấy Groq key** (miễn phí, để chuyển giọng nói thành chữ; chỉ nghe, không nói thì bỏ qua bước này):
 1. Mở [console.groq.com/keys](https://console.groq.com/keys), đăng nhập bằng Google hoặc GitHub.
 2. Bấm **Create API Key**, copy key (bắt đầu bằng `gsk_`). Key chỉ hiện một lần.
-3. Dán key khi extension hỏi. Extension chỉ hỏi lúc bạn dùng mic lần đầu: bấm **F6**, hoặc bật **Hands Free** / **Voice Approve**.
+3. Dán key khi extension hỏi. Extension chỉ hỏi lúc bạn dùng mic lần đầu: bấm **F6**, hoặc bật **Hands Free**.
 
-**3. Xong.** Đọc câu trả lời, nháy cửa sổ và đổi màu title bar đã bật sẵn. Muốn rảnh tay hoàn toàn thì `Ctrl+,` (Mac: `Cmd+,`), gõ `NoIdle`, bật thêm **Hands Free** và **Voice Approve**.
+**3. Xong.** Đọc câu trả lời, nháy cửa sổ và đổi màu title bar đã bật sẵn. Muốn rảnh tay hoàn toàn thì `Ctrl+,` (Mac: `Cmd+,`), gõ `NoIdle`, bật thêm **Hands Free**.
 
 Sau đó **mở lại phiên Claude Code hoặc Copilot CLI** (Copilot Chat: mở chat mới). Phiên đang mở từ trước sẽ không đọc.
 
@@ -79,7 +79,7 @@ Khi approve hoặc chọn đáp án, im lặng hoặc nói không rõ thì chuy�
 
 - Chỉ tool và lệnh thuộc danh sách cho phép mới duyệt được bằng giọng: đọc và sửa file thường, `npm test`, `npm run build`, `git status`, một số dạng `git commit`... Danh sách này không kiểm tra nội dung script hay Git hook; chỉ dùng với project bạn tin cậy.
 - Xoá file, `git push`, `git reset --hard`, `sudo`, sửa `.env`, tool lạ hay MCP **không bao giờ duyệt bằng giọng**. Những lệnh này đi theo cơ chế xin quyền bình thường của agent.
-- Ai đứng gần mic cũng nói được, nên chỉ bật `voiceApprove` khi bạn đang ở gần.
+- Ai đứng gần mic cũng nói được, nên chỉ bật Hands Free khi bạn đang ở gần.
 
 ## Settings
 
@@ -99,14 +99,13 @@ Khi approve hoặc chọn đáp án, im lặng hoặc nói không rõ thì chuy�
 
 | Setting | Mặc định | Ý nghĩa |
 |---|---|---|
-| Hands Free | tắt | Đọc xong thì bíp và mở mic để bạn nói tiếp. Cũng dùng để chọn đáp án bằng giọng. |
-| Voice Approve | tắt | Agent xin chạy lệnh thì mở mic để bạn nói đồng ý hay từ chối. |
+| Hands Free | tắt | Rảnh tay: đọc xong thì bíp và mở mic để bạn nói tiếp; agent hỏi thì chọn đáp án bằng giọng; agent xin chạy lệnh an toàn thì nói đồng ý hay từ chối. |
 | Hands Free Timeout Sec | `20` | Mic mở mà im lặng bao lâu thì tắt. |
 | Hands Free Auto Send | bật | Tự gửi sau khi ngừng nói, xử lý nhận dạng xong và có ít nhất 3 từ. Câu ngắn hơn hoặc khi tắt setting này thì nói "gửi" để gửi. |
 | Hands Free Send Delay Sec | `2.5` | Khoảng chờ trước khi tự gửi khi đã đủ điều kiện Auto Send; không tính thời gian xử lý nhận dạng. |
 | Voice Approve Timeout Sec | `15` | Chờ bạn nói approve tối đa bao lâu. |
 
-Tắt cả Hands Free và Voice Approve thì mic không bao giờ tự mở, chỉ mở khi bạn bấm F6.
+Tắt Hands Free thì mic không bao giờ tự mở, chỉ mở khi bạn bấm F6.
 
 **3. Báo cửa sổ đang cần bạn**
 
@@ -155,7 +154,7 @@ Tắt cả Hands Free và Voice Approve thì mic không bao giờ tự mở, ch�
 
 **Mở nhiều cửa sổ thì mic mở ở đâu?** Ở cửa sổ của agent vừa xong. Copilot Chat nhận lời nói trong ô chat. Claude Code và Copilot CLI nhận trong đúng terminal đang chạy agent, nên hãy chạy chúng trong terminal của VS Code. Chạy ở terminal ngoài VS Code thì vẫn nghe đọc, nhưng mic không tự mở để tránh gõ nhầm chỗ.
 
-**Copilot Chat hỏi approve cả lệnh bình thường?** Copilot Chat gọi hook trước mọi lần chạy tool, nên khi bật Voice Approve có thể hỏi cả lệnh vốn đã được cho phép. Tắt Voice Approve nếu thấy phiền.
+**Copilot Chat hỏi approve cả lệnh bình thường?** Copilot Chat gọi hook trước mọi lần chạy tool, nên khi bật Hands Free có thể hỏi cả lệnh vốn đã được cho phép. Tắt Hands Free nếu thấy phiền.
 
 **Chạy trên Mac được không?** Được, nhưng chưa test trên máy thật. Linux chưa hỗ trợ.
 

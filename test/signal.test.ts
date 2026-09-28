@@ -21,12 +21,12 @@ import {
 const w = (pid: number, ...folders: string[]): WindowEntry => ({ pid, pipe: `p${pid}`, folders });
 
 describe('canAutoListen', () => {
-  const enabled = { voiceResponse: true, voiceMute: false, voiceApprove: true, handsFree: true };
+  const enabled = { voiceResponse: true, voiceMute: false, handsFree: true };
 
   it('checks the current setting for each microphone purpose', () => {
     expect(canAutoListen({ event: 'ask', reason: 'approve' }, enabled)).toBe(true);
-    expect(canAutoListen({ event: 'ask', reason: 'approve' }, { ...enabled, voiceApprove: false })).toBe(false);
-    expect(canAutoListen({ event: 'ask', reason: 'answer' }, { ...enabled, voiceApprove: false })).toBe(true);
+    expect(canAutoListen({ event: 'ask', reason: 'approve' }, { ...enabled, handsFree: false })).toBe(false);
+    expect(canAutoListen({ event: 'ask', reason: 'answer' }, enabled)).toBe(true);
     expect(canAutoListen({ event: 'ask', reason: 'answer' }, { ...enabled, handsFree: false })).toBe(false);
     expect(canAutoListen({ event: 'listen' }, { ...enabled, handsFree: false })).toBe(false);
     expect(canAutoListen({ event: 'listen' }, enabled)).toBe(true);

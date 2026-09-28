@@ -76,7 +76,6 @@ function config() {
     elevenLabsVoiceId: (c.get<string>('elevenLabsVoiceId', '') || '').trim() || ELEVEN_DEFAULT_VOICE,
     elevenLabsModel: (c.get<string>('elevenLabsModel', '') || '').trim() || ELEVEN_DEFAULT_MODEL,
     voiceNotify: c.get<boolean>('voiceNotify', true),
-    voiceApprove: c.get<boolean>('voiceApprove', false),
     approveTimeoutSec: c.get<number>('voiceApproveTimeoutSec', 15),
     handsFree: c.get<boolean>('handsFree', false),
     handsFreeTimeoutSec: c.get<number>('handsFreeTimeoutSec', 20),
@@ -132,6 +131,15 @@ async function migrateFromViVoice(ctx: vscode.ExtensionContext, log: (m: string)
   for (const [k, v] of plan.set) await newCfg.update(k, v, vscode.ConfigurationTarget.Global);
   for (const k of plan.clear) await oldCfg.update(k, undefined, vscode.ConfigurationTarget.Global);
   if (plan.clear.length) log(`migrate: chép ${plan.set.length} setting viVoice.* sang noIdle.*, xoá ${plan.clear.length} key cũ`);
+  // 1.0.11: voiceApprove gộp vào handsFree. Người đang bật approve bằng giọng mà chưa đặt handsFree thì bật handsFree cho họ.
+  const oldApprove = newCfg.inspect<boolean>('voiceApprove')?.globalValue;
+  if (oldApprove !== undefined) {
+    if (oldApprove && newCfg.inspect<boolean>('handsFree')?.globalValue === undefined) {
+      await newCfg.update('handsFree', true, vscode.ConfigurationTarget.Global);
+    }
+    await newCfg.update('voiceApprove', undefined, vscode.ConfigurationTarget.Global);
+    log(`migrate: noIdle.voiceApprove=${oldApprove} gộp vào handsFree`);
+  }
   const oldSecret = await ctx.secrets.get('viVoice.groqApiKey');
   if (oldSecret) {
     if (!(await ctx.secrets.get(SECRET_KEY))) await ctx.secrets.store(SECRET_KEY, oldSecret);
@@ -236,7 +244,6 @@ export function activate(ctx: vscode.ExtensionContext): void {
         void toggle().catch((err) => log(`không dừng được mic: ${(err as Error).message}`));
       }
       if (e.affectsConfiguration('noIdle.handsFree') && cfg.handsFree) void askKeyForMicFeature('Hands Free').catch(() => undefined);
-      else if (e.affectsConfiguration('noIdle.voiceApprove') && cfg.voiceApprove) void askKeyForMicFeature('Voice Approve').catch(() => undefined);
       if (e.affectsConfiguration('noIdle.ffmpegPath') || e.affectsConfiguration('noIdle.micDevice')) {
         recorder.dispose();
         recorder = new Recorder(config());
@@ -294,7 +301,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
   }
 
   /**
-   * Chỉ hỏi key khi người dùng bật tính năng cần mic (Hands Free, Voice Approve) mà chưa có key; không thì mic mở mà
+   * Chỉ hỏi key khi người dùng bật tính năng cần mic (Hands Free) mà chưa có key; không thì mic mở mà
    * lặng lẽ không nhận dạng được. Chỉ nghe đọc thì không cần key nên lúc cài không hỏi. F6 tự hỏi qua getApiKey.
    */
   async function askKeyForMicFeature(feature: string): Promise<void> {
@@ -324,7 +331,6 @@ export function activate(ctx: vscode.ExtensionContext): void {
     const cfg = config();
     const data = {
       voiceMute: cfg.voiceMute,
-      voiceApprove: cfg.voiceApprove,
       approveTimeoutSec: cfg.approveTimeoutSec,
       handsFree: cfg.handsFree,
       pronunciations: cfg.pronunciations,

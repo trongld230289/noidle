@@ -32,7 +32,7 @@ function run(mode: string, input: unknown, args: string[] = []) {
 
 const cli = (sessionId: string, extra: Record<string, unknown> = {}) => ({ sessionId, timestamp: Date.now(), cwd: work, ...extra });
 const log = () => fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8') : '';
-const configure = (extra: Record<string, unknown> = {}) => fs.writeFileSync(config, JSON.stringify({ language: 'en', voiceApprove: true, handsFree: true, ...extra }));
+const configure = (extra: Record<string, unknown> = {}) => fs.writeFileSync(config, JSON.stringify({ language: 'en', handsFree: true, ...extra }));
 
 beforeAll(async () => {
   fs.mkdirSync(tmp, { recursive: true });
@@ -354,7 +354,7 @@ describe('Copilot Chat voice controls', () => {
   });
 
   it.each([
-    [{ voiceApprove: false }, 'run_in_terminal', { command: 'git status' }],
+    [{ handsFree: false }, 'run_in_terminal', { command: 'git status' }],
     [{ voiceMute: true }, 'run_in_terminal', { command: 'git status' }],
     [{ handsFree: false }, 'vscode_askQuestions', { questions: [question] }],
     [{ voiceMute: true }, 'vscode_askQuestions', { questions: [question] }],

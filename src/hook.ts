@@ -16,7 +16,7 @@
  *   skip                      Bỏ qua bản đang đọc (tắt player của vé đầu hàng); extension gọi từ lệnh/phím tắt.
  *   notify [--voice] ...      Notification / PermissionRequest / PreToolUse(AskUserQuestion): đọc một câu ngắn
  *                             "Workspace X cần approve" hoặc "cần bạn xác nhận câu trả lời", xếp sau lượt đang đọc.
- *                             Có --config với voiceApprove/handsFree thì nhờ extension mở mic (tín hiệu ask),
+ *                             Có --config với handsFree thì nhờ extension mở mic (tín hiệu ask),
  *                             nhận chữ nghe được và trả quyết định. Hook không tự mở mic.
  */
 import * as fs from 'fs';
@@ -52,9 +52,8 @@ async function readHookInput(event: string): Promise<AgentHookInput> {
 interface HookConfig {
   /** Tạm tắt tiếng: hook vẫn đăng ký nhưng không đọc, không báo, không chèn hướng dẫn 🔊. Đổi là có hiệu lực ngay. */
   voiceMute?: boolean;
-  voiceApprove?: boolean;
   approveTimeoutSec?: number;
-  /** Vòng lặp nói chuyện: chọn đáp án bằng giọng, và extension tự mở mic sau khi đọc xong câu trả lời. */
+  /** Rảnh tay: duyệt lệnh an toàn và chọn đáp án bằng giọng, và extension tự mở mic sau khi đọc xong câu trả lời. */
   handsFree?: boolean;
   /** Bảng của người dùng: thuật ngữ → cách đọc, ghi đè bảng mặc định trong pronounce.ts. */
   pronunciations?: Record<string, string>;
@@ -560,7 +559,7 @@ async function modeNotify(): Promise<void> {
   const cfg = loadConfig();
   const chat = sourceArg() === 'copilot';
   if (chat && (input.hook_event_name !== 'PreToolUse' || !input.chat_voice_tool)) return;
-  if (chat && input.chat_voice_tool === 'approval' && !cfg.voiceApprove) return;
+  if (chat && input.chat_voice_tool === 'approval' && !cfg.handsFree) return;
   const lang = sessionLang(cfg, input.session_id);
   const say = spoken(lang);
   const approval = input.hook_event_name === 'PermissionRequest' || (chat && input.chat_voice_tool === 'approval');
@@ -576,7 +575,7 @@ async function modeNotify(): Promise<void> {
     log('notify: đang mute, bỏ qua');
     return;
   }
-  if (approval && cfg.voiceApprove) {
+  if (approval && cfg.handsFree) {
     // Danh sách trắng: chỉ tool và lệnh lành mới duyệt bằng giọng; lệnh nguy hiểm hay chưa phân loại thì bấm tay.
     const elevated = input.tool_input?.requestSandboxBypass === true || (chat &&
       ['requestSandboxBypass', 'requestUnsandboxedExecution', 'requestAllowNetwork'].some((key) => input[key] === true || input.tool_input?.[key] === true));

@@ -2,7 +2,7 @@
   "name": "noidle",
   "displayName": "NoIdle",
   "description": "Hear when Claude Code or Copilot is done, say what's next. Nói tiếng Việt để gõ, nghe agent trả lời, hands-free từ ghế hay giường, không phút nào chờ vô ích.",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "publisher": "trongld232",
   "icon": "images/icon.png",
   "license": "MIT",
@@ -100,7 +100,7 @@
           "noIdle.voiceNotify": {
             "type": "boolean",
             "default": true,
-            "markdownDescription": "**Bật** thì đăng ký hook thông báo và tương tác cho Claude Code, Copilot CLI và Copilot Chat (Local): \"Workspace X cần approve\", \"Workspace X cần bạn xác nhận câu trả lời\". Mở mic là việc của `noIdle.voiceApprove` và `noIdle.handsFree`. Tắt setting này cũng gỡ hook approve/chọn đáp án; cần khởi động lại CLI hoặc mở phiên Chat mới để nhận thay đổi.",
+            "markdownDescription": "**Bật** thì đăng ký hook thông báo và tương tác cho Claude Code, Copilot CLI và Copilot Chat (Local): \"Workspace X cần approve\", \"Workspace X cần bạn xác nhận câu trả lời\". Mở mic là việc của `noIdle.handsFree`. Tắt setting này cũng gỡ hook approve/chọn đáp án; cần khởi động lại CLI hoặc mở phiên Chat mới để nhận thay đổi.",
             "scope": "application",
             "order": 3
           },
@@ -130,16 +130,9 @@
           "noIdle.handsFree": {
             "type": "boolean",
             "default": false,
-            "markdownDescription": "**Bật = mic tự mở sau khi agent đọc xong**, để bạn nói yêu cầu tiếp theo. Claude Code/Copilot CLI nhận lời nói trong terminal; Copilot Chat nhận trong ô chat. CLI phải chạy trong terminal tích hợp của VS Code; không xác định đúng terminal thì không tự chèn. **Tắt = đọc xong là thôi, không mở mic.** Lệnh nhanh: `NoIdle: Tắt/bật hands-free`.\n\nNghe tiếng bíp rồi nói; ngừng khoảng 2,5 giây là tự gửi. Nói **gửi** để gửi ngay, **huỷ** để bỏ. Bấm F6 hoặc im lặng hết giờ là mic tắt. Claude Code, Copilot CLI và Copilot Chat (Local, `vscode_askQuestions`) hỏi chọn đáp án thì đọc câu hỏi và lựa chọn, nghe bạn chọn bằng số hoặc tên; chọn nhiều hoặc trả lời tự do khi câu hỏi cho phép. Cần bật `noIdle.voiceNotify`. Đáp án được chuyển cho agent qua phản hồi hook, không tự bấm vào hộp thoại; im lặng, huỷ hoặc không rõ thì chọn tay.\n\nXin quyền chạy lệnh dùng setting riêng `noIdle.voiceApprove`. Tắt cả hai là mic chỉ mở khi bạn bấm F6.",
+            "markdownDescription": "**Bật = rảnh tay hoàn toàn**: agent đọc xong thì mic tự mở để bạn nói yêu cầu tiếp; agent hỏi chọn đáp án thì đọc câu hỏi và nghe bạn chọn; agent xin chạy lệnh hay sửa file thì nghe bạn nói \"đồng ý\" hoặc \"từ chối\". **Tắt = đọc xong là thôi**, mic chỉ mở khi bạn bấm F6, approve và chọn đáp án bằng tay. Lệnh nhanh: `NoIdle: Tắt/bật hands-free`. Cần Groq key và `noIdle.voiceNotify` bật.\n\nNghe tiếng bíp rồi nói; ngừng khoảng 2,5 giây là tự gửi. Nói **gửi** để gửi ngay, **huỷ** để bỏ. Claude Code/Copilot CLI nhận lời nói trong terminal tích hợp của VS Code (không xác định đúng terminal thì không tự chèn); Copilot Chat nhận trong ô chat.\n\nDuyệt lệnh bằng giọng chỉ áp dụng cho danh sách an toàn (đọc/sửa file thường, `npm test`, `git status`...); lệnh nguy hiểm, file nhạy cảm và yêu cầu thoát sandbox luôn phải bấm tay. Im lặng, huỷ hay nói không rõ thì chuyển về xác nhận thủ công. Copilot Chat gọi hook trước mọi lần chạy tool nên có thể hỏi cả lệnh vốn được tự cho phép. Ai đứng gần mic cũng nói được, chỉ bật khi bạn ở gần.",
             "scope": "application",
             "order": 0
-          },
-          "noIdle.voiceApprove": {
-            "type": "boolean",
-            "default": false,
-            "markdownDescription": "**Bật = duyệt lệnh bằng giọng cho Claude Code, Copilot CLI và Copilot Chat (Local)**, bạn nói \"đồng ý\", \"ok\" để cho phép hoặc \"từ chối\", \"không\" để chặn. Cần bật `noIdle.voiceNotify`. **Tắt = giữ cơ chế quyền của agent.** Im lặng hay nói không rõ thì chuyển về xác nhận thủ công.\n\nChỉ lệnh trong danh sách an toàn mới duyệt được bằng giọng; lệnh nguy hiểm, file nhạy cảm và yêu cầu thoát sandbox không được duyệt bằng giọng. Ai ở gần mic cũng nói được, chỉ bật khi cần.\n\nCopilot Chat dùng `PreToolUse` cho `run_in_terminal`, `create_file` và `replace_string_in_file`; patch nhiều file và tool khác giữ cơ chế quyền của VS Code. Chat và Copilot CLI có thể hỏi cả lệnh vốn được tự cho phép, không chỉ lúc hộp xin quyền xuất hiện. Đọc xong/chọn đáp án dùng setting riêng `noIdle.handsFree`.",
-            "scope": "application",
-            "order": 1
           },
           "noIdle.handsFreeTimeoutSec": {
             "type": "number",
@@ -433,7 +426,12 @@
           "viVoice.voiceApprove": {
             "type": "boolean",
             "scope": "application",
-            "deprecationMessage": "Đã đổi thành noIdle.voiceApprove. Giá trị cũ được tự chuyển sang lúc extension khởi động."
+            "deprecationMessage": "Đã gộp vào noIdle.handsFree."
+          },
+          "noIdle.voiceApprove": {
+            "type": "boolean",
+            "scope": "application",
+            "deprecationMessage": "Đã gộp vào noIdle.handsFree: Hands Free bật là duyệt lệnh an toàn bằng giọng luôn. Giá trị cũ được tự chuyển sang lúc extension khởi động."
           },
           "viVoice.voiceApproveTimeoutSec": {
             "type": "number",
