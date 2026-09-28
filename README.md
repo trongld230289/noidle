@@ -46,7 +46,7 @@ Ngoài ra: bấm **F6** để nói thành chữ ở bất kỳ đâu trong VS Co
 2. Bấm **Create API Key**, copy key (bắt đầu bằng `gsk_`). Key chỉ hiện một lần.
 3. Dán key khi extension hỏi. Extension chỉ hỏi lúc bạn dùng mic lần đầu: bấm **F6**, hoặc bật **Hands Free** / **Voice Approve**.
 
-**3. Bật đọc câu trả lời:** `Ctrl+,` (Mac: `Cmd+,`), gõ `NoIdle`, bật **Voice Response**. Muốn rảnh tay hoàn toàn thì bật thêm **Hands Free** và **Voice Approve**.
+**3. Xong.** Đọc câu trả lời, nháy cửa sổ và đổi màu title bar đã bật sẵn. Muốn rảnh tay hoàn toàn thì `Ctrl+,` (Mac: `Cmd+,`), gõ `NoIdle`, bật thêm **Hands Free** và **Voice Approve**.
 
 Sau đó **mở lại phiên Claude Code hoặc Copilot CLI** (Copilot Chat: mở chat mới). Phiên đang mở từ trước sẽ không đọc.
 
@@ -89,7 +89,7 @@ Khi approve hoặc chọn đáp án, im lặng hoặc nói không rõ thì chuy�
 
 | Setting | Mặc định | Ý nghĩa |
 |---|---|---|
-| Voice Response | tắt | Công tắc chính: đọc câu trả lời của Claude Code, Copilot Chat, Copilot CLI. |
+| Voice Response | bật | Công tắc chính: nháy cửa sổ, đổi màu và đọc câu trả lời của Claude Code, Copilot Chat, Copilot CLI. Tắt là gỡ hook, không nháy, không đọc. |
 | Voice Mute | tắt | Im lặng tạm thời, không cần restart. Lệnh nhanh: `NoIdle: Tắt/bật tiếng Claude Code`. |
 | Voice Style | `recap` | `recap`: đọc tóm tắt nội dung (tốn thêm ít token mỗi lượt). `announce`: chỉ đọc "Workspace X is done" (tiếng Anh), không tốn token. |
 | Voice Notify | bật | Đọc "Workspace X cần approve" / "cần bạn trả lời". |
@@ -163,8 +163,8 @@ Tắt cả Hands Free và Voice Approve thì mic không bao giờ tự mở, ch�
 
 | Hiện tượng | Cách xử lý |
 |---|---|
-| Không tìm thấy ffmpeg | Cài ffmpeg rồi mở lại VS Code, hoặc điền đường dẫn vào Ffmpeg Path. |
-| Bấm Đọc thử giọng báo không chạy được node | Cài Node.js (bước 1) rồi mở lại VS Code. |
+| Không tìm thấy ffmpeg, hoặc cửa sổ nháy mà không có tiếng | Cài ffmpeg rồi mở lại VS Code (đóng hết cửa sổ, không chỉ Reload Window), hoặc điền đường dẫn vào Ffmpeg Path. |
+| Báo cần Node.js, hoặc Copilot Chat hiện "Warning from ... hook" | Cài Node.js (bước 1) rồi mở lại VS Code. |
 | Sai key | Chạy `NoIdle: Set Groq API Key`, nhập lại. |
 | Nói mà không ra chữ | Kiểm tra mic trong cài đặt Sound của máy (macOS: thêm quyền mic cho VS Code ở Privacy & Security > Microphone). Chạy `NoIdle: Chọn micro`. |
 | F6 trong terminal ra ký tự lạ | Mở lại VS Code; extension tự thêm F6 vào `terminal.integrated.commandsToSkipShell` lần đầu chạy. |

@@ -4,7 +4,7 @@ Tài liệu cho người muốn hiểu sâu hoặc đóng góp code. Hướng d�
 
 ## Đọc câu trả lời, thông báo và hook
 
-Bật setting `noIdle.voiceResponse`. Extension sẽ:
+Setting `noIdle.voiceResponse` mặc định bật (thiếu `node` thì extension không ghi hook và báo cách cài). Extension sẽ:
 
 1. Đăng ký hook cho Claude Code trong `~/.claude/settings.json` và cho Copilot Chat (VS Code 1.110 trở lên) lẫn GitHub Copilot CLI trong `~/.copilot/hooks/noidle.json`. Hook dặn agent kết thúc bằng phần 🔊 để đọc thành tiếng, đọc khi trả lời xong và xử lý thông báo/câu hỏi nếu được bật. Một file Copilot dùng chung, không đăng ký hai lần cho Chat và CLI.
 2. Đọc bằng giọng tiếng Việt của Microsoft Edge (miễn phí, cần mạng) hoặc ElevenLabs (xem bên dưới), phát qua `ffplay` đi kèm ffmpeg.

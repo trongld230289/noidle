@@ -2,7 +2,7 @@
   "name": "noidle",
   "displayName": "NoIdle",
   "description": "Hear when Claude Code or Copilot is done, say what's next. Nói tiếng Việt để gõ, nghe agent trả lời, hands-free từ ghế hay giường, không phút nào chờ vô ích.",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "publisher": "trongld232",
   "icon": "images/icon.png",
   "license": "MIT",
@@ -70,8 +70,8 @@
         "properties": {
           "noIdle.voiceResponse": {
             "type": "boolean",
-            "default": false,
-            "markdownDescription": "Công tắc chính: **bật** thì Claude Code, Copilot Chat và GitHub Copilot CLI đọc câu trả lời thành tiếng qua loa hoặc tai nghe. **Tắt** thì gỡ hẳn hook. Khởi động lại phiên Claude Code/Copilot CLI để nhận thay đổi hook. Chỉ muốn im tạm thời thì dùng `noIdle.voiceMute`.\n\nCần `node` và `ffplay` (đi kèm ffmpeg) trong PATH.",
+            "default": true,
+            "markdownDescription": "Công tắc chính (mặc định bật): Claude Code, Copilot Chat và GitHub Copilot CLI xong thì cửa sổ nháy, title bar đổi màu và đọc câu trả lời thành tiếng. **Tắt** thì gỡ hẳn hook, không nháy, không đọc. Khởi động lại phiên Claude Code/Copilot CLI để nhận thay đổi hook. Chỉ muốn im tạm thời thì dùng `noIdle.voiceMute`.\n\nCần `node` (thiếu thì không cài hook) và `ffplay` đi kèm ffmpeg (thiếu thì chỉ nháy, không có tiếng) trong PATH.",
             "scope": "application",
             "order": 0
           },

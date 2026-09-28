@@ -16,6 +16,7 @@ import { startServer, writeRegistry, removeRegistry, pipeName, Signal, acquireMi
 import { audioLevel, pcmToWav } from './wav';
 import { terminalForAgent } from './proctree';
 import { planMigration, configProperties } from './migrate';
+import { checkRequirements } from './requirements';
 import * as fs from 'fs';
 import { execFile, spawn } from 'child_process';
 import * as os from 'os';
@@ -66,7 +67,7 @@ function config() {
   const typing = c.get<number>('typingDelayMs', 12);
   return {
     apiKey: (c.get<string>('groqApiKey', '') || '').trim(),
-    voiceResponse: c.get<boolean>('voiceResponse', false),
+    voiceResponse: c.get<boolean>('voiceResponse', true),
     voiceMute: c.get<boolean>('voiceMute', false),
     voice: c.get<string>('voice', 'vi-VN-HoaiMyNeural') || 'vi-VN-HoaiMyNeural',
     voiceRate: c.get<string>('voiceRate', '+0%') || '+0%',
@@ -383,10 +384,36 @@ export function activate(ctx: vscode.ExtensionContext): void {
     }
   }
 
+  /** Đã báo thiếu node/ffplay trong lần chạy này chưa, để không hiện lại mỗi lần đổi setting. */
+  let warnedMissing = '';
+
+  /**
+   * Hook là script node: thiếu node thì Claude Code và Copilot Chat báo lỗi hook ở mọi lượt, nên coi như voiceResponse
+   * tắt (gỡ hook) và báo cách cài. Thiếu ffplay thì hook vẫn nháy cửa sổ, chỉ không có tiếng: vẫn ghi hook, báo một lần.
+   */
+  async function hooksAllowed(opts: HookOptions): Promise<boolean> {
+    if (!opts.enabled) return true;
+    const have = await checkRequirements(opts.player);
+    const missing = !have.node ? 'node' : !have.player ? 'ffplay' : '';
+    if (!missing) return true;
+    if (warnedMissing !== missing) {
+      warnedMissing = missing;
+      const text = missing === 'node'
+        ? 'NoIdle: cần Node.js để đọc câu trả lời và nháy cửa sổ khi agent xong. Cài Node.js (và ffmpeg để có tiếng) rồi mở lại VS Code.'
+        : 'NoIdle: không thấy ffplay (đi kèm ffmpeg) nên chỉ nháy cửa sổ, không đọc thành tiếng. Cài ffmpeg rồi mở lại VS Code, hoặc điền đường dẫn vào Ffmpeg Path.';
+      log(`thiếu ${missing}: ${missing === 'node' ? 'không ghi hook' : 'hook chỉ nháy cửa sổ'}`);
+      void vscode.window.showWarningMessage(text, 'Hướng dẫn cài').then((pick) => {
+        if (pick) void vscode.env.openExternal(vscode.Uri.parse('https://github.com/trongld230289/noidle#readme'));
+      });
+    }
+    return missing !== 'node';
+  }
+
   /** Đồng bộ hook cho Claude Code, Copilot Chat và Copilot CLI. */
   async function syncHooks(): Promise<void> {
     await writeHookConfig();
-    const opts = { ...hookOptions(), script: await installHookScript() };
+    const wanted = { ...hookOptions(), script: await installHookScript() };
+    const opts = (await hooksAllowed(wanted)) ? wanted : { ...wanted, enabled: false };
     await syncClaudeHooks(opts);
     await syncCopilotHooks(opts);
   }
@@ -420,7 +447,6 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   /** Ghi hook Stop + UserPromptSubmit vào ~/.claude/settings.json theo setting voiceResponse. */
   async function syncClaudeHooks(opts: HookOptions): Promise<void> {
-    const cfg = config();
     let current: ClaudeSettings = {};
     try {
       current = JSON.parse(await fs.promises.readFile(claudeSettingsPath, 'utf8')) as ClaudeSettings;
@@ -429,7 +455,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
         log(`không đọc được ${claudeSettingsPath}: ${(err as Error).message}`);
         return;
       }
-      if (!cfg.voiceResponse) return;
+      if (!opts.enabled) return;
     }
     const next = applyHooks(current, opts);
     const before = JSON.stringify(current);
@@ -437,8 +463,8 @@ export function activate(ctx: vscode.ExtensionContext): void {
     if (before === after) return;
     await fs.promises.mkdir(path.dirname(claudeSettingsPath), { recursive: true });
     await fs.promises.writeFile(claudeSettingsPath, JSON.stringify(next, null, 2) + '\n', 'utf8');
-    log(`hook Claude Code: ${cfg.voiceResponse ? 'đã bật' : 'đã tắt'} (${claudeSettingsPath})`);
-    if (cfg.voiceResponse) {
+    log(`hook Claude Code: ${opts.enabled ? 'đã bật' : 'đã tắt'} (${claudeSettingsPath})`);
+    if (opts.enabled) {
       void vscode.window.showInformationMessage(
         'NoIdle: đã bật giọng nói cho Claude Code, Copilot Chat và Copilot CLI. Khởi động lại phiên Claude Code/Copilot CLI để nhận hook.',
       );
