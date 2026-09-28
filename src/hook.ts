@@ -25,7 +25,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { spawn } from 'child_process';
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
-import { lastAssistantText, pickSpeech, hasSpeakSection, pendingBackgroundTasks, briefTool, promptContext, promptReminder, promptStopRecap, splitSentences, announcement, doneAnnouncement, workspaceName, spoken, HookInput } from './speech';
+import { lastAssistantText, pickSpeech, hasSpeakSection, pendingBackgroundTasks, queuedPrompts, briefTool, promptContext, promptReminder, promptStopRecap, splitSentences, announcement, doneAnnouncement, workspaceName, spoken, HookInput } from './speech';
 import { langOf, isAuto, detectLang, effectiveVoice, type Lang } from './lang';
 import { parseApproval, isDangerous, voiceApprovable, parseChoice, isChoiceCancellation, isAmbiguousChoice, permissionRequestOutput } from './decision';
 import { signalWindow, askWindow, readRegistry, micHolder, MIC_LOCK_MAX_AGE_MS, type SignalSource, type AttentionReason } from './signal';
@@ -402,7 +402,10 @@ async function modePrompt(): Promise<void> {
   }
   const promptText = typeof input.prompt === 'string' ? input.prompt : '';
   if (promptText.trimStart().startsWith('<task-notification>')) {
-    log(`prompt: background task notification, session ${input.session_id ?? '-'}, ignored`);
+    // Không phải người dùng nói: không đếm, không đổi ngôn ngữ, không tắt mic. Nhưng Claude sắp chạy tiếp,
+    // cửa sổ không còn "done": bảo extension bỏ màu và chữ "Claude is done".
+    log(`prompt: background task notification, session ${input.session_id ?? '-'}, chỉ báo resumed`);
+    await signalWindow({ event: 'resumed', session: input.session_id ?? '', cwd: input.cwd || process.cwd(), source: sourceArg() }, undefined, log);
     return;
   }
   // Mute thì không dặn Claude viết phần 🔊, nhưng vẫn báo submitted để tắt mic nếu đang mở.
@@ -441,7 +444,9 @@ async function modeSpeak(): Promise<void> {
   // Claude kết thúc lượt mà còn agent hay lệnh chạy nền: nó đang chờ, chưa xong. Claude Code sẽ gọi nó lại
   // khi việc nền xong. Không báo "done", không nháy, không mở mic; chỉ đọc nếu Claude chủ ý viết phần 🔊
   // (báo tiến độ cho người đang nghe). Hết việc nền rồi mới báo như thường, kể cả ở lượt do notification mở.
-  const pending = pendingBackgroundTasks(transcript);
+  // Người dùng gõ tiếp lúc Claude đang làm: câu đó nằm trong hàng đợi và Claude làm ngay, cũng chưa xong.
+  const queued = queuedPrompts(transcript);
+  const pending = [...pendingBackgroundTasks(transcript), ...(queued ? [`${queued} prompt đang xếp hàng`] : [])];
   const waiting = pending.length > 0;
   // Làm nổi cửa sổ (nháy taskbar, đổi màu status bar) kể cả khi mute: không có tiếng, chỉ để tìm đúng cửa sổ.
   const attentionSent = waiting ? Promise.resolve(false) : attention('done', input.session_id ?? '', input.cwd || process.cwd());

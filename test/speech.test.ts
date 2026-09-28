@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { lastAssistantText, pickSpeech, stripMarkdown, promptContext, promptReminder, pendingBackgroundTasks, briefTool } from '../src/speech';
+import { lastAssistantText, pickSpeech, stripMarkdown, promptContext, promptReminder, pendingBackgroundTasks, queuedPrompts, briefTool } from '../src/speech';
 import { applyHooks, hookCommands } from '../src/claudeHooks';
 import { splitSentences, announcement, workspaceName, doneAnnouncement } from '../src/speech';
 
@@ -36,9 +36,23 @@ describe('pendingBackgroundTasks: việc nền còn chạy khi lượt kết th�
   const toolUse = (name: string, input: unknown) => line({ type: 'assistant', message: { content: [{ type: 'tool_use', name, input }] } });
   const text = (t: string) => line({ type: 'assistant', message: { content: [{ type: 'text', text: t }] } });
 
-  it('agent tách nền (isAsync) chưa có notification thì còn chờ; lệnh Bash nền không tính (server chạy hoài)', () => {
+  const prompt = (t: string) => line({ type: 'user', message: { role: 'user', content: t } });
+
+  it('agent tách nền (isAsync) chưa có notification thì còn chờ', () => {
     expect(pendingBackgroundTasks([text('Phát Task 1.'), agentLaunch('a1'), text('Chờ báo cáo.')].join('\n'))).toEqual(['a1']);
-    expect(pendingBackgroundTasks([bashLaunch('b1'), agentLaunch('a1')].join('\n'))).toEqual(['a1']);
+  });
+  it('lệnh Bash nền bật trong lượt vừa kết thúc mà chưa có notification thì còn chờ (Claude ngừng để đợi nó)', () => {
+    expect(pendingBackgroundTasks([prompt('chạy test'), bashLaunch('b1'), text('Đang chờ baseline xong, sẽ chạy RED khi có thông báo.')].join('\n'))).toEqual(['b1']);
+    expect(pendingBackgroundTasks([prompt('chạy test'), bashLaunch('b1'), agentLaunch('a1')].join('\n'))).toEqual(['a1', 'b1']);
+  });
+  it('lệnh Bash nền bật ở lượt trước (server dev chạy hoài) không tính cho các lượt sau', () => {
+    expect(pendingBackgroundTasks([prompt('bật server'), bashLaunch('b1'), text('Server đang chạy.'), prompt('giờ sửa bug'), text('Đã sửa.')].join('\n'))).toEqual([]);
+    // Lượt do notification của việc khác mở ra cũng là lượt mới.
+    expect(pendingBackgroundTasks([prompt('bật server'), bashLaunch('b1'), agentLaunch('a1'), notification('a1'), text('Xong.')].join('\n'))).toEqual([]);
+  });
+  it('lệnh Bash nền đã có notification (kể cả dòng attachment lúc Claude đang làm) thì hết chờ', () => {
+    const attachment = line({ type: 'attachment', attachment: { type: 'task_notification', content: '<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n</task-notification>' } });
+    expect(pendingBackgroundTasks([prompt('chạy test'), bashLaunch('b1'), attachment, text('Test xanh.')].join('\n'))).toEqual([]);
   });
   it('task-notification (kể cả failed) hay TaskStop mang đúng task-id thì hết chờ', () => {
     expect(pendingBackgroundTasks([agentLaunch('a1'), agentLaunch('a2'), notification('a1'), notification('a2', 'failed')].join('\n'))).toEqual([]);
@@ -59,6 +73,27 @@ describe('pendingBackgroundTasks: việc nền còn chạy khi lượt kết th�
   it('transcript thường (không có việc nền) hay dòng hỏng thì rỗng', () => {
     expect(pendingBackgroundTasks([text('Xong.'), 'không phải json'].join('\n'))).toEqual([]);
     expect(pendingBackgroundTasks('')).toEqual([]);
+  });
+});
+
+describe('queuedPrompts: người dùng gõ tiếp lúc Claude đang làm, lượt kết thúc là Claude làm ngay câu đó', () => {
+  const op = (operation: string, content?: string, reason?: string) =>
+    line({ type: 'queue-operation', operation, timestamp: '2026-09-28T16:01:03.216Z', sessionId: 's', ...(content !== undefined ? { content } : {}), ...(reason ? { reason } : {}) });
+  const text = (t: string) => line({ type: 'assistant', message: { content: [{ type: 'text', text: t }] } });
+
+  it('enqueue chưa dequeue thì còn xếp hàng', () => {
+    expect(queuedPrompts([text('Đang làm.'), op('enqueue', 'đang làm nó xanh lên kìa'), text('Xong phần này.')].join('\n'))).toBe(1);
+  });
+  it('dequeue là Claude đã lấy câu đó làm lượt mới; remove (absorbed_mid_turn) là đã gộp vào lượt đang làm', () => {
+    expect(queuedPrompts([op('enqueue', 'a'), op('dequeue')].join('\n'))).toBe(0);
+    expect(queuedPrompts([op('enqueue', 'a'), op('remove', 'a', 'absorbed_mid_turn')].join('\n'))).toBe(0);
+    expect(queuedPrompts([op('enqueue', 'a'), op('enqueue', 'b'), op('remove', 'a', 'absorbed_mid_turn')].join('\n'))).toBe(1);
+  });
+  it('task-notification xếp hàng cũng tính: Claude sẽ chạy tiếp ngay', () => {
+    expect(queuedPrompts([op('enqueue', '<task-notification>\n<task-id>x</task-id>\n</task-notification>')].join('\n'))).toBe(1);
+  });
+  it('không có hàng đợi hay dòng hỏng thì 0', () => {
+    expect(queuedPrompts([text('Xong.'), 'không phải json'].join('\n'))).toBe(0);
   });
 });
 

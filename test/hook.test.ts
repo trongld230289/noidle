@@ -95,7 +95,7 @@ describe('claude-hook voiceMute', () => {
 describe('claude-hook background task notifications', () => {
   const notification = '<task-notification>\n<task-id>server</task-id>\n<status>failed</status>\n<summary>Background command failed with exit code 127</summary>\n</task-notification>';
 
-  it('does not treat a task notification as a user prompt or change session language', async () => {
+  it('does not treat a task notification as a user prompt or change session language, but signals resumed so the window drops its "done" state', async () => {
     const cfg = path.join(work, 'background-auto.json');
     fs.writeFileSync(cfg, JSON.stringify({ language: 'auto' }));
     const session = 'background-context';
@@ -105,9 +105,30 @@ describe('claude-hook background task notifications', () => {
     expect(result.code).toBe(0);
     expect(result.stdout).toBe('');
     expect(readLog().slice(before)).not.toContain('signal submitted');
+    expect(readLog().slice(before)).toContain('resumed');
     const mark = JSON.parse(fs.readFileSync(path.join(work, 'tmp', 'noidle-tts', 'sessions', session), 'utf8'));
     expect(mark.count).toBe(1);
     expect(mark.lang).toBe('vi');
+  });
+
+  it('a turn that ends with a prompt still queued (typed while Claude worked) is silent: Claude starts on it right away', async () => {
+    const session = 'queued-speech';
+    const cfg = path.join(work, 'queued-handsfree.json');
+    fs.writeFileSync(cfg, JSON.stringify({ handsFree: true }));
+    const transcript = path.join(work, 'queued-transcript.jsonl');
+    fs.writeFileSync(transcript, [
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Working on it.' }] } }),
+      JSON.stringify({ type: 'queue-operation', operation: 'enqueue', sessionId: session, content: 'đang làm nó xanh lên kìa' }),
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Done with this part.' }] } }),
+    ].join('\n'));
+    const before = readLog().length;
+    const result = await run(['speak', '--config', cfg, '--player', path.join(work, 'no-such-player.exe')], JSON.stringify({ session_id: session, cwd: work, transcript_path: transcript }));
+    expect(result.code).toBe(0);
+    const added = readLog().slice(before);
+    expect(added).toContain('xếp hàng');
+    expect(added).not.toContain('play pid');
+    expect(added).not.toContain('attention');
+    expect(added).not.toContain('signal listen');
   });
 
   const agentLaunch = JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: 'Async agent launched successfully.' }] }, toolUseResult: { isAsync: true, status: 'async_launched', agentId: 'server' } });

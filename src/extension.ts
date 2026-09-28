@@ -861,7 +861,8 @@ export function activate(ctx: vscode.ExtensionContext): void {
       lastAudio = audio;
       s.segmenter.flush();
       status.set('transcribing');
-      if (s.segments === 0 && Recorder.durationMs(audio) >= MIN_RECORD_MS) {
+      // Cảnh báo mic chỉ cho F6 bấm tay: hands-free hết giờ im lặng là chuyện thường, không phải mic hỏng.
+      if (!s.auto && s.segments === 0 && Recorder.durationMs(audio) >= MIN_RECORD_MS) {
         const level = audioLevel(audio);
         void vscode.window.showWarningMessage(
           `NoIdle: không nghe thấy tiếng nói (peak ${level.peakDb.toFixed(0)} dB, rms ${level.rmsDb.toFixed(0)} dB). ` +
@@ -1023,6 +1024,11 @@ export function activate(ctx: vscode.ExtensionContext): void {
     if (s.source) agentLabel = s.source === 'claude' ? 'Claude' : 'Copilot';
     if (s.event === 'attention') return onAttention(s.reason ?? 'done');
     if (s.event === 'ask') return askOnce(Math.max(3, s.timeoutSec ?? 15) * 1000, s.reason);
+    if (s.event === 'resumed') {
+      // Việc nền xong, Claude chạy tiếp: không còn "done". Mic đang mở thì để nguyên (câu đang nói vẫn vào hàng đợi).
+      clearAttention();
+      return;
+    }
     if (s.event === 'submitted') {
       // Người dùng đã quay lại cửa sổ này và gửi tiếp: không cần làm nổi nữa.
       clearAttention();

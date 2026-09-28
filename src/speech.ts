@@ -35,12 +35,16 @@ export function lastAssistantText(jsonl: string): string {
  * thì nó chạy tiếp và sẽ báo lại. Claude kết thúc lượt mà còn agent nền là đang chờ, chưa phải xong.
  *
  * Notification nằm ở nhiều loại dòng: tin nhắn user khi Claude rảnh, còn lúc Claude đang làm thì là dòng
- * attachment hay queue-operation. Nên tìm thẻ trên cả dòng thô, không phân biệt loại. Lệnh Bash chạy nền
- * (backgroundTaskId) không tính: server dev chạy hoài không bao giờ "xong", tính vào là câm mãi.
+ * attachment hay queue-operation. Nên tìm thẻ trên cả dòng thô, không phân biệt loại.
+ *
+ * Lệnh Bash chạy nền (backgroundTaskId) chỉ tính khi được bật TRONG LƯỢT VỪA KẾT THÚC và chưa có notification:
+ * Claude bật vòng chờ ("đợi test chạy xong") rồi ngừng để đợi, báo "done" lúc đó là sai. Bật ở lượt trước thì
+ * không tính nữa: server dev chạy hoài không bao giờ "xong", tính mãi là câm mãi.
  */
 export function pendingBackgroundTasks(jsonl: string): string[] {
   const launched = new Set<string>();
   const pending = new Set<string>();
+  let bashThisTurn = new Set<string>();
   for (const line of jsonl.split(/\r?\n/)) {
     if (!line.trim()) continue;
     let entry: { type?: string; message?: { content?: unknown }; toolUseResult?: unknown };
@@ -49,14 +53,19 @@ export function pendingBackgroundTasks(jsonl: string): string[] {
     } catch {
       continue;
     }
-    const tr = entry.toolUseResult as { isAsync?: unknown; agentId?: unknown } | undefined;
+    const tr = entry.toolUseResult as { isAsync?: unknown; agentId?: unknown; backgroundTaskId?: unknown } | undefined;
     if (tr && typeof tr === 'object' && tr.isAsync === true && typeof tr.agentId === 'string') {
       launched.add(tr.agentId);
       pending.add(tr.agentId);
     }
+    if (tr && typeof tr === 'object' && typeof tr.backgroundTaskId === 'string') bashThisTurn.add(tr.backgroundTaskId);
+    // Lượt mới bắt đầu ở tin nhắn user thật (prompt hay notification), không phải tool_result.
+    if (entry.type === 'user' && isUserTurnStart(entry.message?.content)) bashThisTurn = new Set();
     for (const m of line.matchAll(/<task-notification>[\s\S]*?<task-id>\s*([^<]+?)\s*<\/task-id>/g)) {
       // Dòng JSON thô: thẻ có thể nằm trong chuỗi đã escape ("\n" là hai ký tự), task-id là chữ số nên không bị ảnh hưởng.
-      pending.delete(m[1].replace(/\\n/g, '').trim());
+      const id = m[1].replace(/\\n/g, '').trim();
+      pending.delete(id);
+      bashThisTurn.delete(id);
     }
     const content = entry.message?.content;
     if (entry.type === 'assistant' && Array.isArray(content)) {
@@ -67,7 +76,41 @@ export function pendingBackgroundTasks(jsonl: string): string[] {
       }
     }
   }
-  return [...pending];
+  return [...pending, ...bashThisTurn];
+}
+
+/** Tin nhắn user mở lượt mới: nội dung là chuỗi, hoặc mảng có khối text mà không có tool_result. */
+function isUserTurnStart(content: unknown): boolean {
+  if (typeof content === 'string') return true;
+  if (!Array.isArray(content)) return false;
+  const blocks = content as { type?: string }[];
+  return blocks.some((b) => b?.type === 'text') && !blocks.some((b) => b?.type === 'tool_result');
+}
+
+/**
+ * Prompt người dùng gõ lúc Claude đang làm nằm chờ trong hàng đợi (dòng queue-operation enqueue). Claude kết thúc
+ * lượt mà hàng đợi còn câu thì nó làm ngay câu đó, chưa phải "done". dequeue là đã lấy ra làm lượt mới; remove
+ * (absorbed_mid_turn) là đã gộp vào lượt đang làm. Trả số câu còn chờ.
+ */
+export function queuedPrompts(jsonl: string): number {
+  const queue: string[] = [];
+  for (const line of jsonl.split(/\r?\n/)) {
+    if (!line.includes('"queue-operation"')) continue;
+    let entry: { type?: string; operation?: string; content?: unknown };
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (entry.type !== 'queue-operation') continue;
+    if (entry.operation === 'enqueue') queue.push(typeof entry.content === 'string' ? entry.content : '');
+    else if (entry.operation === 'dequeue') queue.length = 0;
+    else if (entry.operation === 'remove') {
+      const i = queue.indexOf(typeof entry.content === 'string' ? entry.content : '');
+      if (i >= 0) queue.splice(i, 1);
+    }
+  }
+  return queue.length;
 }
 
 function joinTextBlocks(content: unknown): string {

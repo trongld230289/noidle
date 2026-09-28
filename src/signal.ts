@@ -16,7 +16,8 @@ export interface WindowEntry {
   folders: string[];
 }
 
-export type SignalEvent = 'listen' | 'submitted' | 'ask' | 'attention';
+/** resumed: việc nền xong, Claude chạy tiếp; extension bỏ trạng thái "done" (không đụng mic). */
+export type SignalEvent = 'listen' | 'submitted' | 'ask' | 'attention' | 'resumed';
 /** attention: vì sao cửa sổ cần người dùng. */
 export type AttentionReason = 'done' | 'approve' | 'answer';
 export type SignalSource = 'claude' | 'copilot' | 'copilot-cli';
