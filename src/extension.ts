@@ -3,6 +3,7 @@ import { StatusBar, UsageBar } from './status';
 import { flashWindow, blinkTitleBar, applyTint, removeTint, shellColorFor, normalizeHex, TINT, type ColorMap } from './attention';
 import { Recorder, SAMPLE_RATE, CHANNELS } from './recorder';
 import { Segmenter } from './segmenter';
+import { listenOnce } from './listen';
 import { listAudioDevices } from './devices';
 import { transcribe, TranscribeError, repeatsTail } from './transcriber';
 import { parseVoiceCommand } from './decision';
@@ -33,6 +34,8 @@ const AUTO_SEND_MIN_WORDS = 3;
 const MIC_HANDOVER_MS = 2500;
 /** Hands-free: VAD vẫn thấy tiếng nhưng quá chừng này kể từ chữ cuối mà không ra chữ mới thì coi là tiếng ồn, gửi luôn. */
 const NOISE_GRACE_MS = 8000;
+/** Nghe approve/chọn: bỏ chừng này ms audio sau bíp, loa còn vọng đuôi bíp mà mic đã mở sẵn. */
+const ASK_GUARD_MS = 250;
 
 /**
  * Gửi lệnh dán vào cửa sổ đang focus: Ctrl+V bằng SendKeys trên Windows, Cmd+V bằng System Events trên macOS
@@ -778,11 +781,21 @@ export function activate(ctx: vscode.ExtensionContext): void {
           delivered: 0,
         };
         s.segmenter = new Segmenter({ sampleRate: SAMPLE_RATE, onSpeech: () => (s.lastSpeechAt = Date.now()) }, (pcm) => enqueue(s, pcm));
+        // Hands-free: mở mic xong mới bíp (như nghe approve, xem listen.ts); bíp trước là mấy chữ đầu rơi vào lúc
+        // ffmpeg còn đang mở. Audio lúc bíp và ASK_GUARD_MS sau đó bị bỏ để không thu tiếng loa.
+        let live = !s.auto;
         try {
-          await recorder.start((chunk) => s.segmenter.push(chunk));
+          await recorder.start((chunk) => {
+            if (live) s.segmenter.push(chunk);
+          });
         } catch (err) {
           releaseMic(process.pid);
           throw err;
+        }
+        if (s.auto) {
+          await beep();
+          setTimeout(() => (live = true), ASK_GUARD_MS);
+          s.lastSpeechAt = s.lastTextAt = Date.now();
         }
         session = s;
         status.set(s.auto ? 'listening' : 'recording', uiLang(), agentLabel);
@@ -880,7 +893,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
   }
 
   /**
-   * Nghe một câu cho hook (approve, chọn đáp án): bíp, mở mic, lấy cụm tiếng nói đầu tiên, gửi Whisper (không qua LLM).
+   * Nghe một câu cho hook (approve, chọn đáp án): mở mic, bíp, lấy cụm tiếng nói đầu tiên, gửi Whisper (không qua LLM).
    * Trả '' nếu mic đang bận, không ai nói trong timeoutMs, hoặc lỗi; hook sẽ để hộp thoại hiện như thường.
    */
   async function askOnce(timeoutMs: number, reason: Signal['reason']): Promise<string> {
@@ -907,46 +920,35 @@ export function activate(ctx: vscode.ExtensionContext): void {
     // có thể vừa bắt đầu phát và mic sẽ thu tiếng loa. Cắt như F6; các câu xếp sau tự chờ khoá mic.
     skipSpeech(true);
     try {
-      await beep();
-      if (!allowed()) return '';
       const t0 = Date.now();
-      let starting: Promise<void> = Promise.resolve();
-      const wav = await new Promise<Uint8Array | undefined>((resolve) => {
-        let done = false;
-        let timer: NodeJS.Timeout | undefined;
-        const finish = (v?: Uint8Array) => {
-          if (done) return;
-          done = true;
-          clearTimeout(timer);
-          cancelAsk = undefined;
-          resolve(v);
-        };
-        cancelAsk = () => {
-          log('ask: bị huỷ');
-          finish(undefined);
-        };
-        resetRefinePause();
+      resetRefinePause();
+      // Mở mic và chờ dữ liệu chảy RỒI mới bíp (listenOnce): ffmpeg lạnh mất vài giây, bíp trước là người dùng
+      // nói "approve" vào lúc mic chưa thu. Audio lúc bíp và ASK_GUARD_MS sau đó bị bỏ để không thu tiếng loa.
+      const pcm = await listenOnce({
+        start: (onData) => recorder.start(onData),
+        beep,
         // minSpeechMs thấp để một tiếng "một" hay "ok" ngắn cũng được nhận; ngắt hơi 1.2s là xong câu.
-        const seg = new Segmenter(
-          { sampleRate: SAMPLE_RATE, silenceMs: 1200, maxSegmentMs: timeoutMs, minSpeechMs: 180 },
-          (pcm) => finish(pcmToWav(pcm, SAMPLE_RATE, CHANNELS)),
-        );
-        timer = setTimeout(() => finish(undefined), timeoutMs);
-        starting = recorder.start((chunk) => seg.push(chunk));
-        starting.catch((err: Error) => {
-          log(`ask: không mở được mic: ${err.message}`);
-          finish(undefined);
-        });
+        segmenter: (onSegment) =>
+          new Segmenter({ sampleRate: SAMPLE_RATE, silenceMs: 1200, maxSegmentMs: timeoutMs, minSpeechMs: 180 }, onSegment),
+        onCancel: (cancel) => {
+          cancelAsk = () => {
+            log('ask: bị huỷ');
+            cancel();
+          };
+        },
+        timeoutMs,
+        guardMs: ASK_GUARD_MS,
+        log,
       });
-      // Bị huỷ lúc mic còn đang khởi động: cờ recording chưa bật nên stop() sẽ không làm gì và mic bật lên sau khi
-      // đã trả khoá cho cửa sổ khác. Đợi khởi động xong (có giới hạn) rồi mới dừng và trả khoá.
-      await Promise.race([starting.catch(() => undefined), new Promise((r) => setTimeout(r, 3000))]);
+      cancelAsk = undefined;
+      // Bị huỷ lúc mic còn đang khởi động thì listenOnce vẫn chờ start xong mới trả, nên đến đây stop() là dừng thật.
       if (recorder.recording) await recorder.stop();
       if (!allowed()) return '';
-      if (!wav) {
+      if (!pcm) {
         log(`ask: không nghe thấy gì sau ${Date.now() - t0}ms`);
         return '';
       }
+      const wav = pcmToWav(pcm, SAMPLE_RATE, CHANNELS);
       status.set('transcribing');
       const cfg = config();
       const heard = await transcribe(wav, { apiKey, glossary: cfg.glossary, language: cfg.language, promptLang: uiLang() });
@@ -1004,8 +1006,6 @@ export function activate(ctx: vscode.ExtensionContext): void {
         log(`hands-free: không mở được ô chat Copilot: ${(err as Error).message}`);
         return;
       }
-      await beep();
-      if (!canAutoListen(s, config())) return;
       await toggle({ target: 'chat', auto: true });
       return;
     }
@@ -1021,8 +1021,6 @@ export function activate(ctx: vscode.ExtensionContext): void {
       return;
     }
     log(`hands-free: ${s.source === 'copilot-cli' ? 'Copilot CLI' : 'Claude Code'} → terminal "${terminal.name}"`);
-    await beep();
-    if (!canAutoListen(s, config())) return;
     await toggle({ target: 'terminal', auto: true, terminal });
   }
 
