@@ -383,6 +383,27 @@ describe('claude-hook đổi voiceStyle giữa phiên', () => {
     expect(await ctx(cfgAnnounce, 'sw-2')).toBe('');
     expect(await ctx(cfgRecap, 'sw-2')).toContain('tai nghe');
   });
+
+  // Claude tự viết phần 🔊 dù hook không dặn (thói quen từ memory hay lượt trước): announce thì nhắc thôi, mỗi khi còn thấy.
+  it('announce: câu trả lời trước có phần 🔊 thì nhắc thôi viết, không có thì im', async () => {
+    const transcript = path.join(work, 'transcript-habit.jsonl');
+    const row = (text: string) => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text }] } }) + '\n';
+    const ctxT = async (session: string) => {
+      const r = await run(['prompt', '--config', cfgAnnounce], JSON.stringify({ session_id: session, cwd: work, prompt: 'làm tiếp', transcript_path: transcript }));
+      expect(r.code).toBe(0);
+      if (!r.stdout.trim()) return '';
+      return (JSON.parse(r.stdout) as { hookSpecificOutput?: { additionalContext?: string } }).hookSpecificOutput?.additionalContext ?? '';
+    };
+    fs.writeFileSync(transcript, row('Xong rồi.'));
+    expect(await ctxT('habit-1')).toBe('');
+    fs.writeFileSync(transcript, row('Đã sửa.\n\n🔊 Sửa xong hai điểm.'));
+    const note = await ctxT('habit-1');
+    expect(note).toMatch(/không cần/);
+    expect(note).toContain('🔊');
+    expect(await ctxT('habit-1')).toMatch(/không cần/);
+    fs.writeFileSync(transcript, row('Rõ, không viết nữa.'));
+    expect(await ctxT('habit-1')).toBe('');
+  });
 });
 
 describe('claude-hook tín hiệu attention', () => {

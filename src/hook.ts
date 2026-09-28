@@ -323,7 +323,17 @@ function writeMark(session: string, mark: SessionMark): void {
  * Ngôn ngữ: setting cố định, hoặc khi auto thì đoán từ prompt, không đoán được thì giữ của phiên.
  * Đổi ngôn ngữ giữa phiên thì chèn lại bản đầy đủ, vì dòng nhắc ngắn chỉ trỏ về hướng dẫn cũ.
  */
-function promptContextFor(session: string | undefined, cfg: HookConfig, promptText: string): string {
+/** Câu trả lời ngay trước có phần 🔊 không (Claude tự viết dù không được dặn: thói quen từ memory hay lượt trước). */
+function lastAnswerHadSpeak(transcriptPath: string | undefined): boolean {
+  if (!transcriptPath) return false;
+  try {
+    return hasSpeakSection(lastAssistantText(fs.readFileSync(transcriptPath, 'utf8')));
+  } catch {
+    return false;
+  }
+}
+
+function promptContextFor(session: string | undefined, cfg: HookConfig, promptText: string, lastHadSpeak = false): string {
   const auto = isAuto(cfg.language);
   const style = cfg.voiceStyle === 'announce' ? 'announce' : 'recap';
   if (!session) return style === 'announce' ? '' : promptContext(auto ? (detectLang(promptText) ?? 'vi') : langOf(cfg.language));
@@ -335,9 +345,9 @@ function promptContextFor(session: string | undefined, cfg: HookConfig, promptTe
   writeMark(session, { count: mark.count + 1, lang, style, proc: mark.proc });
   if (auto) log(`prompt: ngôn ngữ ${lang} (${detectLang(promptText) ? 'đoán từ prompt' : 'giữ của phiên'}) ${JSON.stringify(promptText.slice(0, 60))}`);
   if (style === 'announce') {
-    // Hướng dẫn 🔊 còn trong lịch sử phiên thì Claude vẫn viết phần đó: bảo thôi, một lần.
-    if (prevStyle === 'recap') {
-      log('prompt: voiceStyle recap → announce, bảo Claude thôi viết phần 🔊');
+    // Hướng dẫn 🔊 còn trong lịch sử phiên (hay Claude tự viết theo memory/lượt trước) thì Claude vẫn viết phần đó: bảo thôi.
+    if (prevStyle === 'recap' || lastHadSpeak) {
+      log(`prompt: ${prevStyle === 'recap' ? 'voiceStyle recap → announce' : 'câu trước có phần 🔊'}, bảo Claude thôi viết phần 🔊`);
       return promptStopRecap(lang);
     }
     log('prompt: voiceStyle announce, không chèn hướng dẫn');
@@ -399,7 +409,7 @@ async function modePrompt(): Promise<void> {
   if (cfg.voiceMute) log('prompt: đang mute, không chèn hướng dẫn');
   else {
     // announce thường trả rỗng (vẫn cập nhật dấu phiên để speak/notify chọn đúng ngôn ngữ), chỉ có chữ khi vừa đổi kiểu.
-    const additionalContext = promptContextFor(input.session_id, cfg, promptText);
+    const additionalContext = promptContextFor(input.session_id, cfg, promptText, lastAnswerHadSpeak(input.transcript_path));
     if (additionalContext) {
       const output = sourceArg() === 'copilot-cli'
         ? { modifiedPrompt: `${promptText}\n\n${additionalContext}` }
