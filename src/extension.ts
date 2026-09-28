@@ -18,6 +18,7 @@ import { audioLevel, pcmToWav } from './wav';
 import { terminalForAgent } from './proctree';
 import { planMigration, configProperties } from './migrate';
 import { checkRequirements } from './requirements';
+import { findExecutable } from './findTool';
 import * as fs from 'fs';
 import { execFile, spawn } from 'child_process';
 import * as os from 'os';
@@ -209,7 +210,26 @@ export function activate(ctx: vscode.ExtensionContext): void {
   };
   log(`--- NoIdle ${ctx.extension.packageJSON.version} khởi động, log tại ${logFile}`);
   void ensureTerminalSkipShell().catch(() => undefined);
-  let recorder = new Recorder(config());
+  /**
+   * Đường dẫn tuyệt đối của ffmpeg/ffplay (xem findTool.ts). Setting để 'ffmpeg' thì tìm theo PATH của VS Code,
+   * PATH trong registry và thư mục winget/choco/scoop/Homebrew; ghi vào hook để Claude chạy từ shell nào cũng thấy,
+   * và Recorder cũng dùng nên cài ffmpeg xong không cần mở lại VS Code. Không thấy thì giữ tên trần như trước.
+   */
+  const tools = { ffmpeg: config().ffmpegPath, ffplay: playerPath() };
+  async function resolveTools(): Promise<boolean> {
+    const ff = config().ffmpegPath;
+    const bare = ff === 'ffmpeg';
+    const next = {
+      ffmpeg: bare ? (await findExecutable('ffmpeg')) ?? ff : ff,
+      ffplay: bare ? (await findExecutable('ffplay')) ?? 'ffplay' : playerPath(),
+    };
+    const changed = next.ffmpeg !== tools.ffmpeg || next.ffplay !== tools.ffplay;
+    if (changed) log(`ffmpeg: ${next.ffmpeg}; ffplay: ${next.ffplay}`);
+    Object.assign(tools, next);
+    return changed;
+  }
+  const recorderOptions = () => ({ ...config(), ffmpegPath: tools.ffmpeg });
+  let recorder = new Recorder(recorderOptions());
   const api: InjectorApi = {
     activeTerminal: () => vscode.window.activeTerminal,
     executeCommand: (command, ...args) => vscode.commands.executeCommand(command, ...args),
@@ -249,7 +269,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       if (e.affectsConfiguration('noIdle.handsFree') && cfg.handsFree) void askKeyForMicFeature('Hands Free').catch(() => undefined);
       if (e.affectsConfiguration('noIdle.ffmpegPath') || e.affectsConfiguration('noIdle.micDevice')) {
         recorder.dispose();
-        recorder = new Recorder(config());
+        recorder = new Recorder(recorderOptions());
       }
       if (
         e.affectsConfiguration('noIdle.voiceResponse') ||
@@ -351,6 +371,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     await fs.promises.writeFile(hookConfigPath, JSON.stringify(data, null, 2), 'utf8');
   }
 
+  /** ffplay theo setting Ffmpeg Path: setting để 'ffmpeg' thì 'ffplay' (resolveTools sẽ tìm đường dẫn tuyệt đối). */
   function playerPath(): string {
     const ff = config().ffmpegPath;
     if (ff === 'ffmpeg') return 'ffplay';
@@ -369,9 +390,29 @@ export function activate(ctx: vscode.ExtensionContext): void {
       voice: cfg.voice,
       rate: cfg.voiceRate,
       notify: cfg.voiceNotify,
-      player: playerPath(),
+      player: tools.ffplay,
       config: hookConfigPath,
     };
+  }
+
+  /**
+   * Cài ffmpeg giúp bằng winget (Windows) hay brew (macOS) trong terminal của VS Code cho người dùng thấy tiến trình;
+   * đóng terminal là tìm lại đường dẫn và đồng bộ hook, không cần mở lại VS Code.
+   */
+  function installFfmpeg(): void {
+    const cmd = process.platform === 'win32'
+      ? 'winget install --id Gyan.FFmpeg -e --accept-source-agreements --accept-package-agreements'
+      : 'brew install ffmpeg';
+    const terminal = vscode.window.createTerminal({ name: 'NoIdle: cài ffmpeg' });
+    terminal.show();
+    terminal.sendText(cmd, true);
+    const sub = vscode.window.onDidCloseTerminal((t) => {
+      if (t !== terminal) return;
+      sub.dispose();
+      warnedMissing = '';
+      void syncHooks().catch((err) => log(`lỗi đồng bộ hook sau khi cài ffmpeg: ${(err as Error).message}`));
+    });
+    ctx.subscriptions.push(sub);
   }
 
   /** Chép dist/claude-hook.js ra globalStorage (ghi file tạm rồi rename). Trả về đường dẫn hook nên dùng. */
@@ -409,10 +450,12 @@ export function activate(ctx: vscode.ExtensionContext): void {
       warnedMissing = missing;
       const text = missing === 'node'
         ? 'NoIdle: cần Node.js để đọc câu trả lời và nháy cửa sổ khi agent xong. Cài Node.js (và ffmpeg để có tiếng) rồi mở lại VS Code.'
-        : 'NoIdle: không thấy ffplay (đi kèm ffmpeg) nên chỉ nháy cửa sổ, không đọc thành tiếng. Cài ffmpeg rồi mở lại VS Code, hoặc điền đường dẫn vào Ffmpeg Path.';
+        : 'NoIdle: không thấy ffplay (đi kèm ffmpeg) nên chỉ nháy cửa sổ, không đọc thành tiếng. Cài ffmpeg, hoặc điền đường dẫn vào Ffmpeg Path.';
       log(`thiếu ${missing}: ${missing === 'node' ? 'không ghi hook' : 'hook chỉ nháy cửa sổ'}`);
-      void vscode.window.showWarningMessage(text, 'Hướng dẫn cài').then((pick) => {
-        if (pick) void vscode.env.openExternal(vscode.Uri.parse('https://github.com/trongld230289/noidle#readme'));
+      const install = missing === 'ffplay' && process.platform !== 'linux' ? ['Cài ffmpeg'] : [];
+      void vscode.window.showWarningMessage(text, ...install, 'Hướng dẫn cài').then((pick) => {
+        if (pick === 'Cài ffmpeg') installFfmpeg();
+        else if (pick) void vscode.env.openExternal(vscode.Uri.parse('https://github.com/trongld230289/noidle#readme'));
       });
     }
     return missing !== 'node';
@@ -421,6 +464,11 @@ export function activate(ctx: vscode.ExtensionContext): void {
   /** Đồng bộ hook cho Claude Code, Copilot Chat và Copilot CLI. */
   async function syncHooks(): Promise<void> {
     await writeHookConfig();
+    // Tìm ffmpeg/ffplay trước khi ghi hook; đường dẫn ffmpeg đổi thì thay Recorder (lúc mic đang rảnh).
+    if ((await resolveTools()) && !recorder.recording && !session && !asking) {
+      recorder.dispose();
+      recorder = new Recorder(recorderOptions());
+    }
     const wanted = { ...hookOptions(), script: await installHookScript() };
     const opts = (await hooksAllowed(wanted)) ? wanted : { ...wanted, enabled: false };
     await syncClaudeHooks(opts);
@@ -852,7 +900,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   async function pickMic(): Promise<void> {
     try {
-      const devices = await listAudioDevices(config().ffmpegPath);
+      const devices = await listAudioDevices(tools.ffmpeg);
       if (devices.length === 0) {
         void vscode.window.showWarningMessage('NoIdle: ffmpeg không thấy micro nào');
         return;

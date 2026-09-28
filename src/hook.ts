@@ -30,6 +30,7 @@ import { langOf, isAuto, detectLang, effectiveVoice, type Lang } from './lang';
 import { parseApproval, isDangerous, voiceApprovable, parseChoice, isChoiceCancellation, isAmbiguousChoice, permissionRequestOutput } from './decision';
 import { signalWindow, askWindow, readRegistry, micHolder, MIC_LOCK_MAX_AGE_MS, type SignalSource, type AttentionReason } from './signal';
 import { ancestorsOf, parentMap } from './proctree';
+import { resolvePlayer } from './findTool';
 import { flashHostWindow } from './attention';
 import { hedged } from './hedge';
 import { pronounce } from './pronounce';
@@ -985,9 +986,13 @@ async function playText(text: string, ticket: string, voice: string): Promise<vo
   if (!(await waitMicFree())) return;
   const t0 = Date.now();
   const rate = arg('rate', '+0%');
+  // --player là tên trần (settings cũ) hay đường dẫn không còn (ffmpeg dời chỗ) thì tìm lại theo registry PATH
+  // và thư mục winget/choco/scoop; shell chạy Claude có PATH cũ cũng không sao.
+  const playerExe = await resolvePlayer(arg('player', 'ffplay'));
+  if (playerExe !== arg('player', 'ffplay')) log(`player: ${arg('player', 'ffplay')} → ${playerExe}`);
 
   const player = spawn(
-    arg('player', 'ffplay'),
+    playerExe,
     ['-nodisp', '-autoexit', '-loglevel', 'quiet', '-f', 'mp3', '-i', 'pipe:0'],
     { stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true },
   );

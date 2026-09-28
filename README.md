@@ -39,7 +39,7 @@ Ngoài ra: bấm **F6** để nói thành chữ ở bất kỳ đâu trong VS Co
 - Windows: `winget install ffmpeg` và `winget install OpenJS.NodeJS.LTS`
 - macOS: `brew install ffmpeg node`
 
-Đã cài Claude Code bằng npm thì đã có Node.js. Mở lại VS Code sau khi cài.
+Đã cài Claude Code bằng npm thì đã có Node.js. Extension tự tìm ffmpeg vừa cài (kể cả khi shell đang mở chưa có nó trong PATH) và ghi đường dẫn đầy đủ vào hook, nên chạy Claude từ PowerShell hay cmd đều có tiếng.
 
 **2. Lấy Groq key** (miễn phí, để chuyển giọng nói thành chữ; chỉ nghe, không nói thì bỏ qua bước này):
 1. Mở [console.groq.com/keys](https://console.groq.com/keys), đăng nhập bằng Google hoặc GitHub.
@@ -162,7 +162,7 @@ Tắt Hands Free thì mic không bao giờ tự mở, chỉ mở khi bạn bấm
 
 | Hiện tượng | Cách xử lý |
 |---|---|
-| Không tìm thấy ffmpeg, hoặc cửa sổ nháy mà không có tiếng | Cài ffmpeg rồi mở lại VS Code (đóng hết cửa sổ, không chỉ Reload Window), hoặc điền đường dẫn vào Ffmpeg Path. |
+| Không tìm thấy ffmpeg, hoặc cửa sổ nháy mà không có tiếng | Bấm **Cài ffmpeg** trên cảnh báo (chạy winget/brew giúp, đóng terminal là xong), hoặc cài tay rồi đổi bất kỳ setting NoIdle nào để extension tìm lại, hoặc điền đường dẫn vào Ffmpeg Path. |
 | Báo cần Node.js, hoặc Copilot Chat hiện "Warning from ... hook" | Cài Node.js (bước 1) rồi mở lại VS Code. |
 | Sai key | Chạy `NoIdle: Set Groq API Key`, nhập lại. |
 | Nói mà không ra chữ | Kiểm tra mic trong cài đặt Sound của máy (macOS: thêm quyền mic cho VS Code ở Privacy & Security > Microphone). Chạy `NoIdle: Chọn micro`. |
