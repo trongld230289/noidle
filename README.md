@@ -92,6 +92,7 @@ Khi approve hoặc chọn đáp án, im lặng hoặc nói không rõ thì chuy�
 | Voice Response | bật | Công tắc chính: nháy cửa sổ, đổi màu và đọc câu trả lời của Claude Code, Copilot Chat, Copilot CLI. Tắt là gỡ hook, không nháy, không đọc. |
 | Voice Mute | tắt | Im lặng tạm thời, không cần restart. Lệnh nhanh: `NoIdle: Tắt/bật tiếng Claude Code`. |
 | Voice Style | `recap` | `recap`: đọc tóm tắt nội dung (tốn thêm ít token mỗi lượt). `announce`: chỉ đọc "Workspace X is done" (tiếng Anh), không tốn token. |
+| Recap Prompt | bản tiếng Việt sẵn | Dặn agent viết gì trong phần recap; nghe mệt thì sửa ngắn lại. Viết một thứ tiếng, extension tự dịch sang tiếng kia bằng Copilot Chat hoặc Claude Code đang có (không cần key). |
 | Voice Notify | bật | Đọc "Workspace X cần approve" / "cần bạn trả lời". |
 | Voice Say Workspace | `auto` | Đọc tên workspace ở đầu câu. `auto`: chỉ khi mở hơn một cửa sổ. |
 
@@ -120,12 +121,12 @@ Tắt Hands Free thì mic không bao giờ tự mở, chỉ mở khi bạn bấm
 | Setting | Mặc định | Ý nghĩa |
 |---|---|---|
 | Tts Provider | `edge` | `edge`: miễn phí, không cần key. `elevenlabs`: hay hơn, cần key. |
-| Voice | HoaiMy | Giọng Edge. Chọn giọng Multilingual nếu hay nói trộn Việt Anh. |
+| Voice | Brian | Giọng Edge. Brian đa ngôn ngữ, đọc trộn Việt Anh trong câu. Muốn tiếng Việt chuẩn hơn thì chọn Hoài My hoặc Nam Minh. |
 | Voice Rate | `+0%` | Tốc độ đọc, ví dụ `+20%`. |
 | Eleven Labs Api Key | trống | Không bắt buộc. Cách lấy ghi ngay trong Settings. Gói miễn phí đọc khoảng 20.000 ký tự/tháng, hết thì tự về Edge. |
 | Eleven Labs Voice Id | George | Giọng ElevenLabs. |
 | Eleven Labs Model | Flash v2.5 | Flash tốn ít credit nhất. |
-| Pronunciations | trống | Sửa cách đọc từ đọc sai, ví dụ `{"shipngo": "síp gô"}`. |
+| Pronunciations | trống | Sửa cách đọc từ đọc sai, ví dụ `{"acme": "ác mi"}`. |
 
 **5. Nói để gõ (F6)**
 

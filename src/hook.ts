@@ -25,8 +25,9 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { spawn } from 'child_process';
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
-import { lastAssistantText, pickSpeech, hasSpeakSection, pendingBackgroundTasks, queuedPrompts, briefTool, promptContext, promptReminder, promptStopRecap, splitSentences, announcement, doneAnnouncement, workspaceName, spoken, HookInput } from './speech';
-import { langOf, isAuto, detectLang, effectiveVoice, type Lang } from './lang';
+import { lastAssistantText, pickSpeech, hasSpeakSection, pendingBackgroundTasks, queuedPrompts, briefTool, promptStopRecap, splitSentences, announcement, doneAnnouncement, workspaceName, spoken, HookInput } from './speech';
+import { recapInstruction, type RecapPrompts } from './recapPrompt';
+import { langOf, isAuto, detectLang, effectiveVoice, usesVietPronunciation, DEFAULT_VOICE, type Lang } from './lang';
 import { parseApproval, isDangerous, voiceApprovable, parseChoice, isChoiceCancellation, isAmbiguousChoice, permissionRequestOutput } from './decision';
 import { signalWindow, askWindow, readRegistry, micHolder, MIC_LOCK_MAX_AGE_MS, type SignalSource, type AttentionReason } from './signal';
 import { ancestorsOf, parentMap } from './proctree';
@@ -38,7 +39,6 @@ import { prefetchInOrder } from './prefetch';
 import { synthElevenLabs, rateToSpeed, fetchUsage, writeUsage, readUsage, formatUsage, isQuotaError, elevenExhausted } from './elevenlabs';
 import { normalizeCopilotInput, type AgentHookInput } from './copilot';
 
-const DEFAULT_VOICE = 'vi-VN-HoaiMyNeural';
 let inputSource: SignalSource | undefined;
 
 async function readHookInput(event: string): Promise<AgentHookInput> {
@@ -51,6 +51,7 @@ async function readHookInput(event: string): Promise<AgentHookInput> {
 
 /** Cấu hình extension ghi ra file cho hook (đường dẫn qua --config). */
 interface HookConfig {
+  voice?: string;
   /** Tạm tắt tiếng: hook vẫn đăng ký nhưng không đọc, không báo, không chèn hướng dẫn 🔊. Đổi là có hiệu lực ngay. */
   voiceMute?: boolean;
   approveTimeoutSec?: number;
@@ -72,6 +73,11 @@ interface HookConfig {
   language?: string;
   /** Giọng đọc: mặc định Edge; elevenlabs thì hook gọi ElevenLabs bằng key trong file này, lỗi thì lùi về Edge. */
   tts?: TtsConfig;
+  /**
+   * Thân hướng dẫn recap (setting noIdle.recapPrompt) ở hai thứ tiếng: bản người dùng viết và bản extension dịch.
+   * Thiếu thứ tiếng nào thì hook dùng bản kia; thiếu cả hai thì bản mặc định. Hợp đồng 🔊 và câu ngôn ngữ hook tự nối.
+   */
+  recapPrompt?: RecapPrompts;
 }
 
 interface TtsConfig {
@@ -267,8 +273,6 @@ async function waitTurn(file: string, maxMs = 5 * 60_000): Promise<void> {
 }
 
 const SESSION_DIR = path.join(WORK_DIR, 'sessions');
-/** Cứ bao nhiêu prompt thì chèn lại hướng dẫn đầy đủ một lần, phòng khi Claude Code nén context làm mất bản đầu. */
-const FULL_CONTEXT_EVERY = 20;
 const SESSION_MARK_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
 
 /** Dấu phiên: số prompt đã qua và ngôn ngữ đang dùng của phiên đó. Bản cũ chỉ ghi số. */
@@ -317,13 +321,6 @@ function writeMark(session: string, mark: SessionMark): void {
   }
 }
 
-/**
- * Hướng dẫn cho prompt này: đầy đủ ở prompt đầu tiên của phiên (và cứ FULL_CONTEXT_EVERY prompt một lần),
- * còn lại chỉ một dòng nhắc ngắn vì bản đầy đủ đã nằm trong lịch sử phiên. Tiết kiệm ~85% token chèn thêm.
- * Đếm bằng một file theo session_id; không có session_id thì luôn đầy đủ.
- * Ngôn ngữ: setting cố định, hoặc khi auto thì đoán từ prompt, không đoán được thì giữ của phiên.
- * Đổi ngôn ngữ giữa phiên thì chèn lại bản đầy đủ, vì dòng nhắc ngắn chỉ trỏ về hướng dẫn cũ.
- */
 /** Câu trả lời ngay trước có phần 🔊 không (Claude tự viết dù không được dặn: thói quen từ memory hay lượt trước). */
 function lastAnswerHadSpeak(transcriptPath: string | undefined): boolean {
   if (!transcriptPath) return false;
@@ -334,13 +331,17 @@ function lastAnswerHadSpeak(transcriptPath: string | undefined): boolean {
   }
 }
 
+/**
+ * Hướng dẫn cho prompt này: recap thì gửi nguyên hướng dẫn (ngắn, người dùng tự sửa qua noIdle.recapPrompt) ở mọi lượt,
+ * không còn bản đầy đủ / nhắc ngắn. Dấu phiên (file theo session_id) chỉ để nhớ ngôn ngữ và voiceStyle của lượt trước.
+ * Ngôn ngữ: setting cố định, hoặc khi auto thì đoán từ prompt, không đoán được thì giữ của phiên.
+ */
 function promptContextFor(session: string | undefined, cfg: HookConfig, promptText: string, lastHadSpeak = false): string {
   const auto = isAuto(cfg.language);
   const style = cfg.voiceStyle === 'announce' ? 'announce' : 'recap';
-  if (!session) return style === 'announce' ? '' : promptContext(auto ? (detectLang(promptText) ?? 'vi') : langOf(cfg.language));
+  if (!session) return style === 'announce' ? '' : recapInstruction(cfg.recapPrompt, auto ? (detectLang(promptText) ?? 'vi') : langOf(cfg.language));
   const mark = readMark(session);
   const lang = auto ? (detectLang(promptText) ?? mark.lang ?? 'vi') : langOf(cfg.language);
-  const switched = mark.lang !== undefined && mark.lang !== lang;
   // Dấu cũ (trước khi có voiceStyle) không ghi style: phiên đó đã nhận hướng dẫn recap.
   const prevStyle = mark.count === 0 ? undefined : mark.style ?? 'recap';
   writeMark(session, { count: mark.count + 1, lang, style, proc: mark.proc });
@@ -354,9 +355,9 @@ function promptContextFor(session: string | undefined, cfg: HookConfig, promptTe
     log('prompt: voiceStyle announce, không chèn hướng dẫn');
     return '';
   }
-  if (switched) log(`prompt: đổi ngôn ngữ ${mark.lang} → ${lang}, chèn lại hướng dẫn đầy đủ`);
-  if (prevStyle === 'announce') log('prompt: voiceStyle announce → recap, chèn lại hướng dẫn đầy đủ');
-  return mark.count % FULL_CONTEXT_EVERY === 0 || switched || prevStyle === 'announce' ? promptContext(lang) : promptReminder(lang);
+  if (mark.lang !== undefined && mark.lang !== lang) log(`prompt: đổi ngôn ngữ ${mark.lang} → ${lang}`);
+  if (prevStyle === 'announce') log('prompt: voiceStyle announce → recap, chèn lại hướng dẫn recap');
+  return recapInstruction(cfg.recapPrompt, lang);
 }
 
 /** Xoá dấu của các phiên cũ hơn một tuần; chỉ chạy khi gặp phiên mới nên rất thưa. */
@@ -380,7 +381,7 @@ async function modeStart(): Promise<void> {
   const lang = isAuto(cfg.language)
     ? detectLang(input.initial_prompt ?? '') ?? sessionLang(cfg, input.session_id)
     : langOf(cfg.language);
-  process.stdout.write(JSON.stringify({ additionalContext: promptContext(lang) }));
+  process.stdout.write(JSON.stringify({ additionalContext: recapInstruction(cfg.recapPrompt, lang) }));
 }
 
 async function modePrompt(): Promise<void> {
@@ -519,12 +520,12 @@ function modeSkip(): void {
 /** Tách tiến trình phát rồi thoát ngay để Claude Code không phải chờ. listenCwd: phát xong thì báo extension mở mic. */
 function spawnPlay(raw: string, kind: Ticket['kind'], session: string, lang: Lang, listenCwd?: string, ancestors?: number[]): void {
   // Giọng vi-VN đọc sai chữ viết tắt và đuôi file tiếng Anh; viết sẵn cách đọc trước khi tổng hợp.
-  // Tiếng Anh thì bỏ bảng mặc định (nó phiên âm sang tiếng Việt), chỉ giữ bảng của người dùng.
-  const text = pronounce(raw, loadConfig().pronunciations, lang === 'vi');
+  // Tiếng Anh hoặc giọng đa ngôn ngữ thì bỏ bảng mặc định (nó phiên âm sang tiếng Việt), chỉ giữ bảng của người dùng.
+  const voice = voiceFor(lang);
+  const text = pronounce(raw, loadConfig().pronunciations, usesVietPronunciation(voice, lang));
   fs.mkdirSync(WORK_DIR, { recursive: true });
   const file = path.join(WORK_DIR, `say-${Date.now()}-${process.pid}.txt`);
   fs.writeFileSync(file, text, 'utf8');
-  const voice = voiceFor(lang);
   const args = [__filename, 'play', file, '--voice', voice, '--rate', arg('rate', '+0%'), '--player', arg('player', 'ffplay')];
   args.push('--kind', kind, '--session', session || '-');
   // play đọc file cấu hình để biết giọng ElevenLabs (key không đi qua dòng lệnh).
@@ -550,7 +551,7 @@ function sourceArg(): SignalSource {
 
 /** Giọng theo ngôn ngữ: tiếng Anh mà --voice là giọng vi-VN thì đổi sang giọng đa ngôn ngữ. */
 function voiceFor(lang: Lang): string {
-  return effectiveVoice(arg('voice', DEFAULT_VOICE), lang);
+  return effectiveVoice(loadConfig().voice || arg('voice', DEFAULT_VOICE), lang);
 }
 
 /**
@@ -1057,6 +1058,11 @@ async function playText(text: string, ticket: string, voice: string): Promise<vo
 
 async function main(): Promise<void> {
   const mode = process.argv[2];
+  // Extension gọi `claude -p` để dịch recapPrompt: tiến trình đó kế thừa hook này, từng làm tắt mic và đọc "done" giả.
+  if (process.env.NOIDLE_INTERNAL === '1') {
+    log(`${mode}: NOIDLE_INTERNAL, agent do NoIdle gọi, bỏ qua`);
+    return;
+  }
   if (mode === 'start') return modeStart();
   if (mode === 'prompt') return modePrompt();
   if (mode === 'speak') return modeSpeak();

@@ -8,7 +8,7 @@ describe('attention: tìm cửa sổ VS Code theo tiêu đề', () => {
     expect(windowTitleMatches('README.md - vi-voice - Visual Studio Code - Insiders', 'vi-voice')).toBe(true);
   });
   it('không khớp workspace khác, tên chỉ là một phần của tên khác, hay app khác', () => {
-    expect(windowTitleMatches('main.go - shipngo-be - Visual Studio Code', 'vi-voice')).toBe(false);
+    expect(windowTitleMatches('main.go - acme-be - Visual Studio Code', 'vi-voice')).toBe(false);
     expect(windowTitleMatches('a.ts - vi-voice-2 - Visual Studio Code', 'vi-voice')).toBe(false);
     expect(windowTitleMatches('vi-voice - Google Chrome', 'vi-voice')).toBe(false);
   });

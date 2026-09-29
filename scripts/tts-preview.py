@@ -10,7 +10,7 @@ import sys
 
 
 TEXT = """Bạn cập nhật extension rồi kiểm tra lại nhé.
-SuperAdmin kiểm tra đơn hàng trên ShipNGo và Shippo. Hello
+SuperAdmin kiểm tra đơn hàng trên AcmeShop và Trello. Hello
 Please review the changes before deploying to production.
 """
 

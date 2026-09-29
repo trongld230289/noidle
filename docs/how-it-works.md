@@ -11,7 +11,7 @@ Setting `noIdle.voiceResponse` mặc định bật (thiếu `node` thì extensio
 
 Muốn im lặng một lúc mà không phải mở phiên Claude Code mới: bật `noIdle.voiceMute` hoặc chạy lệnh `NoIdle: Tắt/bật tiếng Claude Code`. Hook vẫn đăng ký nhưng không đọc, không báo, không dặn Claude viết phần 🔊 và không mở mic; bật tắt có hiệu lực ngay ở lượt sau. Tắt `noIdle.voiceResponse` thì gỡ hẳn hook, phiên đang mở phải khởi động lại mới nhận.
 
-Khi Claude Code hoặc Copilot CLI cần bạn approve một lệnh hoặc chờ bạn chọn câu trả lời, extension đọc một câu ngắn kèm tên workspace: "Workspace shipngo cần approve" hoặc "Workspace vi voice cần bạn xác nhận câu trả lời". Chạy nhiều cửa sổ cùng lúc vẫn biết cửa sổ nào đang chờ. Mọi lượt đọc xếp hàng theo thứ tự đến, không chồng tiếng; chỉ khi cùng một phiên có câu trả lời mới thì câu cũ của phiên đó bị cắt. Tắt bằng `noIdle.voiceNotify`.
+Khi Claude Code hoặc Copilot CLI cần bạn approve một lệnh hoặc chờ bạn chọn câu trả lời, extension đọc một câu ngắn kèm tên workspace: "Workspace acme cần approve" hoặc "Workspace vi voice cần bạn xác nhận câu trả lời". Chạy nhiều cửa sổ cùng lúc vẫn biết cửa sổ nào đang chờ. Mọi lượt đọc xếp hàng theo thứ tự đến, không chồng tiếng; chỉ khi cùng một phiên có câu trả lời mới thì câu cũ của phiên đó bị cắt. Tắt bằng `noIdle.voiceNotify`.
 
 ### Approve bằng giọng nói
 
@@ -71,7 +71,7 @@ Muốn giọng tự nhiên hơn và đọc trộn Việt Anh mượt hơn Edge t
 
 Hook đọc key từ file cấu hình riêng của extension, không đưa lên dòng lệnh hook. ElevenLabs không bị mở yêu cầu song song như Edge (mỗi ký tự là credit), chỉ thử lại một lần khi lỗi; vẫn lỗi (key sai, hết credit, giọng thư viện trên gói Free, mất mạng) thì câu đó tự đọc bằng giọng Edge đang chọn và ghi lý do vào `hook.log`. Hết credit thì hook nhớ số liệu và đi thẳng Edge cho các câu sau, không gọi ElevenLabs lỗi lại mỗi câu; tới kỳ reset tháng (hoặc sau 24 giờ nếu không biết mốc) mới thử lại. `noIdle.voiceRate` vẫn áp dụng, đổi sang speed 0.7 đến 1.2 của ElevenLabs. Sau mỗi lượt đọc bằng ElevenLabs, hook hỏi số credit còn lại và extension hiện cạnh nút mic trên status bar, kiểu `6.4k/10k` (còn / hạn mức tháng), nền vàng khi còn dưới 10%; chỉ hiện, không đọc thành tiếng, và chỉ khi `ttsProvider` là `elevenlabs`. Script `tts-preview.py` chỉ đọc bằng Edge.
 
-Giọng vi-VN đọc chữ viết tắt và đuôi file tiếng Anh sai, kiểu `README.md` thành "mờ đờ". Hook thay sẵn các thuật ngữ hay gặp bằng âm tiếng Việt trước khi đọc: `.md` thành "chấm em đi", `API` thành "ây pi ai", `JSON` thành "chây sơn", `CI/CD` thành "xi ai xi đi". Thêm từ của bạn hoặc sửa cách đọc mặc định bằng `noIdle.pronunciations`, ví dụ `{"Claude": "cờ lốt", "shipngo": "síp gô"}`; đổi là có hiệu lực ngay ở lượt sau. Bảng mặc định nằm trong `src/pronounce.ts`.
+Giọng vi-VN đọc chữ viết tắt và đuôi file tiếng Anh sai, kiểu `README.md` thành "mờ đờ". Hook thay sẵn các thuật ngữ hay gặp bằng âm tiếng Việt trước khi đọc: `.md` thành "chấm em đi", `API` thành "ây pi ai", `JSON` thành "chây sơn", `CI/CD` thành "xi ai xi đi". Thêm từ của bạn hoặc sửa cách đọc mặc định bằng `noIdle.pronunciations`, ví dụ `{"Claude": "cờ lốt", "acme": "ác mi"}`; đổi là có hiệu lực ngay ở lượt sau. Bảng mặc định nằm trong `src/pronounce.ts`.
 
 Để tiết kiệm token, hướng dẫn viết phần 🔊 chỉ được chèn đầy đủ ở prompt đầu tiên của mỗi phiên Claude Code (khoảng 400 token); các prompt sau chỉ chèn một dòng nhắc ngắn (khoảng 40 token), và cứ 20 prompt thì chèn lại bản đầy đủ một lần phòng khi context bị nén. Hook đếm theo `session_id` bằng file trong `noidle-tts/sessions` trong thư mục tạm.
 
@@ -94,7 +94,7 @@ python scripts/tts-preview.py
 Hoặc truyền một câu trực tiếp:
 
 ```powershell
-python scripts/tts-preview.py "Bạn cập nhật extension rồi kiểm tra ShipNGo và Shippo nhé."
+python scripts/tts-preview.py "Bạn cập nhật extension rồi kiểm tra AcmeShop và Trello nhé."
 ```
 
 Script đọc lại Settings người dùng mỗi lần chạy, lấy `noIdle.voice`, `voiceRate`, `language`, `pronunciations` và đường dẫn player từ `ffmpegPath`. Dùng đúng bộ xử lý pronunciation của dự án, không gọi AI, không tự tách tên ghép và không thay cài đặt. Nó phát riêng, bỏ qua mute, hàng đợi và khóa mic của hook; nên dừng các lượt đọc/thu âm khác trước khi thử. Vẫn cần mạng để tổng hợp Edge TTS.

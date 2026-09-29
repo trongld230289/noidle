@@ -5,7 +5,7 @@ describe('pronounce', () => {
   it('leaves word separation to the AI instead of splitting names mechanically', () => {
     const original = 'SuperAdmin MasterData ScanForm viewAll APIResponse XMLHttpRequest';
     expect(pronounce(original, undefined, false)).toBe(original);
-    expect(pronounce('Super Admin Ship N Go Shippo', undefined, false)).toBe('Super Admin Ship N Go Shippo');
+    expect(pronounce('Super Admin Acme Shop Trello', undefined, false)).toBe('Super Admin Acme Shop Trello');
   });
 
   it('keeps explicit pronunciations without splitting unrelated names', () => {
@@ -14,7 +14,7 @@ describe('pronounce', () => {
   });
 
   it('preserves standalone acronyms, IP versions and words without case boundaries', () => {
-    expect(pronounce('API JSON IPv4 IPv6 SHIPNGO appsettings', undefined, false)).toBe('API JSON IPv4 IPv6 SHIPNGO appsettings');
+    expect(pronounce('API JSON IPv4 IPv6 ACME appsettings', undefined, false)).toBe('API JSON IPv4 IPv6 ACME appsettings');
   });
 
   it('spells file extensions with English letter names in Vietnamese syllables', () => {
@@ -37,8 +37,8 @@ describe('pronounce', () => {
   });
 
   it('lets user entries add words and override defaults', () => {
-    const extra = { API: 'a pê i', shipngo: 'síp gô' };
-    expect(pronounce('shipngo gọi API', extra)).toBe('síp gô gọi a pê i');
+    const extra = { API: 'a pê i', acme: 'ác mi' };
+    expect(pronounce('acme gọi API', extra)).toBe('ác mi gọi a pê i');
   });
 
   it('ignores blank keys, and an empty value disables that default so the word is read as written', () => {

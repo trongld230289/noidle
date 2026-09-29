@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { lastAssistantText, pickSpeech, stripMarkdown, promptContext, promptReminder, pendingBackgroundTasks, queuedPrompts, briefTool } from '../src/speech';
+import { lastAssistantText, pickSpeech, stripMarkdown, pendingBackgroundTasks, queuedPrompts, briefTool } from '../src/speech';
+import { DEFAULT_RECAP_PROMPT } from '../src/recapPrompt';
 import { applyHooks, hookCommands } from '../src/claudeHooks';
 import { splitSentences, announcement, workspaceName, doneAnnouncement } from '../src/speech';
 
@@ -8,7 +9,7 @@ const line = (o: unknown) => JSON.stringify(o);
 describe('briefTool: câu ngắn về tool đang xin quyền (Copilot Chat)', () => {
   it('lệnh: tối đa ba từ đầu, không đọc tham số dài', () => {
     expect(briefTool('Bash', { command: 'git status' })).toBe('Bash: git status');
-    expect(briefTool('Bash', { command: "dotnet test 'd:\\Project\\FREELANCER\\SHIPNGO-API\\src\\Tests.csproj' --filter 'FullyQualifiedName~Create' --nologo -v quiet" })).toBe('Bash: dotnet test Tests.csproj');
+    expect(briefTool('Bash', { command: "dotnet test 'd:\\Project\\Work\\ACME-API\\src\\Tests.csproj' --filter 'FullyQualifiedName~Create' --nologo -v quiet" })).toBe('Bash: dotnet test Tests.csproj');
     expect(briefTool('Bash', { command: `node script.js ${'private-argument '.repeat(40)}` })).toBe('Bash: node script.js private-argument');
   });
   it('bỏ "cd <thư mục> &&" ở đầu, đường dẫn chỉ đọc tên file, từ quá dài thì cắt', () => {
@@ -123,28 +124,17 @@ describe('queuedPrompts: người dùng gõ tiếp lúc Claude đang làm, lư�
 });
 
 describe('speech word separation instructions', () => {
-  it.each(['vi', 'en'] as const)('guides AI word separation in full prompts (%s)', (lang) => {
-    const instruction = promptContext(lang);
+  it.each(['vi', 'en'] as const)('guides AI word separation in the default recap prompt (%s)', (lang) => {
+    const instruction = DEFAULT_RECAP_PROMPT[lang];
     expect(instruction).toContain('SuperAdmin');
     expect(instruction).toContain('Super Admin');
-    expect(instruction).toContain('ShipNGo');
-    expect(instruction).toContain('Ship N Go');
-    expect(instruction).toContain('Shippo');
-    expect(instruction).toContain(lang === 'vi' ? 'không chắc' : 'uncertain');
-    expect(instruction.toLowerCase()).toContain(lang === 'vi' ? 'phần trả lời chính' : 'main answer');
-  });
-
-  it.each(['vi', 'en'] as const)('keeps the speech-only separation guidance in reminders (%s)', (lang) => {
-    const instruction = promptReminder(lang);
-    expect(instruction).toContain(lang === 'vi' ? 'theo nghĩa ở phần đọc' : 'by meaning in speech');
-    expect(instruction).toContain(lang === 'vi' ? 'không chắc thì giữ nguyên' : 'uncertain names unchanged');
-    expect(instruction).toContain(lang === 'vi' ? 'Phần chính giữ tên gốc' : 'original names in the main answer');
+    expect(instruction).toContain(lang === 'vi' ? 'không chắc' : 'confident');
   });
 
   it('reads the AI-prepared section while preserving names in the main answer', () => {
-    const response = 'SuperAdmin uses ShipNGo and Shippo.\n🔊 Super Admin uses Ship N Go and Shippo.';
-    expect(pickSpeech(response)).toBe('Super Admin uses Ship N Go and Shippo.');
-    expect(response.startsWith('SuperAdmin uses ShipNGo and Shippo.')).toBe(true);
+    const response = 'SuperAdmin uses AcmeShop and Trello.\n🔊 Super Admin uses Acme Shop and Trello.';
+    expect(pickSpeech(response)).toBe('Super Admin uses Acme Shop and Trello.');
+    expect(response.startsWith('SuperAdmin uses AcmeShop and Trello.')).toBe(true);
   });
 });
 
@@ -269,7 +259,7 @@ describe('splitSentences', () => {
 describe('announcement', () => {
   it('names the workspace from cwd', () => {
     expect(workspaceName('D:\\Project\\vi-voice')).toBe('vi voice');
-    expect(workspaceName('/home/u/SHIPNGO-BE/')).toBe('SHIPNGO BE');
+    expect(workspaceName('/home/u/ACME-BE/')).toBe('ACME BE');
     expect(workspaceName('')).toBe('không tên');
   });
   it('keeps announcements simple: workspace plus what is needed', () => {

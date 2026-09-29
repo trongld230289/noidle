@@ -15,12 +15,12 @@ const cfgMuted = path.join(work, 'muted.json');
 const cfgNormal = path.join(work, 'normal.json');
 const logFile = path.join(work, 'tmp', 'noidle-tts', 'hook.log');
 
-function run(args: string[], stdin: string): Promise<{ code: number | null; stdout: string }> {
+function run(args: string[], stdin: string, extraEnv: NodeJS.ProcessEnv = {}): Promise<{ code: number | null; stdout: string }> {
   return new Promise((resolve, reject) => {
     const tmp = path.join(work, 'tmp');
     fs.mkdirSync(tmp, { recursive: true });
     const child = spawn(process.execPath, [bundle, ...args], {
-      env: { ...process.env, TEMP: tmp, TMP: tmp, TMPDIR: tmp },
+      env: { ...process.env, TEMP: tmp, TMP: tmp, TMPDIR: tmp, ...extraEnv },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdout = '';
@@ -189,8 +189,9 @@ describe('claude-hook pronunciations', () => {
     );
     const before = readLog().length;
     // --player trỏ tới file không tồn tại để tiến trình play tách ra không phát gì.
+    // --voice vi-VN: bảng phiên âm mặc định chỉ bật cho giọng vi-VN (mặc định cài là Brian đa ngôn ngữ, tắt bảng).
     const r = await run(
-      ['speak', '--config', cfg, '--player', path.join(work, 'no-such-player.exe')],
+      ['speak', '--config', cfg, '--voice', 'vi-VN-HoaiMyNeural', '--player', path.join(work, 'no-such-player.exe')],
       JSON.stringify({ session_id: 's4', cwd: work, transcript_path: transcript }),
     );
     expect(r.code).toBe(0);
@@ -199,37 +200,87 @@ describe('claude-hook pronunciations', () => {
   });
 });
 
+/**
+ * Extension gọi `claude -p` để dịch recapPrompt; tiến trình đó kế thừa hook của người dùng nên từng bắn "submitted"
+ * (tắt mic) và Stop → "Workspace X is done" giả (2026-09-29). Extension đặt NOIDLE_INTERNAL=1, hook thấy là thoát ngay.
+ */
+describe('claude-hook NOIDLE_INTERNAL', () => {
+  const env = { NOIDLE_INTERNAL: '1' };
+  it('prompt: không chèn hướng dẫn, không gửi submitted', async () => {
+    const before = readLog().length;
+    const r = await run(['prompt', '--config', cfgNormal], JSON.stringify({ session_id: 'internal-1', cwd: work, prompt: 'Translate this' }), env);
+    expect(r.code).toBe(0);
+    expect(r.stdout.trim()).toBe('');
+    const added = readLog().slice(before);
+    expect(added).not.toContain('signal submitted');
+    expect(added).toContain('NOIDLE_INTERNAL');
+  });
+
+  it('speak: không đọc "done", không nháy cửa sổ', async () => {
+    const transcript = path.join(work, 'transcript-internal.jsonl');
+    fs.writeFileSync(transcript, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Keep it short.' }] } }) + '\n');
+    const before = readLog().length;
+    const r = await run(
+      ['speak', '--config', cfgNormal, '--player', path.join(work, 'no-such-player.exe')],
+      JSON.stringify({ session_id: 'internal-1', cwd: work, transcript_path: transcript }),
+      env,
+    );
+    expect(r.code).toBe(0);
+    const added = readLog().slice(before);
+    expect(added).not.toContain('speak → play');
+    expect(added).not.toContain('attention');
+  });
+});
+
 describe('claude-hook prompt context per session', () => {
   const prompt = (session: string) => run(['prompt', '--config', cfgNormal], JSON.stringify({ session_id: session, cwd: work }));
   const ctx = (stdout: string) => (JSON.parse(stdout) as { hookSpecificOutput: { additionalContext: string } }).hookSpecificOutput.additionalContext;
 
-  it('chèn hướng dẫn đầy đủ ở prompt đầu tiên của phiên, các prompt sau chỉ nhắc một dòng ngắn', async () => {
+  // Hướng dẫn giờ là prompt ngắn người dùng tự sửa, gửi nguyên mỗi lượt: không còn bản đầy đủ / nhắc ngắn.
+  it('mỗi prompt của phiên đều chèn cùng một hướng dẫn: hợp đồng 🔊, thân mặc định, câu ngôn ngữ', async () => {
     const first = ctx((await prompt('ctx-a')).stdout);
-    expect(first.length).toBeGreaterThan(500);
     expect(first).toContain('🔊');
-    const second = ctx((await prompt('ctx-a')).stdout);
-    expect(second.length).toBeLessThan(200);
-    expect(second).toContain('🔊');
-    const third = ctx((await prompt('ctx-a')).stdout);
-    expect(third).toBe(second);
+    expect(first).toContain(DEFAULT_RECAP_PROMPT.vi);
+    expect(first).toMatch(/tiếng Việt\.$/);
+    expect(ctx((await prompt('ctx-a')).stdout)).toBe(first);
+    expect(ctx((await prompt('ctx-a')).stdout)).toBe(first);
   });
 
-  it('phiên khác thì lại chèn đầy đủ', async () => {
-    await prompt('ctx-b');
-    const other = ctx((await prompt('ctx-c')).stdout);
-    expect(other.length).toBeGreaterThan(500);
-  });
-
-  it('không có session_id thì luôn chèn đầy đủ', async () => {
+  it('không có session_id thì vẫn chèn như thường', async () => {
     const r = await run(['prompt', '--config', cfgNormal], JSON.stringify({ cwd: work }));
-    expect(ctx(r.stdout).length).toBeGreaterThan(500);
-    const r2 = await run(['prompt', '--config', cfgNormal], JSON.stringify({ cwd: work }));
-    expect(ctx(r2.stdout).length).toBeGreaterThan(500);
+    expect(ctx(r.stdout)).toContain(DEFAULT_RECAP_PROMPT.vi);
+  });
+
+  it('recapPrompt trong hook-config thay phần thân, hợp đồng 🔊 vẫn được nối', async () => {
+    const cfg = path.join(work, 'recap-custom.json');
+    fs.writeFileSync(cfg, JSON.stringify({ recapPrompt: { vi: 'Ngắn thôi, hai câu.', en: 'Keep it short, two sentences.' } }));
+    const text = ctx((await run(['prompt', '--config', cfg], JSON.stringify({ session_id: 'ctx-custom', cwd: work }))).stdout);
+    expect(text).toContain('Ngắn thôi, hai câu.');
+    expect(text).not.toContain('Keep it short');
+    expect(text).not.toContain(DEFAULT_RECAP_PROMPT.vi);
+    expect(text).toContain('🔊');
+    expect(text).toMatch(/tiếng Việt\.$/);
+  });
+
+  it('language en: lấy bản tiếng Anh; chưa dịch thì dùng bản gốc cộng câu "Write that section in English"', async () => {
+    const both = path.join(work, 'recap-en.json');
+    fs.writeFileSync(both, JSON.stringify({ language: 'en', recapPrompt: { vi: 'Ngắn thôi.', en: 'Keep it short.' } }));
+    const translated = ctx((await run(['prompt', '--config', both], JSON.stringify({ session_id: 'ctx-en', cwd: work }))).stdout);
+    expect(translated).toContain('Keep it short.');
+    expect(translated).not.toContain('Ngắn thôi.');
+    expect(translated).toMatch(/Write that section in English\.$/);
+
+    const pending = path.join(work, 'recap-en-pending.json');
+    fs.writeFileSync(pending, JSON.stringify({ language: 'en', recapPrompt: { vi: 'Ngắn thôi.' } }));
+    const fallback = ctx((await run(['prompt', '--config', pending], JSON.stringify({ session_id: 'ctx-en2', cwd: work }))).stdout);
+    expect(fallback).toContain('Ngắn thôi.');
+    expect(fallback).toMatch(/Write that section in English\.$/);
   });
 });
 
 import { workspaceName } from '../src/speech';
 import { pronounce } from '../src/pronounce';
+import { DEFAULT_RECAP_PROMPT } from '../src/recapPrompt';
 
 describe('claude-hook workspace prefix', () => {
   const windowsDir = path.join(work, 'tmp', 'noidle-tts', 'windows');
@@ -243,7 +294,7 @@ describe('claude-hook workspace prefix', () => {
   async function spoken(cfgFile: string): Promise<string> {
     fs.writeFileSync(transcript, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: '🔊 Xong việc.' }] } }) + '\n');
     const before = readLog().length;
-    const r = await run(['speak', '--config', cfgFile, '--player', bogusPlayer], JSON.stringify({ session_id: 'ws-1', cwd: work, transcript_path: transcript }));
+    const r = await run(['speak', '--config', cfgFile, '--voice', 'vi-VN-HoaiMyNeural', '--player', bogusPlayer], JSON.stringify({ session_id: 'ws-1', cwd: work, transcript_path: transcript }));
     expect(r.code).toBe(0);
     const m = /speak → play pid \d+ \([^)]*\): (".*")/.exec(readLog().slice(before));
     return m ? (JSON.parse(m[1]) as string) : '';
@@ -326,7 +377,7 @@ describe('claude-hook với Copilot Chat', () => {
     );
     const before = readLog().length;
     const r = await run(
-      ['speak', '--config', cfgNormal, '--player', path.join(work, 'no-such-player.exe')],
+      ['speak', '--config', cfgNormal, '--voice', 'vi-VN-HoaiMyNeural', '--player', path.join(work, 'no-such-player.exe')],
       // Đúng các trường Copilot gửi: timestamp, hook_event_name, session_id, transcript_path, stop_hook_active, cwd.
       JSON.stringify({
         timestamp: '2026-09-21T16:50:23.719Z',
@@ -391,7 +442,7 @@ describe('claude-hook đổi voiceStyle giữa phiên', () => {
   };
 
   it('recap → announce: chèn một dòng bảo Claude thôi viết phần 🔊, lần sau không chèn gì', async () => {
-    expect(await ctx(cfgRecap, 'sw-1')).toContain('tai nghe');
+    expect(await ctx(cfgRecap, 'sw-1')).toContain(DEFAULT_RECAP_PROMPT.vi);
     const note = await ctx(cfgAnnounce, 'sw-1');
     expect(note).toContain('🔊');
     expect(note).toMatch(/không cần/);
@@ -399,10 +450,10 @@ describe('claude-hook đổi voiceStyle giữa phiên', () => {
     expect(await ctx(cfgAnnounce, 'sw-1')).toBe('');
   });
 
-  it('announce → recap: chèn lại hướng dẫn đầy đủ vì dòng nhắc ngắn không đủ', async () => {
+  it('announce → recap: chèn lại hướng dẫn recap', async () => {
     expect(await ctx(cfgAnnounce, 'sw-2')).toBe('');
     expect(await ctx(cfgAnnounce, 'sw-2')).toBe('');
-    expect(await ctx(cfgRecap, 'sw-2')).toContain('tai nghe');
+    expect(await ctx(cfgRecap, 'sw-2')).toContain(DEFAULT_RECAP_PROMPT.vi);
   });
 
   // Claude tự viết phần 🔊 dù hook không dặn (thói quen từ memory hay lượt trước): announce thì nhắc thôi, mỗi khi còn thấy.
@@ -463,5 +514,22 @@ describe('claude-hook attention với Copilot Chat', () => {
     );
     expect(r.code).toBe(0);
     expect(readLog().slice(before)).toMatch(/signal attention/);
+  });
+});
+
+describe('claude-hook default voice', () => {
+  it('speak without --voice uses Brian and skips the Vietnamese transliteration table', async () => {
+    const transcript = path.join(work, 'transcript-default-voice.jsonl');
+    fs.writeFileSync(
+      transcript,
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: '🔊 Claude đã đọc README.md và gọi API.' }] } }) + '\n',
+    );
+    const before = readLog().length;
+    const r = await run(
+      ['speak', '--config', cfgNormal, '--player', path.join(work, 'no-such-player.exe')],
+      JSON.stringify({ session_id: 's5', cwd: work, transcript_path: transcript }),
+    );
+    expect(r.code).toBe(0);
+    expect(readLog().slice(before)).toContain('(en-US-BrianMultilingualNeural): "Claude đã đọc README.md và gọi API."');
   });
 });

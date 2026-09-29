@@ -52,23 +52,35 @@ beforeAll(async () => {
 }, 30_000);
 
 describe('hook with language auto', () => {
+  it.each(['speak', 'notify'])('%s uses the updated voice config even with stale hook arguments', async (mode) => {
+    const configFile = path.join(work, `voice-${mode}.json`);
+    const transcript = path.join(work, `voice-${mode}.jsonl`);
+    fs.writeFileSync(transcript, JSON.stringify({ type: 'assistant', message: { content: '🔊 Voice configuration check.' } }) + '\n');
+    const args = [mode, '--config', configFile, '--voice', 'en-US-BrianMultilingualNeural', '--player', noPlayer];
+    const input = JSON.stringify({ session_id: `voice-${mode}`, cwd: work, transcript_path: transcript, hook_event_name: 'PermissionRequest', tool_name: 'Bash' });
+    for (const voice of ['en-US-EmmaMultilingualNeural', 'en-US-AndrewMultilingualNeural']) {
+      fs.writeFileSync(configFile, JSON.stringify({ language: 'en', voice }));
+      const before = readLog().length;
+      const result = await run(args, input);
+      expect(result.code).toBe(0);
+      expect(readLog().slice(before)).toContain(`(${voice})`);
+    }
+  });
+
   it('follows the language of each prompt and remembers it for short prompts', async () => {
     const first = ctx((await prompt('auto-a', 'please refactor the claimNext function')).stdout);
     expect(first).toMatch(/English/);
     expect(first).not.toMatch(/tiếng Việt/);
-    expect(first.length).toBeGreaterThan(400); // bản đầy đủ
 
     const second = ctx((await prompt('auto-a', 'ok')).stdout);
-    expect(second).toMatch(/English/); // "ok" không đoán được: giữ tiếng Anh
-    expect(second.length).toBeLessThan(first.length / 3); // chỉ nhắc ngắn
+    expect(second).toBe(first); // "ok" không đoán được: giữ tiếng Anh, hướng dẫn gửi nguyên mỗi lượt
 
     const third = ctx((await prompt('auto-a', 'giờ sửa lỗi này giúp mình')).stdout);
-    expect(third).toMatch(/tiếng Việt/); // đổi ngôn ngữ: chèn lại bản đầy đủ tiếng Việt
-    expect(third.length).toBeGreaterThan(400);
+    expect(third).toMatch(/tiếng Việt/); // đổi ngôn ngữ: hướng dẫn tiếng Việt
+    expect(third).not.toMatch(/English/);
 
     const fourth = ctx((await prompt('auto-a', 'ừ')).stdout);
-    expect(fourth).toMatch(/tiếng Việt/);
-    expect(fourth.length).toBeLessThan(third.length / 3);
+    expect(fourth).toBe(third);
   });
 
   it('ignores prompts sent by subagents: no context, no language switch, no submitted signal', async () => {

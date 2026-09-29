@@ -43,7 +43,7 @@ beforeAll(async () => {
   });
   // Lần chạy đầu của bundle mới trên Windows chậm vài giây (Defender quét file): làm nóng ở đây để test đầu không timeout.
   await run(['skip'], '');
-  fs.writeFileSync(cfgEn, JSON.stringify({ language: 'en', pronunciations: { shipngo: 'ship and go' } }));
+  fs.writeFileSync(cfgEn, JSON.stringify({ language: 'en', pronunciations: { acme: 'acme shop' } }));
 }, 30_000);
 
 describe('hook in English mode', () => {
@@ -59,12 +59,12 @@ describe('hook in English mode', () => {
     const transcript = path.join(work, 'transcript-en.jsonl');
     fs.writeFileSync(
       transcript,
-      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: '🔊 Done, shipngo now reads README.md and calls the API.' }] } }) + '\n',
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: '🔊 Done, acme now reads README.md and calls the API.' }] } }) + '\n',
     );
     const before = readLog().length;
     const r = await run(['speak', '--config', cfgEn, '--player', noPlayer], JSON.stringify({ session_id: 'en-2', cwd: work, transcript_path: transcript }));
     expect(r.code).toBe(0);
-    expect(readLog().slice(before)).toContain('Done, ship and go now reads README.md and calls the API.');
+    expect(readLog().slice(before)).toContain('Done, acme shop now reads README.md and calls the API.');
   });
 
   it('notify: announces in English', async () => {

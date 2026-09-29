@@ -9,7 +9,7 @@ import { transcribe, TranscribeError, repeatsTail } from './transcriber';
 import { parseVoiceCommand } from './decision';
 import { refine, DEFAULT_REFINE_MODEL, resetRefinePause } from './refiner';
 import { pronounce } from './pronounce';
-import { langOf, isAuto, effectiveVoice, type Lang } from './lang';
+import { langOf, isAuto, effectiveVoice, usesVietPronunciation, DEFAULT_VOICE, type Lang } from './lang';
 import { ELEVEN_DEFAULT_VOICE, ELEVEN_DEFAULT_MODEL, readUsage, usageFilePath } from './elevenlabs';
 import { applyHooks, copilotHooksFile, copilotHookPaths, ClaudeSettings, HookOptions } from './claudeHooks';
 import { inject, InjectorApi, Target } from './injector';
@@ -19,6 +19,9 @@ import { terminalForAgent } from './proctree';
 import { planMigration, configProperties } from './migrate';
 import { checkRequirements } from './requirements';
 import { findExecutable } from './findTool';
+import { needsTranslation, recapPromptsFor, translateRecap, type RecapTranslator } from './recapPrompt';
+import { claudeCliTranslator } from './translate';
+import { createHash } from 'crypto';
 import * as fs from 'fs';
 import { execFile, spawn } from 'child_process';
 import * as os from 'os';
@@ -26,6 +29,8 @@ import * as path from 'path';
 
 const SECRET_KEY = 'noIdle.groqApiKey';
 const WELCOMED_KEY = 'noIdle.welcomed';
+/** Bản dịch của noIdle.recapPrompt: { hash của text nguồn, bản dịch }. Đổi text là hash khác, dịch lại. */
+const RECAP_CACHE_KEY = 'noIdle.recapPromptTranslation';
 const GROQ_KEYS_URL = 'https://console.groq.com/keys';
 const MAX_RECORD_MS = 120_000;
 const MIN_RECORD_MS = 500;
@@ -73,7 +78,7 @@ function config() {
     apiKey: (c.get<string>('groqApiKey', '') || '').trim(),
     voiceResponse: c.get<boolean>('voiceResponse', true),
     voiceMute: c.get<boolean>('voiceMute', false),
-    voice: c.get<string>('voice', 'vi-VN-HoaiMyNeural') || 'vi-VN-HoaiMyNeural',
+    voice: c.get<string>('voice', DEFAULT_VOICE) || DEFAULT_VOICE,
     voiceRate: c.get<string>('voiceRate', '+0%') || '+0%',
     ttsProvider: (c.get<string>('ttsProvider', 'edge') === 'elevenlabs' ? 'elevenlabs' : 'edge') as 'edge' | 'elevenlabs',
     elevenLabsApiKey: (c.get<string>('elevenLabsApiKey', '') || '').trim(),
@@ -94,6 +99,8 @@ function config() {
     pronunciations: c.get<Record<string, string>>('pronunciations', {}) || {},
     voiceSayWorkspace: c.get<'auto' | 'always' | 'never'>('voiceSayWorkspace', 'auto') || 'auto',
     voiceStyle: (c.get<string>('voiceStyle', 'recap') === 'announce' ? 'announce' : 'recap') as 'recap' | 'announce',
+    /** Thân hướng dẫn recap người dùng tự sửa; rỗng là bản mặc định (recapPromptsFor xử lý). */
+    recapPrompt: (c.get<string>('recapPrompt', '') || '').trim(),
     attentionFlash: c.get<boolean>('attentionFlash', true),
     attentionColor: c.get<boolean>('attentionColor', true),
     attentionTintColor: normalizeHex(c.get<string>('attentionTintColor', ''), TINT.activeBackground),
@@ -267,6 +274,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
         void toggle().catch((err) => log(`không dừng được mic: ${(err as Error).message}`));
       }
       if (e.affectsConfiguration('noIdle.handsFree') && cfg.handsFree) void askKeyForMicFeature('Hands Free').catch(() => undefined);
+      if (e.affectsConfiguration('noIdle.recapPrompt')) void ensureRecapTranslation();
       if (e.affectsConfiguration('noIdle.ffmpegPath') || e.affectsConfiguration('noIdle.micDevice')) {
         recorder.dispose();
         recorder = new Recorder(recorderOptions());
@@ -354,12 +362,14 @@ export function activate(ctx: vscode.ExtensionContext): void {
     const cfg = config();
     const data = {
       voiceMute: cfg.voiceMute,
+      voice: cfg.voice,
       approveTimeoutSec: cfg.approveTimeoutSec,
       handsFree: cfg.handsFree,
       pronunciations: cfg.pronunciations,
       voiceSayWorkspace: cfg.voiceSayWorkspace,
       voiceStyle: cfg.voiceStyle,
       language: cfg.language,
+      recapPrompt: recapPromptsFor(cfg.recapPrompt, cachedTranslation(cfg.recapPrompt)),
       tts: {
         provider: cfg.ttsProvider,
         elevenLabsApiKey: cfg.elevenLabsApiKey,
@@ -369,6 +379,56 @@ export function activate(ctx: vscode.ExtensionContext): void {
     };
     await fs.promises.mkdir(path.dirname(hookConfigPath), { recursive: true });
     await fs.promises.writeFile(hookConfigPath, JSON.stringify(data, null, 2), 'utf8');
+  }
+
+  const recapHash = (text: string): string => createHash('sha1').update(text.trim()).digest('hex');
+
+  function cachedTranslation(text: string): string | undefined {
+    const cache = ctx.globalState.get<{ hash: string; text: string }>(RECAP_CACHE_KEY);
+    return cache?.hash === recapHash(text) ? cache.text : undefined;
+  }
+
+  /** Copilot Chat trong VS Code (vscode.lm): chạy trong tiến trình, lần đầu VS Code hỏi người dùng cho phép NoIdle dùng model. */
+  function copilotLmTranslator(): RecapTranslator {
+    return {
+      name: 'copilot',
+      async run(prompt) {
+        const [model] = await vscode.lm.selectChatModels({ vendor: 'copilot' });
+        if (!model) return undefined;
+        const res = await model.sendRequest([vscode.LanguageModelChatMessage.User(prompt)], {}, new vscode.CancellationTokenSource().token);
+        let out = '';
+        for await (const chunk of res.text) out += chunk;
+        return out;
+      },
+    };
+  }
+
+  let translating: Promise<void> | undefined;
+  /**
+   * Dịch noIdle.recapPrompt sang thứ tiếng còn lại khi text đổi (so hash với cache), chạy nền và im lặng:
+   * Copilot Chat → Claude Code CLI → chịu, hook dùng nguyên văn cộng câu ngôn ngữ. Xong thì ghi lại hook-config.
+   */
+  function ensureRecapTranslation(): Promise<void> {
+    if (translating) return translating;
+    translating = (async () => {
+      const text = config().recapPrompt;
+      if (!needsTranslation(text) || cachedTranslation(text)) return;
+      const hash = recapHash(text);
+      log(`recapPrompt: text mới (${hash.slice(0, 8)}), dịch nền`);
+      const result = await translateRecap(text, [copilotLmTranslator(), claudeCliTranslator()]);
+      if (!result) {
+        log('recapPrompt: không dịch được (không có Copilot Chat lẫn Claude Code), hook dùng nguyên văn');
+        return;
+      }
+      // Người dùng đổi text trong lúc đang dịch thì bản này lỗi thời: lần gọi sau (setting đổi) sẽ dịch lại.
+      if (recapHash(config().recapPrompt) !== hash) return;
+      await ctx.globalState.update(RECAP_CACHE_KEY, { hash, text: result.text });
+      log(`recapPrompt: dịch xong bằng ${result.via} (${result.text.length} ký tự)`);
+      await writeHookConfig();
+    })()
+      .catch((err) => log(`recapPrompt: lỗi dịch: ${(err as Error).message}`))
+      .finally(() => (translating = undefined));
+    return translating;
   }
 
   /** ffplay theo setting Ffmpeg Path: setting để 'ffmpeg' thì 'ffplay' (resolveTools sẽ tìm đường dẫn tuyệt đối). */
@@ -531,7 +591,8 @@ export function activate(ctx: vscode.ExtensionContext): void {
   void migrateFromViVoice(ctx, log)
     .catch((err) => log(`lỗi chuyển setting cũ: ${(err as Error).message}`))
     .then(() => syncHooks())
-    .catch((err) => log(`lỗi đồng bộ hook: ${(err as Error).message}`));
+    .catch((err) => log(`lỗi đồng bộ hook: ${(err as Error).message}`))
+    .then(() => ensureRecapTranslation());
 
   /** Bật tắt nhanh một cờ boolean của noIdle ở Settings người dùng, rồi báo trạng thái mới. */
   async function flip(key: 'voiceMute' | 'handsFree', on: string, off: string): Promise<void> {
@@ -552,7 +613,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       lang === 'en'
         ? 'Hello, this is the NoIdle reader. Done, I updated README.md and called the API, all tests pass.'
         : 'Xin chào, đây là giọng đọc của NoIdle. Xong rồi, đã sửa README.md và gọi API, test pass hết.';
-    await fs.promises.writeFile(file, pronounce(sample, cfg.pronunciations, lang === 'vi'), 'utf8');
+    await fs.promises.writeFile(file, pronounce(sample, cfg.pronunciations, usesVietPronunciation(cfg.voice, lang)), 'utf8');
     const voice = effectiveVoice(cfg.voice, lang);
     // --config để play biết giọng ElevenLabs nếu đang chọn; ghi lại file trước cho chắc.
     await writeHookConfig();

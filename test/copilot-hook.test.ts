@@ -111,7 +111,7 @@ describe('Copilot CLI instructions', () => {
   it('provides native startup context without replacing the user prompt', async () => {
     const result = await run('start', cli('cli-start', { source: 'new', initialPrompt: 'Explain the result' }));
     expect(result.code).toBe(0);
-    expect(JSON.parse(result.stdout)).toEqual({ additionalContext: expect.stringContaining('headphones') });
+    expect(JSON.parse(result.stdout)).toEqual({ additionalContext: expect.stringContaining('read aloud') });
     expect(signals).toEqual([]);
   });
 
@@ -120,7 +120,7 @@ describe('Copilot CLI instructions', () => {
     expect((await run('start', input)).stdout).toBe('');
     const result = await run('prompt', { ...input, hook_event_name: 'UserPromptSubmit', prompt: 'Continue' });
     expect(JSON.parse(result.stdout).hookSpecificOutput).toEqual({
-      hookEventName: 'UserPromptSubmit', additionalContext: expect.stringContaining('headphones'),
+      hookEventName: 'UserPromptSubmit', additionalContext: expect.stringContaining('read aloud'),
     });
   });
 
@@ -128,7 +128,7 @@ describe('Copilot CLI instructions', () => {
     const prompt = 'Explain this code:\n```\nconst x = 1;\n```';
     const result = await run('prompt', cli('cli-prompt', { prompt }));
     expect(JSON.parse(result.stdout).modifiedPrompt).toContain(prompt);
-    expect(JSON.parse(result.stdout).modifiedPrompt).toContain('headphones');
+    expect(JSON.parse(result.stdout).modifiedPrompt).toContain('read aloud');
     expect(signals).toContainEqual(expect.objectContaining({ event: 'submitted', session: 'cli-prompt', source: 'copilot-cli' }));
   });
 
@@ -149,7 +149,7 @@ describe('Copilot CLI instructions', () => {
     const input = cli('cli-settings', { prompt: 'Please explain the API' });
     expect(JSON.parse((await run('prompt', input)).stdout).modifiedPrompt).toContain('in English');
     const vietnamese = cli('cli-settings', { prompt: 'Giải thích bằng tiếng Việt nhé' });
-    expect(JSON.parse((await run('prompt', vietnamese)).stdout).modifiedPrompt).toContain('Viết bằng tiếng Việt');
+    expect(JSON.parse((await run('prompt', vietnamese)).stdout).modifiedPrompt).toContain('bằng tiếng Việt');
     configure({ voiceStyle: 'announce' });
     expect(JSON.parse((await run('prompt', input)).stdout).modifiedPrompt).toContain('no longer needed');
     expect((await run('prompt', input)).stdout).toBe('');

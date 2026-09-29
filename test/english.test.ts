@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { announcement, workspaceName, promptContext, promptReminder, spoken } from '../src/speech';
+import { announcement, workspaceName, spoken } from '../src/speech';
+import { recapInstruction } from '../src/recapPrompt';
 import { parseVoiceCommand } from '../src/decision';
 import { buildPrompt, transcribe } from '../src/transcriber';
 import { refine, cleanReply } from '../src/refiner';
@@ -18,22 +19,16 @@ describe('announcement in English', () => {
   });
   it('defaults to Vietnamese when no language is given', () => {
     expect(announcement({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', cwd: 'D:/abc' })).toBe('Workspace abc cần approve.');
-    expect(promptContext()).toBe(promptContext('vi'));
   });
 });
 
 describe('prompt instructions', () => {
   it('gives Claude English instructions that still use the speak mark', () => {
-    const full = promptContext('en');
-    const short = promptReminder('en');
+    const full = recapInstruction(undefined, 'en');
     expect(full).toContain('🔊');
     expect(full).toMatch(/English/);
     expect(full).not.toMatch(/tiếng Việt/);
-    expect(short).toContain('🔊');
-    expect(short).toMatch(/English/);
-    expect(short.length).toBeLessThan(full.length / 3);
-    expect(promptContext('vi')).toMatch(/tiếng Việt/);
-    expect(promptReminder('vi')).toMatch(/tiếng Việt/);
+    expect(recapInstruction(undefined, 'vi')).toMatch(/tiếng Việt/);
   });
 });
 
@@ -106,7 +101,7 @@ describe('refine in English', () => {
 describe('pronounce without the Vietnamese default table', () => {
   it('leaves terms as written but still applies the user table', () => {
     expect(pronounce('read README.md and call the API', undefined, false)).toBe('read README.md and call the API');
-    expect(pronounce('shipngo calls the API', { shipngo: 'ship and go' }, false)).toBe('ship and go calls the API');
+    expect(pronounce('acme calls the API', { acme: 'acme shop' }, false)).toBe('acme shop calls the API');
   });
 });
 

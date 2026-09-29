@@ -20,15 +20,15 @@ describe('Python TTS preview', () => {
         "noIdle.voice": "en-US-BrianMultilingualNeural",
         "noIdle.language": "vi",
         "noIdle.voiceRate": "+10%",
-        "noIdle.pronunciations": { "extension": "ex tension", "ShipNGo": "Ship and Go", "API": "", },
+        "noIdle.pronunciations": { "extension": "ex tension", "AcmeShop": "Acme Shop", "API": "", },
       }`);
-      const text = 'Bạn kiểm tra extension ShipNGo API và rapid.';
+      const text = 'Bạn kiểm tra extension AcmeShop API và rapid.';
       const result = preview(['--settings', settings, '--dry-run', text]);
       expect(result.error).toBeUndefined();
       expect(result.status, result.stderr).toBe(0);
       expect(JSON.parse(result.stdout)).toMatchObject({
         original: text,
-        spoken: 'Bạn kiểm tra ex tension Ship and Go API và rapid.',
+        spoken: 'Bạn kiểm tra ex tension Acme Shop API và rapid.',
         voice: 'en-US-BrianMultilingualNeural',
         rate: '+10%',
         language: 'vi',

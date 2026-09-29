@@ -191,69 +191,11 @@ export function stripMarkdown(text: string): string {
     .trim();
 }
 
-const SPEECH_WORDS_VI =
-  `Chỉ trong phần ${SPEAK_MARK}, dựa vào ngữ nghĩa để tách tên ghép tiếng Anh thành các từ dễ đọc khi hiểu rõ: ` +
-  `SuperAdmin thành Super Admin; ShipNGo có thể thành Ship N Go nếu đúng tên đang nói. ` +
-  `Giữ nguyên Shippo và tên không chắc cách tách; không tách máy móc theo chữ hoa, không tự bịa phiên âm hay đổi nghĩa. ` +
-  `Giữ từ tiếng Anh gốc, không phiên âm sang tiếng Việt. Phần trả lời chính giữ nguyên tên gốc.`;
-
-const SPEECH_WORDS_EN =
-  `Only in the ${SPEAK_MARK} section, use meaning to separate compound English names into readable words when confident: ` +
-  `SuperAdmin becomes Super Admin; ShipNGo may become Ship N Go if that matches the intended name. ` +
-  `Keep Shippo and names with uncertain word boundaries unchanged; do not split mechanically by capitalization, invent pronunciations or change meaning. ` +
-  `Keep the original English words, without Vietnamese phonetic respelling. Preserve original names in the main answer.`;
-
-/** Hướng dẫn chèn vào mỗi prompt để Claude kết thúc bằng phần đọc được. */
-const PROMPT_CONTEXT_VI =
-  `Người dùng đang nghe câu trả lời bằng giọng nói qua tai nghe và thường không nhìn màn hình. ` +
-  `Kết thúc mỗi câu trả lời bằng một phần riêng bắt đầu bằng ${SPEAK_MARK} ở đầu dòng; mọi thứ từ đó đến hết câu trả lời sẽ được đọc thành tiếng. ` +
-  `Phần này phải đủ nghĩa để người nghe hiểu trọn câu trả lời mà không cần đọc phần trên: ` +
-  `nói kết luận, các ý chính, số liệu quan trọng, và điều gì đang cần ở người dùng. ` +
-  `Nếu người dùng hỏi thông tin (liệt kê, số liệu, giải thích, so sánh) thì kể đủ các mục chính bằng lời nói, kiểu "gồm a, b và c", thường ba đến tám câu. ` +
-  `Nếu chỉ là báo cáo việc bạn vừa làm thì hai đến ba câu: đã làm gì, kết quả ra sao, còn cần gì. ` +
-  `Câu đầu tiên của phần này thật ngắn, dưới mười hai từ, nêu ngay kết luận, vì nó được đọc lên trước tiên. ` +
-  `Viết bằng tiếng Việt, giọng nói chuyện tự nhiên như đang kể cho đồng nghiệp nghe. ` +
-  `Không chứa code, đường dẫn, tên file, bảng, gạch đầu dòng hay ký hiệu markdown. Số (cổng, phiên bản, số lượng) viết bằng chữ số như 4200 hay 1.9.0, giọng đọc tự đọc được; đừng đánh vần thành chữ. ` +
-  SPEECH_WORDS_VI;
-
-/**
- * Dòng nhắc ngắn cho các prompt sau của cùng một phiên: hướng dẫn đầy đủ đã nằm trong lịch sử, chỉ cần
- * nhắc lại quy tắc cốt lõi và cách chuẩn bị tên ghép để đọc.
- */
-const PROMPT_REMINDER_VI =
-  `Nhắc: kết thúc bằng phần ${SPEAK_MARK} đầu dòng, tiếng Việt, đủ nghĩa khi nghe, không markdown/code. ` +
-  `Chỉ tách tên ghép theo nghĩa ở phần đọc; không chắc thì giữ nguyên. Phần chính giữ tên gốc.`;
-
-const PROMPT_CONTEXT_EN =
-  `The user is listening to your answers through headphones and usually not looking at the screen. ` +
-  `End every answer with a separate section that starts with ${SPEAK_MARK} at the beginning of a line; everything from there to the end of the answer is read aloud. ` +
-  `That section must stand on its own so a listener understands the whole answer without reading the part above: ` +
-  `state the conclusion, the main points, the important numbers, and what you need from the user. ` +
-  `If the user asked for information (a list, numbers, an explanation, a comparison), say all the main items in words, like "a, b and c", usually three to eight sentences. ` +
-  `If you are only reporting what you just did, two to three sentences: what you did, how it went, what you still need. ` +
-  `Keep the first sentence of that section very short, under twelve words, stating the conclusion, because it is read first. ` +
-  `Write in English, in a natural conversational tone, as if telling a colleague. ` +
-  `No code, paths, file names, tables, bullet points or markdown symbols. Write numbers (ports, versions, counts) as digits like 4200 or 1.9.0 so the voice reads them; do not spell them out. ` +
-  SPEECH_WORDS_EN;
-
-const PROMPT_REMINDER_EN =
-  `Reminder: the user is listening through headphones. End the answer with a ${SPEAK_MARK} section at the start of a line, ` +
-  `in English, complete when only heard, no markdown or code. Only separate compound names by meaning in speech; ` +
-  `leave uncertain names unchanged. Keep original names in the main answer.`;
-
 /** Chèn một lần khi phiên đang recap đổi sang announce: hướng dẫn cũ còn trong lịch sử nên phải bảo Claude thôi. */
 export function promptStopRecap(lang: Lang = 'vi'): string {
   return lang === 'en'
     ? `The ${SPEAK_MARK} section is no longer needed from now on; answer normally without it.`
     : `Từ giờ không cần viết phần ${SPEAK_MARK} nữa; trả lời như bình thường, không có phần đó.`;
-}
-
-export function promptContext(lang: Lang = 'vi'): string {
-  return lang === 'en' ? PROMPT_CONTEXT_EN : PROMPT_CONTEXT_VI;
-}
-
-export function promptReminder(lang: Lang = 'vi'): string {
-  return lang === 'en' ? PROMPT_REMINDER_EN : PROMPT_REMINDER_VI;
 }
 
 /** Các câu hook nói ra (và lý do trả về cho Claude) khi approve hoặc chọn đáp án bằng giọng, theo ngôn ngữ. */

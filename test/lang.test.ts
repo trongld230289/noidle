@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { langOf, effectiveVoice, detectLang, isAuto } from '../src/lang';
+import { langOf, effectiveVoice, detectLang, isAuto, usesVietPronunciation, DEFAULT_VOICE } from '../src/lang';
 
 describe('langOf', () => {
   it('maps the noIdle.language setting to vi or en', () => {
@@ -58,5 +58,21 @@ describe('effectiveVoice', () => {
     expect(effectiveVoice('en-US-BrianMultilingualNeural', 'en')).toBe('en-US-BrianMultilingualNeural');
     expect(effectiveVoice('vi-VN-HoaiMyNeural', 'vi')).toBe('vi-VN-HoaiMyNeural');
     expect(effectiveVoice('en-US-AvaMultilingualNeural', 'vi')).toBe('en-US-AvaMultilingualNeural');
+  });
+});
+
+describe('usesVietPronunciation', () => {
+  it('applies the Vietnamese transliteration table only for vi-VN voices reading Vietnamese', () => {
+    expect(usesVietPronunciation('vi-VN-HoaiMyNeural', 'vi')).toBe(true);
+    expect(usesVietPronunciation('vi-VN-NamMinhNeural', 'vi')).toBe(true);
+  });
+  it('leaves English terms alone for multilingual voices and for English text', () => {
+    expect(usesVietPronunciation('en-US-BrianMultilingualNeural', 'vi')).toBe(false);
+    expect(usesVietPronunciation('vi-VN-HoaiMyNeural', 'en')).toBe(false);
+  });
+  it('ships Brian as the default voice, matching package.json', async () => {
+    const pkg = JSON.parse(await import('fs').then((fs) => fs.readFileSync('package.json', 'utf8')));
+    expect(DEFAULT_VOICE).toBe('en-US-BrianMultilingualNeural');
+    expect(pkg.contributes.configuration.find((c: { properties: Record<string, unknown> }) => 'noIdle.voice' in c.properties).properties['noIdle.voice'].default).toBe(DEFAULT_VOICE);
   });
 });

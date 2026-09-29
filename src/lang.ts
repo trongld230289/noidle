@@ -39,6 +39,18 @@ export function detectLang(text: string): Lang | undefined {
  */
 export const ENGLISH_FALLBACK_VOICE = 'en-US-AvaMultilingualNeural';
 
+/** Giọng mặc định khi cài: Brian đa ngôn ngữ, đọc được cả Việt lẫn Anh trong một câu. Phải khớp default của noIdle.voice trong package.json. */
+export const DEFAULT_VOICE = 'en-US-BrianMultilingualNeural';
+
 export function effectiveVoice(voice: string, lang: Lang): string {
   return lang === 'en' && /^vi-/i.test(voice) ? ENGLISH_FALLBACK_VOICE : voice;
+}
+
+/**
+ * Bảng phát âm mặc định (pronounce.ts) phiên âm thuật ngữ Anh sang âm Việt cho giọng vi-VN. Giọng đa ngôn ngữ
+ * như Brian tự đọc "API", "README.md" đúng tiếng Anh, phiên âm ra lại làm nó đọc sai. Chỉ dùng bảng khi câu
+ * tiếng Việt và giọng thực tế là vi-VN; bảng riêng của người dùng thì luôn áp dụng.
+ */
+export function usesVietPronunciation(voice: string, lang: Lang): boolean {
+  return lang === 'vi' && /^vi-/i.test(effectiveVoice(voice, lang));
 }
