@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { build } from 'esbuild';
-import { startServer, writeRegistry, type Signal } from '../src/signal';
+import { startServer, writeRegistry, removeRegistry, type Signal } from '../src/signal';
 
 /**
  * Tín hiệu listen của hook phải mang chuỗi pid tổ tiên của Claude Code, để extension tìm đúng terminal
@@ -16,6 +16,7 @@ const bundle = path.join(work, 'claude-hook.js');
 const tmp = path.join(work, 'tmp');
 const windowsDir = path.join(tmp, 'noidle-tts', 'windows');
 const cfg = path.join(work, 'handsfree.json');
+const playedAudio = path.join(work, 'played-audio.jsonl');
 const got: Signal[] = [];
 let server: ReturnType<typeof startServer>;
 
@@ -42,6 +43,50 @@ beforeAll(async () => {
     target: 'node20',
     external: ['bufferutil', 'utf-8-validate'],
     logLevel: 'silent',
+    plugins: [{
+      name: 'offline-audio',
+      setup(builder) {
+        builder.onResolve({ filter: /^msedge-tts$/ }, () => ({ path: 'tts', namespace: 'offline' }));
+        builder.onLoad({ filter: /^tts$/, namespace: 'offline' }, () => ({
+          contents: `
+            const { Readable } = require('stream');
+            exports.OUTPUT_FORMAT = { AUDIO_24KHZ_48KBITRATE_MONO_MP3: 'mp3' };
+            exports.MsEdgeTTS = class {
+              async setMetadata() {}
+              toStream(text) { return { audioStream: Readable.from([Buffer.from(text)]) }; }
+              close() {}
+            };
+          `,
+        }));
+        builder.onResolve({ filter: /^child_process$/ }, () => ({ path: 'process', namespace: 'offline' }));
+        builder.onLoad({ filter: /^process$/, namespace: 'offline' }, () => ({
+          contents: `
+            const childProcess = require('node:child_process');
+            module.exports = {
+              ...childProcess,
+              spawn(command, args, options) {
+                if (command === process.execPath && args[0] === '-nodisp') {
+                  const capture = ${JSON.stringify(`
+                    let audio = '';
+                    process.stdin.on('data', chunk => { audio += chunk.toString(); });
+                    process.stdin.on('end', () => {
+                      if (audio.includes('force-player-failure')) {
+                        process.stderr.write('test audio device is unavailable');
+                        process.exitCode = 2;
+                        return;
+                      }
+                      require('fs').appendFileSync(${JSON.stringify(playedAudio)}, JSON.stringify(audio) + '\\n');
+                    });
+                  `)};
+                  return childProcess.spawn(command, ['-e', capture], options);
+                }
+                return childProcess.spawn(command, args, options);
+              },
+            };
+          `,
+        }));
+      },
+    }],
   });
   // Lần chạy đầu của bundle mới trên Windows chậm vài giây (Defender quét file): làm nóng ở đây để test đầu không timeout.
   await run(['skip'], '');
@@ -112,4 +157,46 @@ describe('a stale answer does not reopen the mic', () => {
     expect(got.some((s) => s.event === 'listen' && s.session === session)).toBe(false);
     expect(fs.readFileSync(logFile, 'utf8').slice(before)).toContain('prompt mới');
   }, 40_000);
+});
+
+describe('standalone Claude playback after VS Code closes', () => {
+  const standaloneConfig = path.join(work, 'standalone.json');
+  const transcript = path.join(work, 'standalone.jsonl');
+  const captured = () => fs.existsSync(playedAudio)
+    ? fs.readFileSync(playedAudio, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as string)
+    : [];
+
+  it('continues delivering audio after IPC closes, with a stale registry and after registry cleanup', async () => {
+    fs.writeFileSync(standaloneConfig, JSON.stringify({ language: 'en', handsFree: true }));
+    const speak = async (text: string) => {
+      const before = captured().length;
+      fs.writeFileSync(transcript, JSON.stringify({ type: 'assistant', message: { content: text } }));
+      const input = { session_id: 'standalone', cwd: work, transcript_path: transcript };
+      expect(await run(['speak', '--config', standaloneConfig, '--player', process.execPath], JSON.stringify(input))).toBe(0);
+      await vi.waitFor(() => expect(captured().slice(before)).toEqual([text]), { timeout: 10_000 });
+      await vi.waitFor(() => {
+        const queue = path.join(tmp, 'noidle-tts', 'queue');
+        const pending = fs.readdirSync(queue).filter((file) => file.endsWith('.json'));
+        expect(pending).toEqual([]);
+      }, { timeout: 10_000 });
+    };
+
+    await speak('The first standalone reply plays while the extension IPC server is available.');
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await speak('The next standalone reply must still play when the extension IPC server has stopped.');
+    removeRegistry(4242, windowsDir);
+    await speak('The final standalone reply must still play with no registered editor window at all.');
+  }, 40_000);
+
+  it('reports player failure instead of claiming playback completed', async () => {
+    const textFile = path.join(work, 'player-failure.txt');
+    const logFile = path.join(tmp, 'noidle-tts', 'hook.log');
+    fs.writeFileSync(textFile, 'force-player-failure');
+    const before = fs.readFileSync(logFile, 'utf8').length;
+    expect(await run(['play', textFile, '--player', process.execPath], '')).toBe(0);
+    const added = fs.readFileSync(logFile, 'utf8').slice(before);
+    expect(added).toContain('player exited with code 2');
+    expect(added).toContain('test audio device is unavailable');
+    expect(added).not.toContain('phát xong');
+  });
 });

@@ -1000,17 +1000,31 @@ async function playText(text: string, ticket: string, voice: string): Promise<vo
 
   const player = spawn(
     playerExe,
-    ['-nodisp', '-autoexit', '-loglevel', 'quiet', '-f', 'mp3', '-i', 'pipe:0'],
-    { stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true },
+    ['-nodisp', '-autoexit', '-loglevel', 'error', '-f', 'mp3', '-i', 'pipe:0'],
+    { stdio: ['pipe', 'ignore', 'pipe'], windowsHide: true },
   );
   updateTicket(ticket, { player: player.pid });
   let stopped = false;
+  let failed = false;
+  let stderrTail = '';
+  player.stderr.setEncoding('utf8');
+  player.stderr.on('data', (chunk: string) => { stderrTail = (stderrTail + chunk).slice(-4096); });
   player.stdin.on('error', () => undefined); // ffplay bị tắt giữa chừng thì bỏ qua EPIPE
   player.on('error', (e) => {
     log(`không chạy được player: ${e.message}`);
+    failed = true;
     stopped = true;
   });
   player.on('exit', () => (stopped = true));
+  const finished = new Promise<void>((resolve) => {
+    player.once('close', (code, signal) => {
+      if (!failed && code !== 0) {
+        failed = true;
+        log(`player exited with code ${code}${signal ? ` (${signal})` : ''}: ${stderrTail.trim() || 'no stderr'}`);
+      }
+      resolve();
+    });
+  });
 
   // Đường ống: luôn có SYNTH_AHEAD khối đang tổng hợp (khối đang chờ phát và các khối sau), đưa vào ffplay theo
   // thứ tự. Edge có lúc mất 5-8 giây một khối trong khi khối đầu chỉ phát ~5 giây, tổng hợp một khối phía trước
@@ -1037,14 +1051,8 @@ async function playText(text: string, ticket: string, voice: string): Promise<vo
     onError: (err, i) => log(`bỏ câu ${i + 1}: ${err.message}`),
   });
   player.stdin.end();
-  // Spawn lỗi chỉ có 'error', không có 'exit': chờ cả hai, không thì vòng lặp cạn việc và tiến trình thoát im lặng
-  // trước khi kịp ra hiệu listen.
-  await new Promise<void>((r) => {
-    if (stopped) return r();
-    player.once('exit', () => r());
-    player.once('error', () => r());
-  });
-  log(`phát xong sau ${Date.now() - t0}ms`);
+  await finished;
+  if (!failed) log(`phát xong sau ${Date.now() - t0}ms`);
 }
 
 async function main(): Promise<void> {
