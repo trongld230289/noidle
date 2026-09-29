@@ -512,6 +512,55 @@ describe('Copilot Chat voice controls', () => {
     expect(signals.some((signal) => signal.event === 'ask')).toBe(false);
   });
 
+  // Hands Free tắt: Chat không báo khi nào hộp thoại hiện, nên hook chỉ đọc "cần approve" cho lệnh terminal mà
+  // VS Code không tự duyệt, và trả 'ask' để hộp thoại chắc chắn hiện (VS Code ép hiện khi hook trả 'ask').
+  describe('announces Chat approvals without Hands Free', () => {
+    const spokenTexts = () => fs.readFileSync(audioTexts, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as string);
+
+    it.each([
+      ['no auto-approve rules known', {}],
+      ['rules known but not matching', { chatAutoApprove: { rules: { echo: true } } }],
+    ])('announces and forces the dialog: %s', async (_name, extra) => {
+      configure({ handsFree: false, ...extra });
+      fs.rmSync(path.join(tmp, 'noidle-tts', 'cache'), { recursive: true, force: true });
+      heard = 'yes';
+      const result = await run('notify', chat('run_in_terminal', { command: 'git push origin main' }), ['--event', 'PreToolUse']);
+      const output = JSON.parse(result.stdout).hookSpecificOutput;
+      expect(output.permissionDecision).toBe('ask');
+      expect(output.permissionDecisionReason).toMatch(/NoIdle/);
+      await vi.waitFor(() => expect(spokenTexts().join(' ')).toMatch(/approv.*git push/i), { timeout: 10_000 });
+      expect(signals.some((signal) => signal.event === 'ask')).toBe(false);
+    }, 20_000);
+
+    it.each([
+      ['matches a VS Code rule', { chatAutoApprove: { rules: { 'git push': true } } }, { command: 'git push origin main' }],
+      ['global auto-approve on', { chatAutoApprove: { global: true } }, { command: 'git push origin main' }],
+      ['on the safe list while rules are unknown', {}, { command: 'git status' }],
+      ['voice notify off', { voiceNotify: false }, { command: 'git push origin main' }],
+      ['voice response off', { voiceResponse: false }, { command: 'git push origin main' }],
+    ])('stays silent: %s', async (_name, extra, args) => {
+      configure({ handsFree: false, ...extra });
+      heard = 'yes';
+      const before = log().length;
+      expect((await run('notify', chat('run_in_terminal', args), ['--event', 'PreToolUse'])).stdout).toBe('');
+      expect(log().slice(before)).not.toMatch(/→ play/);
+      expect(signals).toEqual([]);
+      await playbackFinished();
+      expect(spokenTexts()).toEqual([]);
+    }, 20_000);
+
+    it('leaves file edits alone', async () => {
+      configure({ handsFree: false, chatAutoApprove: { rules: {} } });
+      const args = { filePath: 'D:\\repo\\src\\example.ts', content: 'text' };
+      const before = log().length;
+      expect((await run('notify', chat('create_file', args), ['--event', 'PreToolUse'])).stdout).toBe('');
+      expect(log().slice(before)).not.toMatch(/→ play/);
+      expect(signals).toEqual([]);
+      await playbackFinished();
+      expect(spokenTexts()).toEqual([]);
+    });
+  });
+
   it.each([
     ['one and two', { multiSelect: true }, ['PostgreSQL', 'SQLite']],
     ['all', { multiSelect: true }, ['PostgreSQL', 'SQLite']],

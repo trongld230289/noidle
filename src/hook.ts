@@ -38,6 +38,7 @@ import { pronounce } from './pronounce';
 import { prefetchInOrder } from './prefetch';
 import { synthElevenLabs, rateToSpeed, fetchUsage, writeUsage, readUsage, formatUsage, isQuotaError, elevenExhausted } from './elevenlabs';
 import { normalizeCopilotInput, type AgentHookInput } from './copilot';
+import { chatWouldAutoApprove, type ChatAutoApprove } from './chatAutoApprove';
 
 let inputSource: SignalSource | undefined;
 
@@ -85,6 +86,11 @@ interface HookConfig {
    * Thiếu thứ tiếng nào thì hook dùng bản kia; thiếu cả hai thì bản mặc định. Hợp đồng 🔊 và câu ngôn ngữ hook tự nối.
    */
   recapPrompt?: RecapPrompts;
+  /**
+   * Setting auto-approve của VS Code (extension gộp và ghi). Hands Free tắt: Chat chỉ được đọc "cần approve" cho
+   * lệnh terminal VS Code không tự duyệt, kèm 'ask' để hộp thoại chắc chắn hiện. Thiếu thì dùng danh sách an toàn.
+   */
+  chatAutoApprove?: ChatAutoApprove;
 }
 
 interface TtsConfig {
@@ -614,7 +620,6 @@ async function modeNotify(): Promise<void> {
   const cfg = loadConfig();
   const chat = sourceArg() === 'copilot';
   if (chat && (input.hook_event_name !== 'PreToolUse' || !input.chat_voice_tool)) return;
-  if (chat && input.chat_voice_tool === 'approval' && !cfg.handsFree) return;
   if (input.question_fallback_reason) log(`chọn: dùng hộp thoại thủ công: ${input.question_fallback_reason}`);
   const elevated = input.tool_input?.requestSandboxBypass === true || (chat &&
     ['requestSandboxBypass', 'requestUnsandboxedExecution', 'requestAllowNetwork'].some((key) => input[key] === true || input.tool_input?.[key] === true));
@@ -641,6 +646,30 @@ async function modeNotify(): Promise<void> {
     : announcement(input, lang);
   log(`notify ${input.hook_event_name ?? '?'} ${input.notification_type ?? input.tool_name ?? ''}: ${JSON.stringify(text)}`);
   if (!text) return;
+  if (chat && approval && !cfg.handsFree) {
+    // Hands Free tắt: Chat gọi hook trước mọi tool, kể cả tool sẽ tự duyệt, và không báo khi hộp thoại hiện. Chỉ đọc
+    // cho lệnh terminal mà setting auto-approve của VS Code không duyệt, và trả 'ask' để hộp thoại chắc chắn hiện:
+    // không bao giờ báo mà không có hộp thoại, cùng lắm là thêm một hộp thoại (vd lệnh đã "Allow in this session").
+    if (voiceOff(cfg) || cfg.voiceNotify === false) {
+      log('notify: Chat approve, Hands Free và giọng đọc tắt, để Chat tự lo');
+      return;
+    }
+    if (input.tool_name !== 'Bash') {
+      log('notify: Chat sửa file, Hands Free tắt, không ép hộp thoại');
+      return;
+    }
+    const command = typeof input.tool_input?.command === 'string' ? input.tool_input.command : '';
+    const auto = elevated ? false : (chatWouldAutoApprove(command, cfg.chatAutoApprove) ?? canVoiceApprove);
+    if (auto) {
+      log(`notify: Chat sẽ tự duyệt ${briefTool(input.tool_name, input.tool_input)}, không đọc`);
+      return;
+    }
+    log(`notify: Chat không tự duyệt ${briefTool(input.tool_name, input.tool_input)}, đọc và ép hộp thoại`);
+    await attention('approve', input.session_id ?? '', input.cwd || process.cwd(), cfg);
+    manualChatApproval(say.announcedByVoice);
+    spawnPlay(text, 'notify', input.session_id ?? '', lang);
+    return;
+  }
   await attention(/approve|approval/i.test(text) ? 'approve' : 'answer', input.session_id ?? '', input.cwd || process.cwd(), cfg);
   if (voiceOff(cfg)) {
     log('notify: voiceResponse tắt, không đọc câu báo');

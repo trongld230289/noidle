@@ -205,6 +205,8 @@ export interface Spoken {
   sayApproveOrDeny: (announcement: string) => string;
   notHeardPress: string;
   unclearPress: string;
+  /** Lý do trả về Chat khi hook chỉ đọc "cần approve" và ép hộp thoại hiện (Hands Free tắt). */
+  announcedByVoice: string;
   approved: string;
   denied: string;
   approveReason: (decision: 'allow' | 'deny', heard: string) => string;
@@ -226,6 +228,7 @@ const SPOKEN_VI: Spoken = {
   sayApproveOrDeny: (a) => `${a} Sau tiếng bíp, nói approve hoặc từ chối.`,
   notHeardPress: 'Mình không nghe thấy, bạn bấm tay nhé.',
   unclearPress: 'Mình không rõ, bạn bấm tay nhé.',
+  announcedByVoice: 'NoIdle đã đọc thông báo này bằng giọng nói',
   approved: 'Đã approve.',
   denied: 'Đã từ chối.',
   approveReason: (d, heard) => `Người dùng ${d === 'allow' ? 'approve' : 'từ chối'} bằng giọng nói: "${heard}"`,
@@ -248,6 +251,7 @@ const SPOKEN_EN: Spoken = {
   sayApproveOrDeny: (a) => `${a} After the beep, say approve or deny.`,
   notHeardPress: "I didn't hear anything, please confirm by hand.",
   unclearPress: "I didn't catch that, please confirm by hand.",
+  announcedByVoice: 'NoIdle announced this request by voice',
   approved: 'Approved.',
   denied: 'Denied.',
   approveReason: (d, heard) => `User ${d === 'allow' ? 'approved' : 'denied'} by voice: "${heard}"`,

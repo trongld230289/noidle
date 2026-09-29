@@ -107,7 +107,7 @@ Khi approve hoặc chọn đáp án, im lặng hoặc nói không rõ thì chuy�
 
 Tắt Hands Free thì mic không bao giờ tự mở, chỉ mở khi bạn bấm F6.
 
-Tắt Voice Response hoặc Voice Notify không tắt Hands Free. Khi không có giọng đọc, xem nội dung trên màn hình và chờ bíp để nói. Copilot Chat Local chưa có tín hiệu hook chờ duyệt thủ công: khi Hands Free tắt, NoIdle không đọc approve từ PreToolUse để tránh báo cả lệnh tự duyệt. Đây là giới hạn sự kiện, không phải điều kiện bật giọng đọc.
+Tắt Voice Response hoặc Voice Notify không tắt Hands Free. Khi không có giọng đọc, xem nội dung trên màn hình và chờ bíp để nói. Copilot Chat không báo cho hook biết khi nào hộp duyệt hiện: khi Hands Free tắt, NoIdle đọc "cần approve" cho lệnh terminal mà setting auto-approve của VS Code (`chat.tools.terminal.autoApprove`) không tự duyệt, và ép hộp duyệt hiện để không bao giờ báo mà không có hộp. Lệnh đã "Allow in this session" thì hook không thấy nên có thể bị hỏi thêm một lần.
 
 **3. Báo cửa sổ đang cần bạn**
 
@@ -156,7 +156,7 @@ Tắt Voice Response hoặc Voice Notify không tắt Hands Free. Khi không có
 
 **Mở nhiều cửa sổ thì mic mở ở đâu?** Ở cửa sổ của agent vừa xong. Copilot Chat nhận lời nói trong ô chat. Claude Code và Copilot CLI nhận trong đúng terminal đang chạy agent, nên hãy chạy chúng trong terminal của VS Code. Chạy ở terminal ngoài VS Code thì vẫn nghe đọc, nhưng mic không tự mở để tránh gõ nhầm chỗ.
 
-**Copilot Chat hỏi approve cả lệnh bình thường?** Copilot Chat gọi hook trước mọi lần chạy tool, nên khi bật Hands Free có thể hỏi cả lệnh vốn đã được cho phép. Tắt Hands Free nếu thấy phiền.
+**Copilot Chat hỏi approve cả lệnh bình thường?** Copilot Chat gọi hook trước mọi lần chạy tool, nên khi bật Hands Free có thể hỏi cả lệnh vốn đã được cho phép. Khi tắt Hands Free, NoIdle theo setting auto-approve của VS Code; lệnh chỉ mới "Allow in this session" vẫn có thể bị hỏi lại. Muốn im hẳn thì thêm lệnh vào `chat.tools.terminal.autoApprove` hoặc tắt Voice Notify.
 
 **Copilot CLI đang chạy mà cứ nghe "cần approve", hoặc một câu hỏi bị báo hai lần?** NoIdle không dùng sự kiện kiểm tra quyền của CLI để báo đang chờ duyệt thủ công. Câu hỏi thủ công chỉ báo khi hộp thoại xuất hiện, không báo thêm lúc chuẩn bị gọi tool. Báo approve thủ công cần CLI phát thông báo `permission_prompt`; phiên bản không phát sự kiện này vẫn hiện hộp duyệt nhưng không có tiếng báo. Khi bật Hands Free, NoIdle vẫn có thể hỏi duyệt bằng giọng cho lệnh an toàn trước khi CLI tự kiểm tra quyền.
 

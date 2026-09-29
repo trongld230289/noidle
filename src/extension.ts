@@ -21,6 +21,7 @@ import { checkRequirements } from './requirements';
 import { findExecutable } from './findTool';
 import { needsTranslation, recapPromptsFor, translateRecap, type RecapTranslator } from './recapPrompt';
 import { claudeCliTranslator } from './translate';
+import { chatAutoApproveFrom } from './chatAutoApprove';
 import { createHash } from 'crypto';
 import * as fs from 'fs';
 import { execFile, spawn } from 'child_process';
@@ -298,9 +299,9 @@ export function activate(ctx: vscode.ExtensionContext): void {
         e.affectsConfiguration('noIdle.ffmpegPath')
       ) {
         void syncHooks().catch((err) => log(`lỗi đồng bộ hook: ${(err as Error).message}`));
-      } else if (e.affectsConfiguration('noIdle')) {
+      } else if (e.affectsConfiguration('noIdle') || e.affectsConfiguration('chat.tools')) {
         if (e.affectsConfiguration('noIdle.ttsProvider')) refreshUsage();
-        // Approve bằng giọng, hands-free: hook đọc từ file cấu hình nên chỉ cần ghi lại file.
+        // Approve bằng giọng, hands-free, auto-approve của Chat: hook đọc từ file cấu hình nên chỉ cần ghi lại file.
         void writeHookConfig().catch((err) => log(`lỗi ghi hook-config: ${(err as Error).message}`));
       }
     }),
@@ -383,6 +384,12 @@ export function activate(ctx: vscode.ExtensionContext): void {
       voiceStyle: cfg.voiceStyle,
       language: cfg.language,
       recapPrompt: recapPromptsFor(cfg.recapPrompt, cachedTranslation(cfg.recapPrompt)),
+      // Setting auto-approve của Copilot Chat (đã gộp mặc định + user + workspace): Hands Free tắt thì hook chỉ đọc
+      // "cần approve" cho lệnh terminal VS Code không tự duyệt, kèm 'ask' để hộp thoại chắc chắn hiện.
+      chatAutoApprove: chatAutoApproveFrom(
+        (key) => vscode.workspace.getConfiguration().get(key),
+        (key) => vscode.workspace.getConfiguration().inspect(key)?.defaultValue,
+      ),
       tts: {
         provider: cfg.ttsProvider,
         elevenLabsApiKey: cfg.elevenLabsApiKey,
