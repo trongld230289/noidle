@@ -29,3 +29,12 @@ export function configProperties(contributes: { configuration?: ConfigBlock | Co
   const blocks = Array.isArray(c) ? c : [c];
   return Object.assign({}, ...blocks.map((b) => b.properties ?? {}));
 }
+
+/**
+ * 1.0.19: bỏ noIdle.voiceMute; Voice Response tắt giờ là im lặng (vẫn nháy, có hiệu lực ngay). Người đang mute thì
+ * chuyển thành voiceResponse tắt; giá trị voiceMute nào cũng được xoá.
+ */
+export function planMuteMigration(mute: boolean | undefined): { voiceResponse?: false; clearMute: boolean } {
+  if (mute === undefined) return { clearMute: false };
+  return mute ? { voiceResponse: false, clearMute: true } : { clearMute: true };
+}

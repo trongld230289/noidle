@@ -22,6 +22,8 @@ let server: ReturnType<typeof startServer>;
 
 function run(args: string[], stdin: string): Promise<number | null> {
   return new Promise((resolve, reject) => {
+    // Không bao giờ phát ra loa thật trong test: speak/notify thiếu --player thì dùng player giả (2026-09-29 test đỏ từng đọc to).
+    if (['speak', 'notify'].includes(args[0]) && !args.includes('--player')) args = [...args, '--player', path.join(work, 'no-such-player.exe')];
     const child = spawn(process.execPath, [bundle, ...args], {
       env: { ...process.env, TEMP: tmp, TMP: tmp, TMPDIR: tmp },
       stdio: ['pipe', 'ignore', 'ignore'],

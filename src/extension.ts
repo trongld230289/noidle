@@ -11,12 +11,12 @@ import { refine, DEFAULT_REFINE_MODEL, resetRefinePause } from './refiner';
 import { pronounce } from './pronounce';
 import { langOf, isAuto, effectiveVoice, usesVietPronunciation, DEFAULT_VOICE, type Lang } from './lang';
 import { ELEVEN_DEFAULT_VOICE, ELEVEN_DEFAULT_MODEL, readUsage, usageFilePath } from './elevenlabs';
-import { applyHooks, copilotHooksFile, copilotHookPaths, ClaudeSettings, HookOptions } from './claudeHooks';
+import { applyHooks, copilotHooksFile, copilotHookPaths, hooksEnabled, ClaudeSettings, HookOptions } from './claudeHooks';
 import { inject, InjectorApi, Target } from './injector';
 import { startServer, writeRegistry, removeRegistry, pipeName, Signal, acquireMic, releaseMic, micHolder, signalPid, canAutoListen, type AttentionReason } from './signal';
 import { audioLevel, pcmToWav } from './wav';
 import { terminalForAgent } from './proctree';
-import { planMigration, configProperties } from './migrate';
+import { planMigration, planMuteMigration, configProperties } from './migrate';
 import { checkRequirements } from './requirements';
 import { findExecutable } from './findTool';
 import { needsTranslation, recapPromptsFor, translateRecap, type RecapTranslator } from './recapPrompt';
@@ -77,7 +77,6 @@ function config() {
   return {
     apiKey: (c.get<string>('groqApiKey', '') || '').trim(),
     voiceResponse: c.get<boolean>('voiceResponse', true),
-    voiceMute: c.get<boolean>('voiceMute', false),
     voice: c.get<string>('voice', DEFAULT_VOICE) || DEFAULT_VOICE,
     voiceRate: c.get<string>('voiceRate', '+0%') || '+0%',
     ttsProvider: (c.get<string>('ttsProvider', 'edge') === 'elevenlabs' ? 'elevenlabs' : 'edge') as 'edge' | 'elevenlabs',
@@ -150,6 +149,14 @@ async function migrateFromViVoice(ctx: vscode.ExtensionContext, log: (m: string)
     }
     await newCfg.update('voiceApprove', undefined, vscode.ConfigurationTarget.Global);
     log(`migrate: noIdle.voiceApprove=${oldApprove} gộp vào handsFree`);
+  }
+  // 1.0.19: bỏ voiceMute; tắt Voice Response giờ là im lặng mà vẫn nháy, có hiệu lực ngay.
+  const oldMute = newCfg.inspect<boolean>('voiceMute')?.globalValue;
+  const mute = planMuteMigration(oldMute);
+  if (mute.voiceResponse === false) await newCfg.update('voiceResponse', false, vscode.ConfigurationTarget.Global);
+  if (mute.clearMute) {
+    await newCfg.update('voiceMute', undefined, vscode.ConfigurationTarget.Global);
+    log(`migrate: noIdle.voiceMute=${oldMute}${mute.voiceResponse === false ? ' → voiceResponse tắt' : ''}, xoá voiceMute`);
   }
   const oldSecret = await ctx.secrets.get('viVoice.groqApiKey');
   if (oldSecret) {
@@ -280,10 +287,13 @@ export function activate(ctx: vscode.ExtensionContext): void {
         recorder = new Recorder(recorderOptions());
       }
       if (
+        // Cài hay gỡ hook chỉ đổi khi bật/tắt hết đọc, nháy và đổi màu; syncHooks ghi lại hook-config trước nên
+        // bật tắt từng tính năng vẫn có hiệu lực ngay ở lượt sau.
         e.affectsConfiguration('noIdle.voiceResponse') ||
+        e.affectsConfiguration('noIdle.attentionFlash') ||
+        e.affectsConfiguration('noIdle.attentionColor') ||
         e.affectsConfiguration('noIdle.voice') ||
         e.affectsConfiguration('noIdle.voiceRate') ||
-        e.affectsConfiguration('noIdle.voiceNotify') ||
         e.affectsConfiguration('noIdle.ffmpegPath')
       ) {
         void syncHooks().catch((err) => log(`lỗi đồng bộ hook: ${(err as Error).message}`));
@@ -361,7 +371,9 @@ export function activate(ctx: vscode.ExtensionContext): void {
   async function writeHookConfig(): Promise<void> {
     const cfg = config();
     const data = {
-      voiceMute: cfg.voiceMute,
+      voiceResponse: cfg.voiceResponse,
+      voiceNotify: cfg.voiceNotify,
+      attentionFlash: cfg.attentionFlash,
       voice: cfg.voice,
       approveTimeoutSec: cfg.approveTimeoutSec,
       handsFree: cfg.handsFree,
@@ -444,12 +456,13 @@ export function activate(ctx: vscode.ExtensionContext): void {
   function hookOptions(): HookOptions {
     const cfg = config();
     return {
-      enabled: cfg.voiceResponse,
+      enabled: hooksEnabled(cfg),
       script: hookScript,
       // Hook tự đổi giọng vi-VN sang giọng đa ngôn ngữ khi đọc tiếng Anh (theo ngôn ngữ của từng phiên).
       voice: cfg.voice,
       rate: cfg.voiceRate,
-      notify: cfg.voiceNotify,
+      // Hook approve/chọn đáp án luôn cài: nó còn nháy cửa sổ khi agent chờ bạn; đọc hay không do hook-config quyết.
+      notify: true,
       player: tools.ffplay,
       config: hookConfigPath,
     };
@@ -504,7 +517,8 @@ export function activate(ctx: vscode.ExtensionContext): void {
   async function hooksAllowed(opts: HookOptions): Promise<boolean> {
     if (!opts.enabled) return true;
     const have = await checkRequirements(opts.player);
-    const missing = !have.node ? 'node' : !have.player ? 'ffplay' : '';
+    // Thiếu ffplay chỉ đáng báo khi người dùng muốn nghe đọc.
+    const missing = !have.node ? 'node' : !have.player && config().voiceResponse ? 'ffplay' : '';
     if (!missing) return true;
     if (warnedMissing !== missing) {
       warnedMissing = missing;
@@ -583,7 +597,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     log(`hook Claude Code: ${opts.enabled ? 'đã bật' : 'đã tắt'} (${claudeSettingsPath})`);
     if (opts.enabled) {
       void vscode.window.showInformationMessage(
-        'NoIdle: đã bật giọng nói cho Claude Code, Copilot Chat và Copilot CLI. Khởi động lại phiên Claude Code/Copilot CLI để nhận hook.',
+        'NoIdle: đã cài hook cho Claude Code, Copilot Chat và Copilot CLI. Khởi động lại phiên Claude Code/Copilot CLI để nhận hook.',
       );
     }
   }
@@ -595,14 +609,14 @@ export function activate(ctx: vscode.ExtensionContext): void {
     .then(() => ensureRecapTranslation());
 
   /** Bật tắt nhanh một cờ boolean của noIdle ở Settings người dùng, rồi báo trạng thái mới. */
-  async function flip(key: 'voiceMute' | 'handsFree', on: string, off: string): Promise<void> {
+  async function flip(key: 'voiceResponse' | 'handsFree', fallback: boolean, on: string, off: string): Promise<void> {
     const c = vscode.workspace.getConfiguration('noIdle');
-    const next = !c.get<boolean>(key, false);
+    const next = !c.get<boolean>(key, fallback);
     await c.update(key, next, vscode.ConfigurationTarget.Global);
     void vscode.window.showInformationMessage(`NoIdle: ${next ? on : off}`);
   }
-  const toggleMute = () => flip('voiceMute', 'đã tắt tiếng Claude Code (hook im lặng, không cần restart).', 'đã bật lại tiếng Claude Code.');
-  const toggleHandsFree = () => flip('handsFree', 'đã bật hands-free, Claude đọc xong sẽ mở mic.', 'đã tắt hands-free, đọc xong thì thôi.');
+  const toggleMute = () => flip('voiceResponse', true, 'đã bật lại giọng đọc.', 'đã tắt giọng đọc (cửa sổ vẫn nháy, không cần restart).');
+  const toggleHandsFree = () => flip('handsFree', false, 'đã bật hands-free, Claude đọc xong sẽ mở mic.', 'đã tắt hands-free, đọc xong thì thôi.');
 
   async function testVoice(): Promise<void> {
     const cfg = config();

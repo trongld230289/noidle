@@ -44,7 +44,7 @@
       },
       {
         "command": "noIdle.toggleMute",
-        "title": "NoIdle: Tắt/bật tiếng Claude Code"
+        "title": "NoIdle: Tắt/bật giọng đọc"
       },
       {
         "command": "noIdle.toggleHandsFree",
@@ -71,16 +71,9 @@
           "noIdle.voiceResponse": {
             "type": "boolean",
             "default": true,
-            "markdownDescription": "Công tắc chính (mặc định bật): Claude Code, Copilot Chat và GitHub Copilot CLI xong thì cửa sổ nháy, title bar đổi màu và đọc câu trả lời thành tiếng. **Tắt** thì gỡ hẳn hook, không nháy, không đọc. Khởi động lại phiên Claude Code/Copilot CLI để nhận thay đổi hook. Chỉ muốn im tạm thời thì dùng `noIdle.voiceMute`.\n\nCần `node` (thiếu thì không cài hook) và `ffplay` đi kèm ffmpeg (thiếu thì chỉ nháy, không có tiếng) trong PATH.",
+            "markdownDescription": "**Bật** thì đọc thành tiếng khi Claude Code, Copilot Chat và GitHub Copilot CLI trả lời xong, và đọc câu báo khi agent chờ bạn. **Tắt** là im hẳn: không đọc, không báo bằng giọng, không chèn hướng dẫn recap, không tự mở mic. Có hiệu lực ngay ở lượt sau, không cần restart. Lệnh nhanh: `NoIdle: Tắt/bật giọng đọc`.\n\nNháy taskbar và đổi màu cửa sổ chạy độc lập, chỉnh ở nhóm 3.\n\nCần `node` (thiếu thì không cài hook) và `ffplay` đi kèm ffmpeg (thiếu thì không có tiếng) trong PATH.",
             "scope": "application",
             "order": 0
-          },
-          "noIdle.voiceMute": {
-            "type": "boolean",
-            "default": false,
-            "markdownDescription": "**Bật = im lặng tạm thời**, không cần restart: không đọc, không báo, không mở mic. Tắt lại là nói tiếp ngay lượt sau. Lệnh nhanh: `NoIdle: Tắt/bật tiếng Claude Code`.\n\nTaskbar nháy và title bar đổi màu vẫn chạy khi đang im.",
-            "scope": "application",
-            "order": 1
           },
           "noIdle.voiceStyle": {
             "type": "string",
@@ -95,7 +88,7 @@
             ],
             "markdownDescription": "Đọc gì khi Claude trả lời xong.\n\n- `recap`: Claude viết thêm một đoạn tóm tắt 🔊 và đọc đoạn đó. Nghe được nội dung, tốn thêm chút token.\n- `announce`: chỉ đọc \"Workspace X is done\" hoặc \"Workspace X is asking you\". Không tốn token, không nghe nội dung.\n\nCâu báo approve và chọn đáp án giống nhau ở cả hai kiểu.",
             "scope": "application",
-            "order": 2
+            "order": 1
           },
           "noIdle.recapPrompt": {
             "type": "string",
@@ -103,14 +96,14 @@
             "editPresentation": "multilineText",
             "markdownDescription": "Dặn agent viết gì trong phần recap (kiểu `recap`). Sửa thẳng, ví dụ rút còn hai câu nếu nghe mệt. Phần kỹ thuật (bắt đầu bằng 🔊, đọc từ đó đến hết, viết bằng tiếng gì) extension tự nối thêm, không cần ghi.\n\nViết một thứ tiếng thôi: lần đầu extension dịch sang thứ tiếng còn lại bằng Copilot Chat hoặc Claude Code bạn đang có (không cần key) và nhớ bản dịch. Để trống là dùng bản mặc định.",
             "scope": "application",
-            "order": 3
+            "order": 2
           },
           "noIdle.voiceNotify": {
             "type": "boolean",
             "default": true,
-            "markdownDescription": "**Bật** thì đăng ký hook thông báo và tương tác cho Claude Code, Copilot CLI và Copilot Chat (Local): \"Workspace X cần approve\", \"Workspace X cần bạn xác nhận câu trả lời\". Mở mic là việc của `noIdle.handsFree`. Tắt setting này cũng gỡ hook approve/chọn đáp án; cần khởi động lại CLI hoặc mở phiên Chat mới để nhận thay đổi.",
+            "markdownDescription": "**Bật** thì đọc câu báo khi agent chờ bạn: \"Workspace X cần approve\", \"Workspace X cần bạn xác nhận câu trả lời\". Tắt thì không đọc câu báo, cửa sổ vẫn nháy. Không có tác dụng khi Voice Response tắt. Mở mic là việc của `noIdle.handsFree`.",
             "scope": "application",
-            "order": 4
+            "order": 3
           },
           "noIdle.voiceSayWorkspace": {
             "type": "string",
@@ -127,7 +120,7 @@
             ],
             "scope": "application",
             "markdownDescription": "Có đọc \"Workspace X:\" ở đầu câu trả lời (kiểu `recap`) để biết cửa sổ nào vừa xong không. `auto`: chỉ khi đang mở hơn một cửa sổ VS Code.",
-            "order": 5
+            "order": 4
           }
         }
       },
@@ -179,14 +172,14 @@
           "noIdle.attentionFlash": {
             "type": "boolean",
             "default": true,
-            "markdownDescription": "**Bật** thì cửa sổ này nháy khi cần bạn (Claude xong, cần approve, cần trả lời) mà bạn đang ở cửa sổ khác. Windows: nút VS Code trên taskbar nháy cam. macOS: title bar nháy vài lần. Bấm vào cửa sổ là hết nháy.\n\nMẹo Windows: Settings, Taskbar, \"Combine taskbar buttons\" chọn Never để mỗi workspace có nút riêng.",
+            "markdownDescription": "**Bật** thì cửa sổ này nháy khi cần bạn (Claude xong, cần approve, cần trả lời) mà bạn đang ở cửa sổ khác. Windows: nút VS Code trên taskbar nháy cam. macOS: title bar nháy vài lần. Bấm vào cửa sổ là hết nháy.\n\nMẹo Windows: Settings, Taskbar, \"Combine taskbar buttons\" chọn Never để mỗi workspace có nút riêng.\n\nChạy cả khi tắt Voice Response.",
             "scope": "application",
             "order": 0
           },
           "noIdle.attentionColor": {
             "type": "boolean",
             "default": true,
-            "markdownDescription": "**Bật** thì title bar của cửa sổ đang cần bạn đổi màu (`noIdle.attentionTintColor`) và nút NoIdle ở status bar hiện \"Claude xong\" / \"cần approve\". Quay lại cửa sổ là trả màu cũ.\n\nMàu được ghi tạm vào settings của workspace rồi gỡ, nên nếu `.vscode/settings.json` nằm trong git thì bạn sẽ thấy file đó đổi trong lúc đang tô.",
+            "markdownDescription": "**Bật** thì title bar của cửa sổ đang cần bạn đổi màu (`noIdle.attentionTintColor`) và nút NoIdle ở status bar hiện \"Claude xong\" / \"cần approve\". Quay lại cửa sổ là trả màu cũ.\n\nMàu được ghi tạm vào settings của workspace rồi gỡ, nên nếu `.vscode/settings.json` nằm trong git thì bạn sẽ thấy file đó đổi trong lúc đang tô.\n\nChạy cả khi tắt Voice Response.",
             "scope": "application",
             "order": 1
           },
@@ -520,6 +513,11 @@
             "type": "string",
             "scope": "machine",
             "deprecationMessage": "Đã đổi thành noIdle.micDevice. Giá trị cũ được tự chuyển sang lúc extension khởi động."
+          },
+          "noIdle.voiceMute": {
+            "type": "boolean",
+            "scope": "application",
+            "deprecationMessage": "Đã bỏ: tắt noIdle.voiceResponse là im lặng (cửa sổ vẫn nháy), có hiệu lực ngay. Giá trị cũ được tự chuyển sang lúc extension khởi động."
           }
         }
       }

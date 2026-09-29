@@ -21,7 +21,7 @@ import {
 const w = (pid: number, ...folders: string[]): WindowEntry => ({ pid, pipe: `p${pid}`, folders });
 
 describe('canAutoListen', () => {
-  const enabled = { voiceResponse: true, voiceMute: false, handsFree: true };
+  const enabled = { voiceResponse: true, handsFree: true };
 
   it('checks the current setting for each microphone purpose', () => {
     expect(canAutoListen({ event: 'ask', reason: 'approve' }, enabled)).toBe(true);
@@ -34,7 +34,6 @@ describe('canAutoListen', () => {
 
   it.each([
     { voiceResponse: false },
-    { voiceMute: true },
   ])('blocks every automatic microphone request when disabled: %j', (settings) => {
     for (const signal of [
       { event: 'ask', reason: 'approve' },

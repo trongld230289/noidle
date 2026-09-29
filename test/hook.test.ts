@@ -17,6 +17,8 @@ const logFile = path.join(work, 'tmp', 'noidle-tts', 'hook.log');
 
 function run(args: string[], stdin: string, extraEnv: NodeJS.ProcessEnv = {}): Promise<{ code: number | null; stdout: string }> {
   return new Promise((resolve, reject) => {
+    // Không bao giờ phát ra loa thật trong test: speak/notify thiếu --player thì dùng player giả (2026-09-29 test đỏ từng đọc to).
+    if (['speak', 'notify'].includes(args[0]) && !args.includes('--player')) args = [...args, '--player', path.join(work, 'no-such-player.exe')];
     const tmp = path.join(work, 'tmp');
     fs.mkdirSync(tmp, { recursive: true });
     const child = spawn(process.execPath, [bundle, ...args], {
@@ -46,11 +48,11 @@ beforeAll(async () => {
   });
   // Lần chạy đầu của bundle mới trên Windows chậm vài giây (Defender quét file): làm nóng ở đây để test đầu không timeout.
   await run(['skip'], '');
-  fs.writeFileSync(cfgMuted, JSON.stringify({ voiceMute: true, handsFree: true }));
-  fs.writeFileSync(cfgNormal, JSON.stringify({ voiceMute: false, handsFree: false }));
+  fs.writeFileSync(cfgMuted, JSON.stringify({ voiceResponse: false, handsFree: true }));
+  fs.writeFileSync(cfgNormal, JSON.stringify({ voiceResponse: true, handsFree: false }));
 }, 30_000);
 
-describe('claude-hook voiceMute', () => {
+describe('claude-hook voiceResponse off (im lặng, vẫn nháy)', () => {
   it('prompt: không mute thì chèn hướng dẫn 🔊 cho Claude', async () => {
     const r = await run(['prompt', '--config', cfgNormal], JSON.stringify({ session_id: 's1', cwd: work }));
     expect(r.code).toBe(0);
@@ -74,7 +76,7 @@ describe('claude-hook voiceMute', () => {
     const r = await run(['speak', '--config', cfgMuted], JSON.stringify({ session_id: 's2', cwd: work, transcript_path: transcript }));
     expect(r.code).toBe(0);
     const added = readLog().slice(before);
-    expect(added).toContain('mute');
+    expect(added).toContain('voiceResponse tắt');
     expect(added).not.toContain('play pid');
     expect(added).not.toContain('listen');
   });
@@ -87,8 +89,37 @@ describe('claude-hook voiceMute', () => {
     );
     expect(r.code).toBe(0);
     const added = readLog().slice(before);
-    expect(added).toContain('mute');
+    expect(added).toContain('voiceResponse tắt');
     expect(added).not.toContain('play pid');
+  });
+
+  it('notify: voiceNotify tắt thì không đọc câu báo, nhưng vẫn báo cửa sổ', async () => {
+    const cfg = path.join(work, 'notify-off.json');
+    fs.writeFileSync(cfg, JSON.stringify({ voiceResponse: true, voiceNotify: false }));
+    const before = readLog().length;
+    const r = await run(
+      ['notify', '--config', cfg],
+      JSON.stringify({ session_id: 's3b', cwd: work, hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'ls' } }),
+    );
+    expect(r.code).toBe(0);
+    const added = readLog().slice(before);
+    expect(added).toContain('voiceNotify tắt');
+    expect(added).toContain('signal attention');
+    expect(added).not.toContain('play pid');
+  });
+
+  it('attentionFlash tắt thì không nháy cửa sổ chứa agent, chỉ báo extension (đổi màu)', async () => {
+    const cfg = path.join(work, 'flash-off.json');
+    fs.writeFileSync(cfg, JSON.stringify({ voiceResponse: false, attentionFlash: false }));
+    const before = readLog().length;
+    const r = await run(
+      ['notify', '--config', cfg],
+      JSON.stringify({ session_id: 's3c', cwd: work, hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'ls' } }),
+    );
+    expect(r.code).toBe(0);
+    const added = readLog().slice(before);
+    expect(added).toContain('attentionFlash tắt');
+    expect(added).toContain('signal attention');
   });
 });
 

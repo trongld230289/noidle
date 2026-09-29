@@ -125,3 +125,11 @@ export function applyHooks(settings: ClaudeSettings, o: HookOptions): ClaudeSett
   if (Object.keys(hooks).length === 0) delete out.hooks;
   return out;
 }
+
+/**
+ * Hook được cài khi còn tính năng nào cần nó: đọc (voiceResponse), nháy taskbar (attentionFlash) hoặc đổi màu
+ * (attentionColor). Từng tính năng bật/tắt lúc chạy qua hook-config, nên chỉ lúc tắt hết mới gỡ hook.
+ */
+export function hooksEnabled(s: { voiceResponse: boolean; attentionFlash: boolean; attentionColor: boolean }): boolean {
+  return s.voiceResponse || s.attentionFlash || s.attentionColor;
+}

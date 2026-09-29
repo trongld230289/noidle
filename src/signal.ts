@@ -40,9 +40,9 @@ export type SignalHandler = (s: Signal) => void | string | Promise<void | string
 
 export function canAutoListen(
   signal: Pick<Signal, 'event' | 'reason'>,
-  settings: { voiceResponse: boolean; voiceMute: boolean; handsFree: boolean },
+  settings: { voiceResponse: boolean; handsFree: boolean },
 ): boolean {
-  if (!settings.voiceResponse || settings.voiceMute) return false;
+  if (!settings.voiceResponse) return false;
   if (signal.event === 'listen') return settings.handsFree;
   if (signal.event !== 'ask') return false;
   if (signal.reason === 'approve' || signal.reason === 'answer') return settings.handsFree;

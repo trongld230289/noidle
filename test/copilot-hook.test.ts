@@ -133,7 +133,7 @@ describe('Copilot CLI instructions', () => {
   });
 
   it('does not inject instructions while muted, but still reports a submitted prompt', async () => {
-    configure({ voiceMute: true });
+    configure({ voiceResponse: false });
     expect((await run('start', cli('cli-muted'))).stdout).toBe('');
     expect((await run('prompt', cli('cli-muted', { prompt: 'Continue' }))).stdout).toBe('');
     expect(signals.some((s) => s.event === 'submitted' && s.session === 'cli-muted')).toBe(true);
@@ -207,8 +207,8 @@ describe('Copilot CLI speech and terminal routing', () => {
 });
 
 describe('Copilot CLI voice permissions', () => {
-  it.each([false, true])('does not announce a permission check without hands-free (muted: %s)', async (voiceMute) => {
-    configure({ handsFree: false, voiceMute });
+  it.each([false, true])('does not announce a permission check without hands-free (muted: %s)', async (muted) => {
+    configure({ handsFree: false, voiceResponse: !muted });
     const before = log().length;
     const result = await run('notify', cli('cli-permission-check', {
       toolName: 'powershell', toolInput: { command: 'git status' },
@@ -286,7 +286,7 @@ describe('Copilot CLI voice permissions', () => {
   });
 
   it('draws muted CLI approval attention only for an actual prompt', async () => {
-    configure({ voiceMute: true });
+    configure({ voiceResponse: false });
     heard = 'yes';
     const result = await run('notify', cli('cli-permission-muted', { toolName: 'powershell', toolInput: { command: 'git status' } }), ['--event', 'PermissionRequest']);
     expect(result.stdout).toBe('');
@@ -410,9 +410,9 @@ describe('Copilot Chat voice controls', () => {
 
   it.each([
     [{ handsFree: false }, 'run_in_terminal', { command: 'git status' }],
-    [{ voiceMute: true }, 'run_in_terminal', { command: 'git status' }],
+    [{ voiceResponse: false }, 'run_in_terminal', { command: 'git status' }],
     [{ handsFree: false }, 'vscode_askQuestions', { questions: [question] }],
-    [{ voiceMute: true }, 'vscode_askQuestions', { questions: [question] }],
+    [{ voiceResponse: false }, 'vscode_askQuestions', { questions: [question] }],
   ])('respects disabled voice controls: %j', async (settings, tool, args) => {
     configure(settings);
     heard = 'yes';
@@ -534,7 +534,7 @@ describe('Copilot CLI voice questions', () => {
   });
 
   it('draws attention once for a muted question without speaking or opening the microphone', async () => {
-    configure({ voiceMute: true });
+    configure({ voiceResponse: false });
     const before = log().length;
     await run('notify', cli('cli-muted-question', {
       toolName: 'ask_user', toolArgs: question,

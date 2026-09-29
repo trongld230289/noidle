@@ -2,12 +2,12 @@
  * Hook cho Claude Code, Copilot Chat và Copilot CLI, đóng gói thành dist/claude-hook.js.
  * Copilot gửi stdin cùng các trường (session_id, transcript_path, stop_hook_active, cwd = thư mục workspace),
  * chỉ khác định dạng transcript (speech.ts hiểu cả hai). Các chế độ:
- *   prompt [--config]         UserPromptSubmit: in hướng dẫn để Claude kết thúc bằng dòng 🔊 (trừ khi config voiceMute).
+ *   prompt [--config]         UserPromptSubmit: in hướng dẫn để Claude kết thúc bằng dòng 🔊 (trừ khi config voiceResponse false).
  *   prompt                    ...rồi báo extension (tín hiệu submitted) là người dùng đã gửi, để tắt mic hands-free.
  *   speak [--voice] [--rate] [--player]
  *                             Stop: đọc transcript, chọn câu cần đọc, rồi tách tiến trình `play` và thoát ngay.
  *                             Hands-free: play xong thì báo extension mở mic (tín hiệu listen), hook không tự nghe.
- *                             Config voiceMute thì speak và notify thoát ngay, không đọc gì; đổi cờ có hiệu lực ngay.
+ *                             Config voiceResponse false thì speak và notify chỉ báo cửa sổ, không đọc; đổi cờ có hiệu lực ngay.
  *   play <textfile> --kind speak|notify --session <id> [--listen <cwd> --claude-pid <pid>]
  *                             Tổng hợp giọng bằng Edge TTS (hoặc ElevenLabs theo file --config), phát bằng ffplay. Xếp hàng theo thứ tự đến;
  *                             câu trả lời mới của cùng một phiên thì cắt câu trả lời cũ của phiên đó.
@@ -52,8 +52,15 @@ async function readHookInput(event: string): Promise<AgentHookInput> {
 /** Cấu hình extension ghi ra file cho hook (đường dẫn qua --config). */
 interface HookConfig {
   voice?: string;
-  /** Tạm tắt tiếng: hook vẫn đăng ký nhưng không đọc, không báo, không chèn hướng dẫn 🔊. Đổi là có hiệu lực ngay. */
-  voiceMute?: boolean;
+  /**
+   * Setting noIdle.voiceResponse. false: không đọc, không nói câu báo, không chèn hướng dẫn 🔊, không mở mic; vẫn nháy
+   * và đổi màu cửa sổ. Hook luôn được cài khi còn tính năng nào bật, nên đổi cờ này có hiệu lực ngay ở lượt sau.
+   */
+  voiceResponse?: boolean;
+  /** false: không đọc câu báo "cần approve" / "cần bạn trả lời" (vẫn nháy). Chỉ có nghĩa khi voiceResponse bật. */
+  voiceNotify?: boolean;
+  /** false: hook không tự nháy cửa sổ chứa agent (terminal rời); extension vẫn nhận tín hiệu để đổi màu. */
+  attentionFlash?: boolean;
   approveTimeoutSec?: number;
   /** Rảnh tay: duyệt lệnh an toàn và chọn đáp án bằng giọng, và extension tự mở mic sau khi đọc xong câu trả lời. */
   handsFree?: boolean;
@@ -131,6 +138,10 @@ function loadConfig(): HookConfig {
     log(`không đọc được config ${p}: ${(err as Error).message}`);
     return {};
   }
+}
+/** Tắt đọc: thiếu cờ (config cũ) coi như bật. */
+function voiceOff(cfg: HookConfig): boolean {
+  return cfg.voiceResponse === false;
 }
 const WORK_DIR = path.join(os.tmpdir(), 'noidle-tts');
 const QUEUE_DIR = path.join(WORK_DIR, 'queue');
@@ -377,7 +388,7 @@ async function modeStart(): Promise<void> {
   const input = await readHookInput('SessionStart');
   if (sourceArg() !== 'copilot-cli' || input.agent_id) return;
   const cfg = loadConfig();
-  if (cfg.voiceMute || cfg.voiceStyle === 'announce') return;
+  if (voiceOff(cfg) || cfg.voiceStyle === 'announce') return;
   const lang = isAuto(cfg.language)
     ? detectLang(input.initial_prompt ?? '') ?? sessionLang(cfg, input.session_id)
     : langOf(cfg.language);
@@ -409,9 +420,9 @@ async function modePrompt(): Promise<void> {
     await signalWindow({ event: 'resumed', session: input.session_id ?? '', cwd: input.cwd || process.cwd(), source: sourceArg() }, undefined, log);
     return;
   }
-  // Mute thì không dặn Claude viết phần 🔊, nhưng vẫn báo submitted để tắt mic nếu đang mở.
+  // Tắt đọc thì không dặn Claude viết phần 🔊, nhưng vẫn báo submitted để tắt mic nếu đang mở.
   const cfg = loadConfig();
-  if (cfg.voiceMute) log('prompt: đang mute, không chèn hướng dẫn');
+  if (voiceOff(cfg)) log('prompt: voiceResponse tắt, không chèn hướng dẫn');
   else {
     // announce thường trả rỗng (vẫn cập nhật dấu phiên để speak/notify chọn đúng ngôn ngữ), chỉ có chữ khi vừa đổi kiểu.
     const additionalContext = promptContextFor(input.session_id, cfg, promptText, lastAnswerHadSpeak(input.transcript_path));
@@ -452,9 +463,9 @@ async function modeSpeak(): Promise<void> {
   const pending = [...pendingBackgroundTasks(transcript), ...(queued ? [`${queued} prompt đang xếp hàng`] : [])];
   const waiting = pending.length > 0;
   // Làm nổi cửa sổ (nháy taskbar, đổi màu status bar) kể cả khi mute: không có tiếng, chỉ để tìm đúng cửa sổ.
-  const attentionSent = waiting ? Promise.resolve(false) : attention('done', input.session_id ?? '', input.cwd || process.cwd());
-  if (cfg.voiceMute) {
-    log('speak: đang mute, bỏ qua');
+  const attentionSent = waiting ? Promise.resolve(false) : attention('done', input.session_id ?? '', input.cwd || process.cwd(), cfg);
+  if (voiceOff(cfg)) {
+    log('speak: voiceResponse tắt, chỉ báo cửa sổ');
     await attentionSent;
     return;
   }
@@ -560,8 +571,9 @@ function voiceFor(lang: Lang): string {
  * có cwd này nháy taskbar và tô màu. Không có cửa sổ hay lỗi thì thôi, không chặn việc đọc.
  * VI_VOICE_HOST_FLASH=0 tắt bước tự nháy (test chạy hook dưới terminal thật, không được nháy nó).
  */
-async function attention(reason: AttentionReason, session: string, cwd: string): Promise<boolean> {
-  if (process.env.VI_VOICE_HOST_FLASH !== '0' && process.platform === 'win32') {
+async function attention(reason: AttentionReason, session: string, cwd: string, cfg: HookConfig = {}): Promise<boolean> {
+  if (cfg.attentionFlash === false) log(`attention ${reason}: attentionFlash tắt, không nháy cửa sổ chứa agent`);
+  else if (process.env.VI_VOICE_HOST_FLASH !== '0' && process.platform === 'win32') {
     const t0 = Date.now();
     const host = await flashHostWindow(await claudeAncestors(process.ppid, session));
     log(`attention ${reason}: nháy cửa sổ chứa agent → ${host.result}${host.window ? ` (${host.window})` : ''} (${Date.now() - t0}ms)`);
@@ -585,13 +597,13 @@ async function modeNotify(): Promise<void> {
   const canVoiceApprove = !elevated && voiceApprovable(input.tool_name, input.tool_input);
   if (sourceArg() === 'copilot-cli') {
     // CLI permission hooks run before policy checks, not when a dialog opens.
-    if (input.hook_event_name === 'PermissionRequest' && (!cfg.handsFree || cfg.voiceMute || !canVoiceApprove)) {
+    if (input.hook_event_name === 'PermissionRequest' && (!cfg.handsFree || voiceOff(cfg) || !canVoiceApprove)) {
       log('notify: CLI permission preflight, leaving permission handling to CLI without an alert');
       return;
     }
     // Manual questions emit elicitation_dialog when they actually need an answer.
     if (input.hook_event_name === 'PreToolUse' && input.tool_name === 'AskUserQuestion' &&
-        (!cfg.handsFree || cfg.voiceMute || input.question_fallback_reason)) {
+        (!cfg.handsFree || voiceOff(cfg) || input.question_fallback_reason)) {
       log('notify: CLI manual question, waiting for elicitation_dialog');
       return;
     }
@@ -605,9 +617,13 @@ async function modeNotify(): Promise<void> {
     : announcement(input, lang);
   log(`notify ${input.hook_event_name ?? '?'} ${input.notification_type ?? input.tool_name ?? ''}: ${JSON.stringify(text)}`);
   if (!text) return;
-  await attention(/approve|approval/i.test(text) ? 'approve' : 'answer', input.session_id ?? '', input.cwd || process.cwd());
-  if (cfg.voiceMute) {
-    log('notify: đang mute, bỏ qua');
+  await attention(/approve|approval/i.test(text) ? 'approve' : 'answer', input.session_id ?? '', input.cwd || process.cwd(), cfg);
+  if (voiceOff(cfg)) {
+    log('notify: voiceResponse tắt, chỉ báo cửa sổ');
+    return;
+  }
+  if (cfg.voiceNotify === false) {
+    log('notify: voiceNotify tắt, không đọc câu báo');
     return;
   }
   if (approval && cfg.handsFree) {

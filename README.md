@@ -30,7 +30,7 @@ Ngoài ra: bấm **F6** để nói thành chữ ở bất kỳ đâu trong VS Co
 **Mặc định sau khi cài** (chưa cần key gì): agent xong → cửa sổ nháy, title bar đổi màu → đọc recap câu trả lời. Muốn nói yêu cầu tiếp, chọn đáp án và approve lệnh an toàn bằng giọng thì bật **Hands Free**; cần Groq key.
 
 - Không cần nói thì không cần lấy Groq key.
-- Không cần nghe agent recap thì bật **Voice Mute**, cửa sổ vẫn nháy.
+- Không cần nghe agent đọc thì tắt **Voice Response**, cửa sổ vẫn nháy.
 - Chỉ cần nghe ngắn gọn "Workspace A is done" thì chọn **Voice Style** = `announce`.
 
 ## Cài trong 3 bước
@@ -89,11 +89,10 @@ Khi approve hoặc chọn đáp án, im lặng hoặc nói không rõ thì chuy�
 
 | Setting | Mặc định | Ý nghĩa |
 |---|---|---|
-| Voice Response | bật | Công tắc chính: nháy cửa sổ, đổi màu và đọc câu trả lời của Claude Code, Copilot Chat, Copilot CLI. Tắt là gỡ hook, không nháy, không đọc. |
-| Voice Mute | tắt | Im lặng tạm thời, không cần restart. Lệnh nhanh: `NoIdle: Tắt/bật tiếng Claude Code`. |
+| Voice Response | bật | Đọc câu trả lời và câu báo của Claude Code, Copilot Chat, Copilot CLI. Tắt là im hẳn, có hiệu lực ngay; cửa sổ vẫn nháy. Lệnh nhanh: `NoIdle: Tắt/bật giọng đọc`. |
 | Voice Style | `recap` | `recap`: đọc tóm tắt nội dung (tốn thêm ít token mỗi lượt). `announce`: chỉ đọc "Workspace X is done" (tiếng Anh), không tốn token. |
 | Recap Prompt | bản tiếng Việt sẵn | Dặn agent viết gì trong phần recap; nghe mệt thì sửa ngắn lại. Viết một thứ tiếng, extension tự dịch sang tiếng kia bằng Copilot Chat hoặc Claude Code đang có (không cần key). |
-| Voice Notify | bật | Đọc "Workspace X cần approve" / "cần bạn trả lời". |
+| Voice Notify | bật | Đọc "Workspace X cần approve" / "cần bạn trả lời". Tắt Voice Response thì không đọc dù đang bật. |
 | Voice Say Workspace | `auto` | Đọc tên workspace ở đầu câu. `auto`: chỉ khi mở hơn một cửa sổ. |
 
 **2. Mic tự mở (rảnh tay)**
@@ -149,9 +148,9 @@ Tắt Hands Free thì mic không bao giờ tự mở, chỉ mở khi bạn bấm
 
 **Không dùng Claude hay Copilot thì dùng được không?** Được, F6 vẫn nói thành chữ ở mọi nơi trong VS Code.
 
-**Bật rồi mà không nghe đọc?** Mở lại phiên Claude Code / Copilot CLI (Copilot Chat: mở chat mới). Chạy `NoIdle: Đọc thử giọng` để kiểm tra loa. Kiểm tra Voice Mute đang tắt.
+**Bật rồi mà không nghe đọc?** Mở lại phiên Claude Code / Copilot CLI (Copilot Chat: mở chat mới). Chạy `NoIdle: Đọc thử giọng` để kiểm tra loa. Kiểm tra Voice Response đang bật.
 
-**Muốn im lặng một lúc?** Bật Voice Mute hoặc chạy `NoIdle: Tắt/bật tiếng Claude Code`. Có hiệu lực ngay.
+**Muốn im lặng một lúc?** Tắt Voice Response hoặc chạy `NoIdle: Tắt/bật giọng đọc`. Có hiệu lực ngay, cửa sổ vẫn nháy.
 
 **Mở nhiều cửa sổ thì mic mở ở đâu?** Ở cửa sổ của agent vừa xong. Copilot Chat nhận lời nói trong ô chat. Claude Code và Copilot CLI nhận trong đúng terminal đang chạy agent, nên hãy chạy chúng trong terminal của VS Code. Chạy ở terminal ngoài VS Code thì vẫn nghe đọc, nhưng mic không tự mở để tránh gõ nhầm chỗ.
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hookCommands, applyHooks, copilotHooksFile, copilotHookPaths, HookOptions } from '../src/claudeHooks';
+import { hookCommands, applyHooks, copilotHooksFile, copilotHookPaths, hooksEnabled, HookOptions } from '../src/claudeHooks';
 
 const opts: HookOptions = {
   enabled: true,
@@ -126,5 +126,15 @@ describe('copilotHookPaths', () => {
     expect(copilotHookPaths('\\\\server\\share\\Alice', '\\\\SERVER\\SHARE\\Alice\\.copilot')).toEqual([
       '\\\\server\\share\\Alice\\.copilot\\hooks\\noidle.json',
     ]);
+  });
+});
+
+describe('hooksEnabled', () => {
+  it('hook được cài khi còn bất kỳ tính năng nào cần nó: đọc, nháy taskbar hoặc đổi màu', () => {
+    const off = { voiceResponse: false, attentionFlash: false, attentionColor: false };
+    expect(hooksEnabled(off)).toBe(false);
+    expect(hooksEnabled({ ...off, voiceResponse: true })).toBe(true);
+    expect(hooksEnabled({ ...off, attentionFlash: true })).toBe(true);
+    expect(hooksEnabled({ ...off, attentionColor: true })).toBe(true);
   });
 });
