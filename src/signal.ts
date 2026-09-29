@@ -17,7 +17,11 @@ export interface WindowEntry {
 }
 
 /** resumed: việc nền xong, Claude chạy tiếp; extension bỏ trạng thái "done" (không đụng mic). */
-export type SignalEvent = 'listen' | 'submitted' | 'ask' | 'attention' | 'resumed';
+/**
+ * chatPending: Copilot Chat sắp chạy một lệnh terminal mà setting auto-approve không tự duyệt; extension chờ bằng chứng
+ * tool đã chạy (terminal Copilot mở, lệnh bắt đầu, chatDone) rồi mới đọc "cần approve". chatDone: PostToolUse của Chat.
+ */
+export type SignalEvent = 'listen' | 'submitted' | 'ask' | 'attention' | 'resumed' | 'chatPending' | 'chatDone';
 /** attention: vì sao cửa sổ cần người dùng. */
 export type AttentionReason = 'done' | 'approve' | 'answer';
 export type SignalSource = 'claude' | 'copilot' | 'copilot-cli';
@@ -33,6 +37,14 @@ export interface Signal {
   ancestors?: number[];
   /** attention: Claude xong, cần approve hay cần trả lời; extension nháy taskbar và đổi màu status bar. */
   reason?: AttentionReason;
+  /** chatPending/chatDone: tool_use_id của Chat (`<toolCallId>__vscode-<n>`), để khớp Pre với Post. */
+  toolUseId?: string;
+  /** chatPending/chatDone: câu lệnh terminal, để khớp với sự kiện lệnh bắt đầu chạy khi thiếu id. */
+  command?: string;
+  /** chatPending: câu báo sẽ đọc nếu hết giờ chờ mà tool chưa chạy. */
+  text?: string;
+  /** chatPending: ngôn ngữ của câu báo, để extension chọn giọng. */
+  lang?: 'vi' | 'en';
 }
 
 /** Trả lời của server cho ask; các tín hiệu khác không có trả lời. */
@@ -81,12 +93,18 @@ export function pickWindow(entries: WindowEntry[], cwd: string, caseInsensitive 
 export function parseSignal(line: string): Signal | undefined {
   try {
     const o = JSON.parse(line.trim()) as Partial<Signal>;
-    if ((o.event !== 'listen' && o.event !== 'submitted' && o.event !== 'ask' && o.event !== 'attention') || typeof o.cwd !== 'string') return undefined;
-    const out: Signal = { event: o.event, session: typeof o.session === 'string' ? o.session : '', cwd: o.cwd };
+    const events: SignalEvent[] = ['listen', 'submitted', 'ask', 'attention', 'resumed', 'chatPending', 'chatDone'];
+    const event = o.event as SignalEvent | undefined;
+    if (!event || !events.includes(event) || typeof o.cwd !== 'string') return undefined;
+    const out: Signal = { event, session: typeof o.session === 'string' ? o.session : '', cwd: o.cwd };
     if (typeof o.timeoutSec === 'number') out.timeoutSec = o.timeoutSec;
     if (o.source === 'claude' || o.source === 'copilot' || o.source === 'copilot-cli') out.source = o.source;
     if (Array.isArray(o.ancestors)) out.ancestors = o.ancestors.filter((n): n is number => typeof n === 'number');
     if (o.reason === 'done' || o.reason === 'approve' || o.reason === 'answer') out.reason = o.reason;
+    if (typeof o.toolUseId === 'string') out.toolUseId = o.toolUseId;
+    if (typeof o.command === 'string') out.command = o.command;
+    if (typeof o.text === 'string') out.text = o.text;
+    if (o.lang === 'vi' || o.lang === 'en') out.lang = o.lang;
     return out;
   } catch {
     return undefined;

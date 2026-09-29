@@ -77,6 +77,8 @@ export function copilotHooksFile(o: HookOptions): { version: 1; hooks: Record<st
   if (o.notify) {
     hooks.permissionRequest = [{ type: 'command', command: `${cmd.Notify} --event PermissionRequest --source copilot`, timeoutSec: 120 }];
     hooks.preToolUse = [{ type: 'command', command: `${cmd.Notify} --event PreToolUse --source copilot`, timeoutSec: 180 }];
+    // Chat: PostToolUse là bằng chứng tool đã chạy; extension dùng để không đọc "cần approve" cho lệnh đã tự duyệt.
+    hooks.postToolUse = [{ type: 'command', command: `${cmd.Notify} --event PostToolUse --source copilot`, timeoutSec: 30 }];
     // The handler filters notification types, including actual permission prompts.
     hooks.notification = [{ type: 'command', command: `${cmd.Notify} --event Notification --source copilot` }];
   }

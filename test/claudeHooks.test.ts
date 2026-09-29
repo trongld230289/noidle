@@ -53,7 +53,7 @@ describe('copilotHooksFile', () => {
     expect(file.hooks.agentStop).toEqual([{ type: 'command', command: `${cmd.Stop} --source copilot`, timeoutSec: 60 }]);
     expect(file.hooks.userPromptSubmitted).toEqual([{ type: 'command', command: `${cmd.UserPromptSubmit} --source copilot` }]);
     expect(Object.keys(file.hooks).sort()).toEqual([
-      'agentStop', 'notification', 'permissionRequest', 'preToolUse', 'sessionStart', 'userPromptSubmitted',
+      'agentStop', 'notification', 'permissionRequest', 'postToolUse', 'preToolUse', 'sessionStart', 'userPromptSubmitted',
     ]);
     expect(file.hooks.userPromptTransformed).toBeUndefined();
   });
@@ -69,6 +69,10 @@ describe('copilotHooksFile', () => {
     ]);
     expect(file.hooks.notification).toEqual([
       { type: 'command', command: `${cmd.Notify} --event Notification --source copilot` },
+    ]);
+    // Chat: PostToolUse là bằng chứng tool đã chạy, extension dùng để không đọc "cần approve" cho lệnh đã tự duyệt.
+    expect(file.hooks.postToolUse).toEqual([
+      { type: 'command', command: `${cmd.Notify} --event PostToolUse --source copilot`, timeoutSec: 30 },
     ]);
   });
 

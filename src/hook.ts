@@ -619,6 +619,14 @@ async function modeNotify(): Promise<void> {
   const input = await readHookInput(arg('event', 'Notification'));
   const cfg = loadConfig();
   const chat = sourceArg() === 'copilot';
+  if (chat && input.hook_event_name === 'PostToolUse') {
+    // Bằng chứng tool đã chạy: extension bỏ lượt chờ "cần approve" của lệnh này (xem chatPending.ts).
+    if (input.chat_voice_tool === 'approval' && input.tool_name === 'Bash') {
+      await signalWindow({ event: 'chatDone', ...chatToolRef(input) }, undefined, log, false)
+        .catch((err) => log(`signal chatDone lỗi: ${(err as Error).message}`));
+    }
+    return;
+  }
   if (chat && (input.hook_event_name !== 'PreToolUse' || !input.chat_voice_tool)) return;
   if (input.question_fallback_reason) log(`chọn: dùng hộp thoại thủ công: ${input.question_fallback_reason}`);
   const elevated = input.tool_input?.requestSandboxBypass === true || (chat &&
@@ -646,28 +654,38 @@ async function modeNotify(): Promise<void> {
     : announcement(input, lang);
   log(`notify ${input.hook_event_name ?? '?'} ${input.notification_type ?? input.tool_name ?? ''}: ${JSON.stringify(text)}`);
   if (!text) return;
-  if (chat && approval && !cfg.handsFree) {
-    // Hands Free tắt: Chat gọi hook trước mọi tool, kể cả tool sẽ tự duyệt, và không báo khi hộp thoại hiện. Chỉ đọc
-    // cho lệnh terminal mà setting auto-approve của VS Code không duyệt, và trả 'ask' để hộp thoại chắc chắn hiện:
-    // không bao giờ báo mà không có hộp thoại, cùng lắm là thêm một hộp thoại (vd lệnh đã "Allow in this session").
-    if (voiceOff(cfg) || cfg.voiceNotify === false) {
-      log('notify: Chat approve, Hands Free và giọng đọc tắt, để Chat tự lo');
-      return;
-    }
-    if (input.tool_name !== 'Bash') {
-      log('notify: Chat sửa file, Hands Free tắt, không ép hộp thoại');
-      return;
-    }
+  if (chat && approval && input.tool_name === 'Bash' && (!cfg.handsFree || !canVoiceApprove)) {
+    // Lệnh terminal của Chat mà không duyệt bằng giọng: Chat gọi hook trước mọi tool, kể cả tool sẽ tự duyệt, và
+    // không báo khi hộp thoại hiện. Ép hộp thoại bằng 'ask' thì VS Code ẩn menu "Allow in this session/workspace/
+    // always", nên chỉ báo extension chờ bằng chứng tool chạy (terminal Copilot mở, lệnh bắt đầu, PostToolUse);
+    // hết giờ chờ mới đọc và nháy. Lệnh setting auto-approve của VS Code sẽ tự duyệt thì im luôn.
     const command = typeof input.tool_input?.command === 'string' ? input.tool_input.command : '';
     const auto = elevated ? false : (chatWouldAutoApprove(command, cfg.chatAutoApprove) ?? canVoiceApprove);
     if (auto) {
       log(`notify: Chat sẽ tự duyệt ${briefTool(input.tool_name, input.tool_input)}, không đọc`);
       return;
     }
-    log(`notify: Chat không tự duyệt ${briefTool(input.tool_name, input.tool_input)}, đọc và ép hộp thoại`);
+    let reason = text;
+    if (cfg.handsFree) {
+      const dangerous = isDangerous(input.tool_name, input.tool_input);
+      log(`approve: ${input.tool_name} ${dangerous ? 'nguy hiểm' : 'không trong danh sách an toàn'}, không nghe`);
+      reason = dangerous ? say.dangerous(text) : say.notSafe(text);
+    }
+    const sent = await signalWindow({ event: 'chatPending', ...chatToolRef(input), text: reason, lang, source: 'copilot' }, undefined, log, false)
+      .catch((err) => { log(`signal chatPending lỗi: ${(err as Error).message}`); return false; });
+    if (sent) {
+      log(`notify: Chat có thể hỏi duyệt ${briefTool(input.tool_name, input.tool_input)}, extension chờ bằng chứng tool chạy`);
+      return;
+    }
+    // Không có cửa sổ VS Code nhận tín hiệu: ép hộp thoại và đọc như trước, còn hơn im.
+    log('notify: không có cửa sổ nhận chatPending, ép hộp thoại và đọc');
     await attention('approve', input.session_id ?? '', input.cwd || process.cwd(), cfg);
-    manualChatApproval(say.announcedByVoice);
-    spawnPlay(text, 'notify', input.session_id ?? '', lang);
+    manualChatApproval(cfg.handsFree ? reason : say.announcedByVoice);
+    spawnPlay(reason, 'notify', input.session_id ?? '', lang);
+    return;
+  }
+  if (chat && approval && !cfg.handsFree) {
+    log('notify: Chat sửa file, Hands Free tắt, không ép hộp thoại');
     return;
   }
   await attention(/approve|approval/i.test(text) ? 'approve' : 'answer', input.session_id ?? '', input.cwd || process.cwd(), cfg);
@@ -801,6 +819,18 @@ async function voiceChoose(text: string, input: AgentHookInput, cfg: HookConfig,
  * Approve bằng giọng: đọc thông báo (chờ đọc xong), mở mic nghe một câu, hỏi Whisper,
  * rồi trả quyết định cho Claude Code. Không rõ hoặc im lặng thì không trả gì, hộp thoại hiện như thường.
  */
+/** Phần nhận diện một tool của Chat trong tín hiệu chatPending/chatDone: phiên, cwd, tool_use_id và câu lệnh. */
+function chatToolRef(input: AgentHookInput): { session: string; cwd: string; toolUseId?: string; command?: string } {
+  const toolUseId = (input as Record<string, unknown>).tool_use_id;
+  const command = input.tool_input?.command;
+  return {
+    session: input.session_id ?? '',
+    cwd: input.cwd || process.cwd(),
+    ...(typeof toolUseId === 'string' && toolUseId ? { toolUseId } : {}),
+    ...(typeof command === 'string' ? { command } : {}),
+  };
+}
+
 function manualChatApproval(reason: string): void {
   if (sourceArg() !== 'copilot') return;
   process.stdout.write(JSON.stringify({

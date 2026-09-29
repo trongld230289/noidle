@@ -84,6 +84,14 @@ describe('parseSignal', () => {
     expect(parseSignal('{"event":"attention","session":"s","cwd":"D:/x","reason":"approve"}')?.reason).toBe('approve');
     expect(parseSignal('{"event":"attention","session":"s","cwd":"D:/x","reason":"weird"}')?.reason).toBeUndefined();
   });
+  it('chatPending/chatDone: giữ toolUseId, command, text; bỏ trường sai kiểu', () => {
+    expect(parseSignal('{"event":"chatPending","session":"s","cwd":"D:/x","toolUseId":"call_1__vscode-2","command":"git push","text":"Workspace x needs approval. Bash: git push.","lang":"en"}'))
+      .toEqual({ event: 'chatPending', session: 's', cwd: 'D:/x', toolUseId: 'call_1__vscode-2', command: 'git push', text: 'Workspace x needs approval. Bash: git push.', lang: 'en' });
+    expect(parseSignal('{"event":"chatPending","session":"s","cwd":"D:/x","command":"x","text":"t","lang":"fr"}')?.lang).toBeUndefined();
+    expect(parseSignal('{"event":"chatDone","session":"s","cwd":"D:/x","toolUseId":"call_1__vscode-2","command":"git push"}'))
+      .toEqual({ event: 'chatDone', session: 's', cwd: 'D:/x', toolUseId: 'call_1__vscode-2', command: 'git push' });
+    expect(parseSignal('{"event":"chatDone","session":"s","cwd":"D:/x","toolUseId":7,"command":null}')).toEqual({ event: 'chatDone', session: 's', cwd: 'D:/x' });
+  });
   it('bỏ JSON hỏng, event lạ, thiếu cwd', () => {
     expect(parseSignal('{')).toBeUndefined();
     expect(parseSignal('{"event":"boom","session":"","cwd":"x"}')).toBeUndefined();

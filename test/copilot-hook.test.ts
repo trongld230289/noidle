@@ -446,18 +446,36 @@ describe('Copilot Chat voice controls', () => {
     expect(signals.some((signal) => signal.event === 'ask')).toBe(true);
   }, 20_000);
 
+  // Lệnh terminal ngoài danh sách an toàn: không ép hộp thoại (VS Code sẽ ẩn menu Allow), chỉ báo extension chờ
+  // bằng chứng tool chạy; hộp duyệt của Chat tự hiện nếu cần.
   it.each([
-    ['run_in_terminal', { command: 'git push origin main' }],
-    ['run_in_terminal', { command: 'rm -rf src' }],
-    ['run_in_terminal', { command: 'git status', requestSandboxBypass: true }],
-    ['run_in_terminal', { command: 'git status', requestUnsandboxedExecution: true }],
-    ['run_in_terminal', { command: 'git status', requestAllowNetwork: true }],
-    ['create_file', { filePath: 'D:\\repo\\.env', content: 'secret' }],
-  ])('requires manual approval without opening the mic: %s %j', async (tool, args) => {
+    { command: 'git push origin main' },
+    { command: 'rm -rf src' },
+    { command: 'git status', requestSandboxBypass: true },
+    { command: 'git status', requestUnsandboxedExecution: true },
+    { command: 'git status', requestAllowNetwork: true },
+  ])('hands a terminal command over to the Chat dialog without forcing it: %j', async (args) => {
     heard = 'yes';
-    const result = await run('notify', chat(tool, args), ['--event', 'PreToolUse']);
+    const result = await run('notify', { ...chat('run_in_terminal', args), tool_use_id: 'call-x__vscode-1' }, ['--event', 'PreToolUse']);
+    expect(result.stdout).toBe('');
+    expect(signals.some((signal) => signal.event === 'ask' || signal.event === 'attention')).toBe(false);
+    const pending = signals.filter((signal) => signal.event === 'chatPending');
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({ session: 'chat-voice', toolUseId: 'call-x__vscode-1', command: args.command });
+    expect(pending[0].text).toMatch(/approv/i);
+  });
+
+  it('still forces the dialog for a sensitive file edit', async () => {
+    heard = 'yes';
+    const result = await run('notify', chat('create_file', { filePath: 'D:\\repo\\.env', content: 'secret' }), ['--event', 'PreToolUse']);
     expect(JSON.parse(result.stdout).hookSpecificOutput.permissionDecision).toBe('ask');
     expect(signals.some((signal) => signal.event === 'ask')).toBe(false);
+  });
+
+  it('reports a finished Chat tool as chatDone', async () => {
+    const input = { ...chat('run_in_terminal', { command: 'git push origin main' }), hook_event_name: 'PostToolUse', tool_use_id: 'call-x__vscode-1', tool_response: { output: 'ok' } };
+    expect((await run('notify', input, ['--event', 'PostToolUse'])).stdout).toBe('');
+    expect(signals).toEqual([expect.objectContaining({ event: 'chatDone', session: 'chat-voice', toolUseId: 'call-x__vscode-1', command: 'git push origin main' })]);
   });
 
   it.each(['create_file', 'replace_string_in_file'])('allows a known ordinary file operation only after confirmation: %s', async (tool) => {
@@ -476,21 +494,17 @@ describe('Copilot Chat voice controls', () => {
     ['en', `node script.js ${'private-argument '.repeat(40)}`, /^Workspace .+ needs approval\. Bash: node script\.js private-argument\. This command is not on the safe list, please confirm by hand\.$/],
   ])('keeps manual approval speech brief without reading the whole command: %s %s', async (language, command, expected) => {
     configure({ language });
-    fs.rmSync(path.join(tmp, 'noidle-tts', 'cache'), { recursive: true, force: true });
     heard = 'yes';
     const result = await run('notify', {
       ...chat('run_in_terminal', { command }), session_id: `brief-${language}-${command.startsWith('rm') ? 'dangerous' : 'unknown'}`,
     }, ['--event', 'PreToolUse']);
-    expect(JSON.parse(result.stdout).hookSpecificOutput.permissionDecision).toBe('ask');
+    expect(result.stdout).toBe('');
     expect(signals.some((signal) => signal.event === 'ask')).toBe(false);
-    await vi.waitFor(() => {
-      const texts = fs.readFileSync(audioTexts, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
-      // Player giả ghi từng câu một dòng; ghép lại để so cả câu báo.
-      const spoken = texts.join(' ');
-      expect(spoken).toMatch(expected);
-      expect(spoken.length).toBeLessThan(160);
-      expect((spoken.match(/private/g) ?? []).length).toBeLessThanOrEqual(1);
-    }, { timeout: 10_000 });
+    // Câu báo đi trong tín hiệu chatPending; extension đọc nếu hết giờ chờ mà tool chưa chạy.
+    const spoken = signals.find((signal) => signal.event === 'chatPending')?.text ?? '';
+    expect(spoken).toMatch(expected);
+    expect(spoken.length).toBeLessThan(160);
+    expect((spoken.match(/private/g) ?? []).length).toBeLessThanOrEqual(1);
   }, 15_000);
 
   it.each(['Bash', 'Read', 'mcp__server__run_in_terminal', 'apply_patch', 'multi_replace_string_in_file'])('does not approve unknown or unvalidated tools: %s', async (tool) => {
@@ -520,24 +534,24 @@ describe('Copilot Chat voice controls', () => {
     it.each([
       ['no auto-approve rules known', {}],
       ['rules known but not matching', { chatAutoApprove: { rules: { echo: true } } }],
-    ])('announces and forces the dialog: %s', async (_name, extra) => {
+    ])('signals a pending approval instead of forcing the dialog: %s', async (_name, extra) => {
       configure({ handsFree: false, ...extra });
-      fs.rmSync(path.join(tmp, 'noidle-tts', 'cache'), { recursive: true, force: true });
       heard = 'yes';
-      const result = await run('notify', chat('run_in_terminal', { command: 'git push origin main' }), ['--event', 'PreToolUse']);
-      const output = JSON.parse(result.stdout).hookSpecificOutput;
-      expect(output.permissionDecision).toBe('ask');
-      expect(output.permissionDecisionReason).toMatch(/NoIdle/);
-      await vi.waitFor(() => expect(spokenTexts().join(' ')).toMatch(/approv.*git push/i), { timeout: 10_000 });
-      expect(signals.some((signal) => signal.event === 'ask')).toBe(false);
+      const before = log().length;
+      const input = { ...chat('run_in_terminal', { command: 'git push origin main' }), tool_use_id: 'call-push__vscode-1' };
+      expect((await run('notify', input, ['--event', 'PreToolUse'])).stdout).toBe('');
+      expect(log().slice(before)).not.toMatch(/→ play/);
+      expect(signals).toHaveLength(1);
+      expect(signals[0]).toMatchObject({ event: 'chatPending', session: 'chat-voice', toolUseId: 'call-push__vscode-1', command: 'git push origin main' });
+      expect(signals[0].text).toMatch(/approv.*git push/i);
+      await playbackFinished();
+      expect(spokenTexts()).toEqual([]);
     }, 20_000);
 
     it.each([
       ['matches a VS Code rule', { chatAutoApprove: { rules: { 'git push': true } } }, { command: 'git push origin main' }],
       ['global auto-approve on', { chatAutoApprove: { global: true } }, { command: 'git push origin main' }],
       ['on the safe list while rules are unknown', {}, { command: 'git status' }],
-      ['voice notify off', { voiceNotify: false }, { command: 'git push origin main' }],
-      ['voice response off', { voiceResponse: false }, { command: 'git push origin main' }],
     ])('stays silent: %s', async (_name, extra, args) => {
       configure({ handsFree: false, ...extra });
       heard = 'yes';
@@ -548,6 +562,15 @@ describe('Copilot Chat voice controls', () => {
       await playbackFinished();
       expect(spokenTexts()).toEqual([]);
     }, 20_000);
+
+    // Giọng đọc tắt vẫn gửi tín hiệu: extension không đọc nhưng còn nháy cửa sổ khi hộp duyệt hiện thật.
+    it.each([{ voiceNotify: false }, { voiceResponse: false }])('still signals pending with speech off: %j', async (extra) => {
+      configure({ handsFree: false, ...extra });
+      const before = log().length;
+      expect((await run('notify', chat('run_in_terminal', { command: 'git push origin main' }), ['--event', 'PreToolUse'])).stdout).toBe('');
+      expect(log().slice(before)).not.toMatch(/→ play/);
+      expect(signals.map((signal) => signal.event)).toEqual(['chatPending']);
+    });
 
     it('leaves file edits alone', async () => {
       configure({ handsFree: false, chatAutoApprove: { rules: {} } });

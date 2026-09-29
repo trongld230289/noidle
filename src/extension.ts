@@ -22,6 +22,7 @@ import { findExecutable } from './findTool';
 import { needsTranslation, recapPromptsFor, translateRecap, type RecapTranslator } from './recapPrompt';
 import { claudeCliTranslator } from './translate';
 import { chatAutoApproveFrom } from './chatAutoApprove';
+import { ChatPendingTracker, isAgentTerminal, type PendingChatTool } from './chatPending';
 import { createHash } from 'crypto';
 import * as fs from 'fs';
 import { execFile, spawn } from 'child_process';
@@ -1102,9 +1103,54 @@ export function activate(ctx: vscode.ExtensionContext): void {
    * Tín hiệu từ hook Claude Code: listen = Claude vừa đọc xong, mở mic; submitted = người dùng đã gửi, tắt mic;
    * ask = nghe một câu và trả chữ về cho hook.
    */
+  /**
+   * Copilot Chat sắp chạy lệnh terminal mà setting auto-approve không tự duyệt. Hook không ép hộp thoại (VS Code sẽ ẩn
+   * menu Allow); extension chờ bằng chứng tool đã chạy, hết giờ mới đọc câu báo và nháy cửa sổ.
+   */
+  const chatPending = new ChatPendingTracker({
+    log,
+    onAnnounce: (p) => {
+      const cfg = config();
+      if (cfg.voiceResponse && cfg.voiceNotify !== false) speakNotify(p);
+      else log('chat pending: giọng đọc tắt, chỉ nháy cửa sổ');
+      void onAttention('approve').catch((err) => log(`chat pending: lỗi nháy cửa sổ: ${(err as Error).message}`));
+    },
+  });
+  ctx.subscriptions.push(
+    { dispose: () => chatPending.clear() },
+    vscode.window.onDidOpenTerminal((t) => chatPending.terminalOpened(isAgentTerminal(t.creationOptions as { env?: Record<string, string | null | undefined> | null }))),
+    vscode.window.onDidStartTerminalShellExecution((e) =>
+      chatPending.executionStarted(e.execution.commandLine.value, isAgentTerminal(e.terminal.creationOptions as { env?: Record<string, string | null | undefined> | null }))),
+  );
+
+  /** Đọc câu báo approve của Chat qua tiến trình play của hook (cùng hàng đợi, khoá mic và giọng ElevenLabs). */
+  function speakNotify(p: PendingChatTool & { lang?: Lang }): void {
+    const cfg = config();
+    const lang: Lang = p.lang ?? langOf(cfg.language);
+    const voice = effectiveVoice(cfg.voice, lang);
+    const file = path.join(os.tmpdir(), 'noidle-tts', `say-chat-${Date.now()}-${process.pid}.txt`);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, pronounce(p.text, cfg.pronunciations, usesVietPronunciation(voice, lang)), 'utf8');
+    const args = [hookScript, 'play', file, '--voice', voice, '--rate', cfg.voiceRate, '--player', playerPath(), '--config', hookConfigPath,
+      '--kind', 'notify', '--session', p.session || '-'];
+    const child = spawn('node', args, { detached: true, stdio: 'ignore', windowsHide: true });
+    child.on('error', (e) => log(`chat pending: không chạy được node để đọc: ${e.message}`));
+    child.unref();
+  }
+
   async function onSignal(s: Signal): Promise<string | void> {
     log(`tín hiệu ${s.event} (session ${s.session || '-'})`);
     if (s.source) agentLabel = s.source === 'claude' ? 'Claude' : 'Copilot';
+    if (s.event === 'chatPending') {
+      if (!s.text || !s.command) return;
+      chatPending.add({ session: s.session, toolUseId: s.toolUseId, command: s.command, text: s.text, ...(s.lang ? { lang: s.lang } : {}) } as PendingChatTool);
+      return;
+    }
+    if (s.event === 'chatDone') {
+      chatPending.done({ toolUseId: s.toolUseId, session: s.session, command: s.command });
+      return;
+    }
+    if (s.event === 'submitted') chatPending.promptSubmitted(s.session);
     if (s.event === 'attention') return onAttention(s.reason ?? 'done');
     if (s.event === 'ask') return askOnce(Math.max(3, s.timeoutSec ?? 15) * 1000, s.reason);
     if (s.event === 'resumed') {
