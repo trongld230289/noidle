@@ -157,6 +157,8 @@ Tắt Hands Free thì mic không bao giờ tự mở, chỉ mở khi bạn bấm
 
 **Copilot Chat hỏi approve cả lệnh bình thường?** Copilot Chat gọi hook trước mọi lần chạy tool, nên khi bật Hands Free có thể hỏi cả lệnh vốn đã được cho phép. Tắt Hands Free nếu thấy phiền.
 
+**Copilot CLI đang chạy mà cứ nghe "cần approve", hoặc một câu hỏi bị báo hai lần?** NoIdle không dùng sự kiện kiểm tra quyền của CLI để báo đang chờ duyệt thủ công. Câu hỏi thủ công chỉ báo khi hộp thoại xuất hiện, không báo thêm lúc chuẩn bị gọi tool. Báo approve thủ công cần CLI phát thông báo `permission_prompt`; phiên bản không phát sự kiện này vẫn hiện hộp duyệt nhưng không có tiếng báo. Khi bật Hands Free, NoIdle vẫn có thể hỏi duyệt bằng giọng cho lệnh an toàn trước khi CLI tự kiểm tra quyền.
+
 **Chạy trên Mac được không?** Được, nhưng chưa test trên máy thật. Linux chưa hỗ trợ.
 
 ## Khi gặp lỗi

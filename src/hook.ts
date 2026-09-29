@@ -579,6 +579,23 @@ async function modeNotify(): Promise<void> {
   const chat = sourceArg() === 'copilot';
   if (chat && (input.hook_event_name !== 'PreToolUse' || !input.chat_voice_tool)) return;
   if (chat && input.chat_voice_tool === 'approval' && !cfg.handsFree) return;
+  if (input.question_fallback_reason) log(`chọn: dùng hộp thoại thủ công: ${input.question_fallback_reason}`);
+  const elevated = input.tool_input?.requestSandboxBypass === true || (chat &&
+    ['requestSandboxBypass', 'requestUnsandboxedExecution', 'requestAllowNetwork'].some((key) => input[key] === true || input.tool_input?.[key] === true));
+  const canVoiceApprove = !elevated && voiceApprovable(input.tool_name, input.tool_input);
+  if (sourceArg() === 'copilot-cli') {
+    // CLI permission hooks run before policy checks, not when a dialog opens.
+    if (input.hook_event_name === 'PermissionRequest' && (!cfg.handsFree || cfg.voiceMute || !canVoiceApprove)) {
+      log('notify: CLI permission preflight, leaving permission handling to CLI without an alert');
+      return;
+    }
+    // Manual questions emit elicitation_dialog when they actually need an answer.
+    if (input.hook_event_name === 'PreToolUse' && input.tool_name === 'AskUserQuestion' &&
+        (!cfg.handsFree || cfg.voiceMute || input.question_fallback_reason)) {
+      log('notify: CLI manual question, waiting for elicitation_dialog');
+      return;
+    }
+  }
   const lang = sessionLang(cfg, input.session_id);
   const say = spoken(lang);
   const approval = input.hook_event_name === 'PermissionRequest' || (chat && input.chat_voice_tool === 'approval');
@@ -587,7 +604,6 @@ async function modeNotify(): Promise<void> {
     ? `${announcement({ ...input, hook_event_name: 'PermissionRequest' }, lang)} ${briefTool(input.tool_name ?? '', input.tool_input)}.`
     : announcement(input, lang);
   log(`notify ${input.hook_event_name ?? '?'} ${input.notification_type ?? input.tool_name ?? ''}: ${JSON.stringify(text)}`);
-  if (input.question_fallback_reason) log(`chọn: dùng hộp thoại thủ công: ${input.question_fallback_reason}`);
   if (!text) return;
   await attention(/approve|approval/i.test(text) ? 'approve' : 'answer', input.session_id ?? '', input.cwd || process.cwd());
   if (cfg.voiceMute) {
@@ -596,9 +612,7 @@ async function modeNotify(): Promise<void> {
   }
   if (approval && cfg.handsFree) {
     // Danh sách trắng: chỉ tool và lệnh lành mới duyệt bằng giọng; lệnh nguy hiểm hay chưa phân loại thì bấm tay.
-    const elevated = input.tool_input?.requestSandboxBypass === true || (chat &&
-      ['requestSandboxBypass', 'requestUnsandboxedExecution', 'requestAllowNetwork'].some((key) => input[key] === true || input.tool_input?.[key] === true));
-    if (elevated || !voiceApprovable(input.tool_name, input.tool_input)) {
+    if (!canVoiceApprove) {
       const dangerous = isDangerous(input.tool_name, input.tool_input);
       log(`approve: ${input.tool_name} ${dangerous ? 'nguy hiểm' : 'không trong danh sách an toàn'}, không nghe`);
       const reason = dangerous ? say.dangerous(text) : say.notSafe(text);

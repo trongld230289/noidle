@@ -207,6 +207,47 @@ describe('Copilot CLI speech and terminal routing', () => {
 });
 
 describe('Copilot CLI voice permissions', () => {
+  it.each([false, true])('does not announce a permission check without hands-free (muted: %s)', async (voiceMute) => {
+    configure({ handsFree: false, voiceMute });
+    const before = log().length;
+    const result = await run('notify', cli('cli-permission-check', {
+      toolName: 'powershell', toolInput: { command: 'git status' },
+    }), ['--event', 'PermissionRequest']);
+    expect(result.stdout).toBe('');
+    expect(signals).toEqual([]);
+    expect(log().slice(before)).not.toContain('play pid');
+  });
+
+  it('announces an actual permission prompt without opening the microphone', async () => {
+    configure({ handsFree: false });
+    const before = log().length;
+    const result = await run('notify', cli('cli-permission-dialog', {
+      notificationType: 'permission_prompt',
+    }), ['--event', 'Notification']);
+    expect(result.stdout).toBe('');
+    expect(signals.filter((s) => s.event === 'attention' && s.reason === 'approve')).toHaveLength(1);
+    expect(signals.some((s) => s.event === 'ask')).toBe(false);
+    expect(log().slice(before).match(/notify → play pid/g)).toHaveLength(1);
+  });
+
+  it('announces only one dialog after six concurrent permission checks', async () => {
+    configure({ handsFree: false });
+    const before = log().length;
+    const results = await Promise.all(Array.from({ length: 6 }, (_, index) =>
+      run('notify', cli('cli-permission-burst', {
+        toolName: 'powershell', toolInput: { command: `git show HEAD~${index}` },
+      }), ['--event', 'PermissionRequest']),
+    ));
+    expect(results.every((result) => result.code === 0 && result.stdout === '')).toBe(true);
+    expect(signals).toEqual([]);
+    expect(log().slice(before)).not.toContain('play pid');
+    await run('notify', cli('cli-permission-burst', {
+      notificationType: 'permission_prompt',
+    }), ['--event', 'Notification']);
+    expect(signals.filter((s) => s.event === 'attention' && s.reason === 'approve')).toHaveLength(1);
+    expect(log().slice(before).match(/notify → play pid/g)).toHaveLength(1);
+  });
+
   it.each([
     ['yes', { behavior: 'allow' }],
     ['no', { behavior: 'deny', message: expect.stringContaining('no') }],
@@ -224,10 +265,12 @@ describe('Copilot CLI voice permissions', () => {
     { toolName: 'unknown_mcp', toolInput: {} },
     { toolName: 'web_fetch', toolInput: { url: 'https://example.com', requestSandboxBypass: true } },
   ])('leaves unsafe or unknown permissions to manual approval: $toolName', async (tool) => {
+    const before = log().length;
     heard = 'yes';
     const result = await run('notify', cli('cli-unsafe', tool), ['--event', 'PermissionRequest']);
     expect(result.stdout).toBe('');
-    expect(signals.some((s) => s.event === 'ask')).toBe(false);
+    expect(signals).toEqual([]);
+    expect(log().slice(before)).not.toContain('play pid');
   });
 
   it('falls through on unclear approval instead of emitting success', async () => {
@@ -242,13 +285,25 @@ describe('Copilot CLI voice permissions', () => {
     expect(signals).toEqual([]);
   });
 
-  it('keeps muted CLI permission requests manual while still drawing attention', async () => {
+  it('draws muted CLI approval attention only for an actual prompt', async () => {
     configure({ voiceMute: true });
     heard = 'yes';
     const result = await run('notify', cli('cli-permission-muted', { toolName: 'powershell', toolInput: { command: 'git status' } }), ['--event', 'PermissionRequest']);
     expect(result.stdout).toBe('');
+    expect(signals).toEqual([]);
+    await run('notify', cli('cli-permission-muted', {
+      notificationType: 'permission_prompt',
+    }), ['--event', 'Notification']);
     expect(signals.some((s) => s.event === 'ask')).toBe(false);
     expect(signals.some((s) => s.event === 'attention' && s.reason === 'approve')).toBe(true);
+  });
+
+  it.each(['idle_prompt', 'auth_success', 'unknown'])('ignores unrelated CLI notifications: %s', async (notificationType) => {
+    const before = log().length;
+    const result = await run('notify', cli('cli-other-notification', { notificationType }), ['--event', 'Notification']);
+    expect(result.stdout).toBe('');
+    expect(signals).toEqual([]);
+    expect(log().slice(before)).not.toContain('play pid');
   });
 });
 
@@ -440,6 +495,58 @@ describe('Copilot Chat voice controls', () => {
 
 describe('Copilot CLI voice questions', () => {
   const question = { question: 'Which database?', choices: ['PostgreSQL', 'SQLite'], allow_freeform: false };
+
+  it('announces each manual question only when its dialog appears, not at pre-tool time', async () => {
+    configure({ handsFree: false });
+    for (let i = 0; i < 2; i++) {
+      const before = log().length;
+      const attentionBefore = signals.filter((s) => s.event === 'attention').length;
+      const result = await run('notify', cli('cli-manual-question', {
+        toolName: 'ask_user', toolArgs: question,
+      }), ['--event', 'PreToolUse']);
+      expect(result.stdout).toBe('');
+      expect(signals.filter((s) => s.event === 'attention')).toHaveLength(attentionBefore);
+      expect(log().slice(before)).not.toContain('play pid');
+
+      await run('notify', cli('cli-manual-question', {
+        notificationType: 'elicitation_dialog',
+      }), ['--event', 'Notification']);
+      expect(signals.filter((s) => s.event === 'attention' && s.reason === 'answer')).toHaveLength(i + 1);
+      expect(log().slice(before).match(/notify → play pid/g)).toHaveLength(1);
+      expect(signals.some((s) => s.event === 'ask')).toBe(false);
+      await playbackFinished();
+    }
+  }, 20_000);
+
+  it('waits for the actual dialog when a hands-free question cannot be handled', async () => {
+    const before = log().length;
+    await run('notify', cli('cli-unsupported-question', {
+      toolName: 'ask_user',
+      toolArgs: { message: 'Choose', requestedSchema: { properties: { secret: { type: 'object' } } } },
+    }), ['--event', 'PreToolUse']);
+    expect(signals).toEqual([]);
+    expect(log().slice(before)).not.toContain('play pid');
+    expect(log().slice(before)).toContain('unsupported schema type');
+    await run('notify', cli('cli-unsupported-question', {
+      notificationType: 'elicitation_dialog',
+    }), ['--event', 'Notification']);
+    expect(log().slice(before).match(/notify → play pid/g)).toHaveLength(1);
+  });
+
+  it('draws attention once for a muted question without speaking or opening the microphone', async () => {
+    configure({ voiceMute: true });
+    const before = log().length;
+    await run('notify', cli('cli-muted-question', {
+      toolName: 'ask_user', toolArgs: question,
+    }), ['--event', 'PreToolUse']);
+    expect(signals).toEqual([]);
+    await run('notify', cli('cli-muted-question', {
+      notificationType: 'elicitation_dialog',
+    }), ['--event', 'Notification']);
+    expect(signals.filter((s) => s.event === 'attention' && s.reason === 'answer')).toHaveLength(1);
+    expect(signals.some((s) => s.event === 'ask')).toBe(false);
+    expect(log().slice(before)).not.toContain('play pid');
+  });
 
   it('answers ask_user through native hook feedback without approving the tool', async () => {
     heard = 'two';

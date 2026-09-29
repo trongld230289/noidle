@@ -57,7 +57,11 @@ Hook dùng giao thức camelCase của CLI, nhưng vẫn nhận giao thức snak
 
 CLI gọi `permissionRequest` **trước** bộ kiểm tra quyền của nó, nên có thể hỏi bằng giọng cho cả lệnh vốn được tự cho phép. NoIdle chỉ trả quyền sau khi nghe xác nhận rõ và lệnh vượt qua cùng danh sách an toàn của Claude; lời nói không rõ, tool lạ, file nhạy cảm hay yêu cầu thoát sandbox được để CLI xử lý thủ công. NoIdle không sửa quy tắc quyền của CLI.
 
+Khi tắt `handsFree`, đang mute, hoặc lệnh không thể duyệt bằng giọng, `permissionRequest` không đọc "cần approve" và không làm nổi cửa sổ: sự kiện này chưa chứng minh CLI cần người dùng. Thông báo approve thủ công chỉ đến từ `Notification` loại `permission_prompt`, nếu phiên bản CLI phát sự kiện đó. CLI không phát sự kiện này thì vẫn hiện hộp duyệt theo cơ chế của CLI nhưng NoIdle không báo bằng giọng; không suy đoán từ mỗi lần kiểm tra quyền.
+
 Câu hỏi `ask_user` được đọc kèm lựa chọn; nói số, tên hoặc câu tự do nếu câu hỏi cho phép. Chỉ chọn nhiều khi biểu mẫu cho phép chọn nhiều. Giống hook Claude, NoIdle chặn lần gọi tool đặt câu hỏi và đưa câu trả lời vào lý do phản hồi để agent tiếp tục, **không giả lập thao tác chọn trên hộp thoại**. Biểu mẫu không hỗ trợ hoặc câu trả lời không rõ vẫn để chọn tay.
+
+Với câu hỏi thủ công (tắt `handsFree`, đang mute hoặc biểu mẫu không hỗ trợ), NoIdle chỉ thông báo khi nhận `Notification` loại `elicitation_dialog`. Không thông báo thêm ở `PreToolUse`, tránh đọc hai lần cho một câu hỏi. Các câu hỏi mới vẫn được báo riêng, không dùng thời gian chờ để bỏ qua câu hỏi tiếp theo.
 
 Hướng dẫn 🔊 được cung cấp qua `sessionStart`; CLI 1.0.56 còn nhận nhắc theo mỗi prompt qua `modifiedPrompt`. Các bản CLI bỏ qua output của `userPromptSubmitted` vẫn có hướng dẫn đầu phiên, nhưng cần mở phiên mới sau khi đổi ngôn ngữ/kiểu recap–announce để cập nhật hướng dẫn cho model. Mute, giọng đọc và việc bật/tắt mic vẫn được extension/hook đọc từ cấu hình.
 

@@ -68,7 +68,7 @@ describe('copilotHooksFile', () => {
       { type: 'command', command: `${cmd.Notify} --event PreToolUse --source copilot`, timeoutSec: 180 },
     ]);
     expect(file.hooks.notification).toEqual([
-      { type: 'command', command: `${cmd.Notify} --event Notification --source copilot`, matcher: 'elicitation_dialog' },
+      { type: 'command', command: `${cmd.Notify} --event Notification --source copilot` },
     ]);
   });
 

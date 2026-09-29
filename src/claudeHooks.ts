@@ -77,7 +77,8 @@ export function copilotHooksFile(o: HookOptions): { version: 1; hooks: Record<st
   if (o.notify) {
     hooks.permissionRequest = [{ type: 'command', command: `${cmd.Notify} --event PermissionRequest --source copilot`, timeoutSec: 120 }];
     hooks.preToolUse = [{ type: 'command', command: `${cmd.Notify} --event PreToolUse --source copilot`, timeoutSec: 180 }];
-    hooks.notification = [{ type: 'command', command: `${cmd.Notify} --event Notification --source copilot`, matcher: 'elicitation_dialog' }];
+    // The handler filters notification types, including actual permission prompts.
+    hooks.notification = [{ type: 'command', command: `${cmd.Notify} --event Notification --source copilot` }];
   }
   return { version: 1, hooks };
 }
