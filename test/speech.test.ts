@@ -58,6 +58,31 @@ describe('pendingBackgroundTasks: việc nền còn chạy khi lượt kết th�
     expect(pendingBackgroundTasks([agentLaunch('a1'), agentLaunch('a2'), notification('a1'), notification('a2', 'failed')].join('\n'))).toEqual([]);
     expect(pendingBackgroundTasks([agentLaunch('a1'), toolUse('TaskStop', { task_id: 'a1' })].join('\n'))).toEqual([]);
   });
+  it('TaskOutput đã lấy kết quả (completed/failed/killed) thì hết chờ: Claude Code không gửi notification cho agent đó nữa', () => {
+    // Thấy thật 2026-09-09: agent lấy bằng TaskOutput, không notification, hook câm suốt một giờ còn lại của phiên.
+    const taskOutput = (id: string, status: string) =>
+      line({
+        type: 'user',
+        message: { content: [{ type: 'tool_result', content: `<retrieval_status>success</retrieval_status>\n\n<task_id>${id}</task_id>\n\n<task_type>local_agent</task_type>\n\n<status>${status}</status>\n\n<output>\nx\n</output>` }] },
+        toolUseResult: { retrieval_status: 'success', task: { task_id: id, task_type: 'local_agent', status } },
+      });
+    expect(pendingBackgroundTasks([agentLaunch('a1'), taskOutput('a1', 'completed'), text('Xong.')].join('\n'))).toEqual([]);
+    expect(pendingBackgroundTasks([agentLaunch('a1'), taskOutput('a1', 'failed')].join('\n'))).toEqual([]);
+    expect(pendingBackgroundTasks([prompt('chạy test'), bashLaunch('b1'), taskOutput('b1', 'completed')].join('\n'))).toEqual([]);
+    // Hết giờ chờ mà agent vẫn chạy thì còn chờ.
+    expect(pendingBackgroundTasks([agentLaunch('a1'), taskOutput('a1', 'running')].join('\n'))).toEqual(['a1']);
+  });
+  it('agent tách ở lượt trước, người dùng tự gõ prompt mới thì thôi chờ (agent chết hay phiên mở lại thì không bao giờ có notification)', () => {
+    expect(pendingBackgroundTasks([prompt('review đi'), agentLaunch('a1'), text('Chờ agent.'), prompt('tiện thể sửa README'), text('Đã sửa.')].join('\n'))).toEqual([]);
+    // Lượt mở bởi notification của agent khác, hay tin nhắn từ agent, không phải người dùng gõ: vẫn chờ.
+    expect(pendingBackgroundTasks([prompt('review đi'), agentLaunch('a1'), agentLaunch('a2'), notification('a2'), text('Còn a1.')].join('\n'))).toEqual(['a1']);
+    const agentMessage = prompt('Another Claude session sent a message:\n<agent-message from="a1">\nxin phép\n</agent-message>');
+    expect(pendingBackgroundTasks([prompt('review đi'), agentLaunch('a1'), agentMessage, text('Ok.')].join('\n'))).toEqual(['a1']);
+  });
+  it('nội dung skill hay system chèn giữa lượt (isMeta) không phải lượt mới: việc nền bật trước đó vẫn tính', () => {
+    const skill = line({ type: 'user', isMeta: true, turnCompanion: true, message: { role: 'user', content: [{ type: 'text', text: 'Base directory for this skill: ...' }] } });
+    expect(pendingBackgroundTasks([prompt('chạy test'), bashLaunch('b1'), agentLaunch('a1'), skill, text('Đang chờ.')].join('\n'))).toEqual(['a1', 'b1']);
+  });
   it('notification về lúc Claude đang làm nằm ở dòng attachment hay queue-operation, vẫn tính', () => {
     const attachment = line({ type: 'attachment', attachment: { type: 'task_notification', content: '<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n</task-notification>' } });
     const queued = line({ type: 'queue-operation', operation: 'enqueue', content: '<task-notification>\n<task-id>a2</task-id>\n<status>completed</status>\n</task-notification>' });

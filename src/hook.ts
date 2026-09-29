@@ -434,6 +434,8 @@ async function modeSpeak(): Promise<void> {
   // Một hook khác vừa chặn Stop và Claude làm tiếp: không đọc lại để khỏi lặp.
   if (input.stop_hook_active) return;
   const cfg = loadConfig();
+  // Ghi kiểu đọc và file cấu hình đang dùng: người dùng bật announce mà vẫn nghe recap thì log này chỉ ra hook đọc file nào.
+  log(`speak: voiceStyle ${cfg.voiceStyle ?? 'recap (mặc định, không có trong config)'}, config ${arg('config', '') || '(không có --config)'}`);
   let transcript: string;
   try {
     transcript = fs.readFileSync(input.transcript_path, 'utf8');

@@ -40,6 +40,11 @@ export function lastAssistantText(jsonl: string): string {
  * Lệnh Bash chạy nền (backgroundTaskId) chỉ tính khi được bật TRONG LƯỢT VỪA KẾT THÚC và chưa có notification:
  * Claude bật vòng chờ ("đợi test chạy xong") rồi ngừng để đợi, báo "done" lúc đó là sai. Bật ở lượt trước thì
  * không tính nữa: server dev chạy hoài không bao giờ "xong", tính mãi là câm mãi.
+ *
+ * Agent cũng phải có đường thoát, không thì một agent mất notification làm hook câm hết phần còn lại của phiên
+ * (thấy thật: Claude lấy kết quả bằng TaskOutput thì Claude Code không gửi notification nữa; agent chết hay
+ * phiên mở lại bằng --resume cũng vậy). Nên: TaskOutput trả status khác running là hết chờ, và người dùng tự gõ
+ * prompt mới thì bỏ các agent còn treo từ lượt trước. Notification hay tin nhắn từ agent mở lượt thì vẫn chờ.
  */
 export function pendingBackgroundTasks(jsonl: string): string[] {
   const launched = new Set<string>();
@@ -47,20 +52,32 @@ export function pendingBackgroundTasks(jsonl: string): string[] {
   let bashThisTurn = new Set<string>();
   for (const line of jsonl.split(/\r?\n/)) {
     if (!line.trim()) continue;
-    let entry: { type?: string; message?: { content?: unknown }; toolUseResult?: unknown };
+    let entry: { type?: string; isMeta?: unknown; message?: { content?: unknown }; toolUseResult?: unknown };
     try {
       entry = JSON.parse(line);
     } catch {
       continue;
     }
-    const tr = entry.toolUseResult as { isAsync?: unknown; agentId?: unknown; backgroundTaskId?: unknown } | undefined;
+    const tr = entry.toolUseResult as
+      | { isAsync?: unknown; agentId?: unknown; backgroundTaskId?: unknown; task?: { task_id?: unknown; status?: unknown } }
+      | undefined;
     if (tr && typeof tr === 'object' && tr.isAsync === true && typeof tr.agentId === 'string') {
       launched.add(tr.agentId);
       pending.add(tr.agentId);
     }
     if (tr && typeof tr === 'object' && typeof tr.backgroundTaskId === 'string') bashThisTurn.add(tr.backgroundTaskId);
+    // TaskOutput: Claude đã tự lấy kết quả (completed/failed/killed), việc đó xong; còn running thì vẫn chờ.
+    const task = tr && typeof tr === 'object' ? tr.task : undefined;
+    if (task && typeof task.task_id === 'string' && typeof task.status === 'string' && task.status !== 'running') {
+      pending.delete(task.task_id);
+      bashThisTurn.delete(task.task_id);
+    }
     // Lượt mới bắt đầu ở tin nhắn user thật (prompt hay notification), không phải tool_result.
-    if (entry.type === 'user' && isUserTurnStart(entry.message?.content)) bashThisTurn = new Set();
+    // Nội dung skill/system chèn giữa lượt (isMeta) không phải lượt mới.
+    if (entry.type === 'user' && entry.isMeta !== true && isUserTurnStart(entry.message?.content)) {
+      bashThisTurn = new Set();
+      if (isTypedPrompt(entry.message?.content)) pending.clear();
+    }
     for (const m of line.matchAll(/<task-notification>[\s\S]*?<task-id>\s*([^<]+?)\s*<\/task-id>/g)) {
       // Dòng JSON thô: thẻ có thể nằm trong chuỗi đã escape ("\n" là hai ký tự), task-id là chữ số nên không bị ảnh hưởng.
       const id = m[1].replace(/\\n/g, '').trim();
@@ -77,6 +94,18 @@ export function pendingBackgroundTasks(jsonl: string): string[] {
     }
   }
   return [...pending, ...bashThisTurn];
+}
+
+/**
+ * Người dùng tự gõ (hay nói) câu này, không phải Claude Code chèn: không phải task-notification của việc nền,
+ * không phải tin nhắn từ agent/phiên khác. Chỉ những câu này mới bỏ các agent còn treo từ lượt trước.
+ */
+function isTypedPrompt(content: unknown): boolean {
+  const text = (typeof content === 'string' ? content : joinTextBlocks(content)).trimStart();
+  if (!text) return false;
+  if (text.startsWith('<task-notification>')) return false;
+  if (text.startsWith('Another Claude session') || /<agent-message\b/.test(text)) return false;
+  return true;
 }
 
 /** Tin nhắn user mở lượt mới: nội dung là chuỗi, hoặc mảng có khối text mà không có tool_result. */
