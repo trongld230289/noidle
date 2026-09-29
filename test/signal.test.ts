@@ -32,14 +32,12 @@ describe('canAutoListen', () => {
     expect(canAutoListen({ event: 'listen' }, enabled)).toBe(true);
   });
 
-  it.each([
-    { voiceResponse: false },
-  ])('blocks every automatic microphone request when disabled: %j', (settings) => {
+  it('allows automatic microphone requests with speech disabled', () => {
     for (const signal of [
       { event: 'ask', reason: 'approve' },
       { event: 'ask', reason: 'answer' },
       { event: 'listen' },
-    ] as const) expect(canAutoListen(signal, { ...enabled, ...settings })).toBe(false);
+    ] as const) expect(canAutoListen(signal, { ...enabled, voiceResponse: false })).toBe(true);
   });
 
   it('rejects old or ambiguous ask signals without a known purpose', () => {

@@ -89,7 +89,7 @@ Khi approve hoặc chọn đáp án, im lặng hoặc nói không rõ thì chuy�
 
 | Setting | Mặc định | Ý nghĩa |
 |---|---|---|
-| Voice Response | bật | Đọc câu trả lời và câu báo của Claude Code, Copilot Chat, Copilot CLI. Tắt là im hẳn, có hiệu lực ngay; cửa sổ vẫn nháy. Lệnh nhanh: `NoIdle: Tắt/bật giọng đọc`. |
+| Voice Response | bật | Đọc câu trả lời và câu báo của Claude Code, Copilot Chat, Copilot CLI. Tắt thì không đọc; mic vẫn hoạt động theo Hands Free, cửa sổ vẫn nháy. Lệnh nhanh: `NoIdle: Tắt/bật giọng đọc`. |
 | Voice Style | `recap` | `recap`: đọc tóm tắt nội dung (tốn thêm ít token mỗi lượt). `announce`: chỉ đọc "Workspace X is done" (tiếng Anh), không tốn token. |
 | Recap Prompt | bản tiếng Việt sẵn | Dặn agent viết gì trong phần recap; nghe mệt thì sửa ngắn lại. Viết một thứ tiếng, extension tự dịch sang tiếng kia bằng Copilot Chat hoặc Claude Code đang có (không cần key). |
 | Voice Notify | bật | Đọc "Workspace X cần approve" / "cần bạn trả lời". Tắt Voice Response thì không đọc dù đang bật. |
@@ -99,13 +99,15 @@ Khi approve hoặc chọn đáp án, im lặng hoặc nói không rõ thì chuy�
 
 | Setting | Mặc định | Ý nghĩa |
 |---|---|---|
-| Hands Free | tắt | Rảnh tay: đọc xong thì bíp và mở mic để bạn nói tiếp; agent hỏi thì chọn đáp án bằng giọng; agent xin chạy lệnh an toàn thì nói đồng ý hay từ chối. |
+| Hands Free | tắt | Tự mở mic để bạn nói tiếp, chọn đáp án hoặc duyệt lệnh an toàn bằng giọng. Độc lập với Voice Response và Voice Notify; nếu có giọng đọc thì đợi đọc xong mới nghe. |
 | Hands Free Timeout Sec | `20` | Mic mở mà im lặng bao lâu thì tắt. |
 | Hands Free Auto Send | bật | Tự gửi sau khi ngừng nói, xử lý nhận dạng xong và có ít nhất 3 từ. Câu ngắn hơn hoặc khi tắt setting này thì nói "gửi" để gửi. |
 | Hands Free Send Delay Sec | `2.5` | Khoảng chờ trước khi tự gửi khi đã đủ điều kiện Auto Send; không tính thời gian xử lý nhận dạng. |
 | Voice Approve Timeout Sec | `15` | Chờ bạn nói approve tối đa bao lâu. |
 
 Tắt Hands Free thì mic không bao giờ tự mở, chỉ mở khi bạn bấm F6.
+
+Tắt Voice Response hoặc Voice Notify không tắt Hands Free. Khi không có giọng đọc, xem nội dung trên màn hình và chờ bíp để nói. Copilot Chat Local chưa có tín hiệu hook chờ duyệt thủ công: khi Hands Free tắt, NoIdle không đọc approve từ PreToolUse để tránh báo cả lệnh tự duyệt. Đây là giới hạn sự kiện, không phải điều kiện bật giọng đọc.
 
 **3. Báo cửa sổ đang cần bạn**
 

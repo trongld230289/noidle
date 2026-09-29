@@ -131,8 +131,9 @@ describe('copilotHookPaths', () => {
 
 describe('hooksEnabled', () => {
   it('hook được cài khi còn bất kỳ tính năng nào cần nó: đọc, nháy taskbar hoặc đổi màu', () => {
-    const off = { voiceResponse: false, attentionFlash: false, attentionColor: false };
+    const off = { voiceResponse: false, handsFree: false, attentionFlash: false, attentionColor: false };
     expect(hooksEnabled(off)).toBe(false);
+    expect(hooksEnabled({ ...off, handsFree: true })).toBe(true);
     expect(hooksEnabled({ ...off, voiceResponse: true })).toBe(true);
     expect(hooksEnabled({ ...off, attentionFlash: true })).toBe(true);
     expect(hooksEnabled({ ...off, attentionColor: true })).toBe(true);

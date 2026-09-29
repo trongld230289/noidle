@@ -34,6 +34,14 @@ const cli = (sessionId: string, extra: Record<string, unknown> = {}) => ({ sessi
 const log = () => fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8') : '';
 const configure = (extra: Record<string, unknown> = {}) => fs.writeFileSync(config, JSON.stringify({ language: 'en', handsFree: true, ...extra }));
 
+function holdPlayback() {
+  const queue = path.join(tmp, 'noidle-tts', 'queue');
+  fs.mkdirSync(queue, { recursive: true });
+  const ticket = path.join(queue, '000000000000000-held.json');
+  fs.writeFileSync(ticket, JSON.stringify({ pid: process.pid, kind: 'speak', session: 'other-audio' }));
+  return { queue, release: () => fs.rmSync(ticket, { force: true }) };
+}
+
 beforeAll(async () => {
   fs.mkdirSync(tmp, { recursive: true });
   await build({
@@ -165,6 +173,62 @@ describe('Copilot CLI instructions', () => {
 });
 
 describe('Copilot CLI speech and terminal routing', () => {
+  it('invalidates queued listening when a new prompt arrives with speech disabled', async () => {
+    const session = 'muted-new-prompt';
+    const transcriptPath = path.join(work, 'muted-new-prompt.jsonl');
+    fs.writeFileSync(transcriptPath, JSON.stringify({ type: 'assistant.message', data: { content: 'Finished.' } }));
+    await run('prompt', cli(session, { prompt: 'Explain the code' }));
+    const held = holdPlayback();
+    try {
+      await run('speak', cli(session, { transcriptPath }));
+      await vi.waitFor(() => expect(fs.readdirSync(held.queue).length).toBeGreaterThan(1), { timeout: 10_000 });
+      configure({ voiceResponse: false });
+      expect((await run('prompt', cli(session, { prompt: 'Continue with the next task' }))).stdout).toBe('');
+    } finally {
+      held.release();
+      await playbackFinished();
+    }
+    expect(signals.some((signal) => signal.event === 'listen' && signal.session === session)).toBe(false);
+    expect(fs.readFileSync(audioTexts, 'utf8')).toBe('');
+  }, 20_000);
+
+  it.each(['speak', 'approve', 'answer'])('waits for existing audio before silent %s listening', async (purpose) => {
+    configure({ voiceResponse: false });
+    heard = purpose === 'answer' ? 'two' : 'yes';
+    const transcriptPath = path.join(work, 'silent-wait.jsonl');
+    fs.writeFileSync(transcriptPath, JSON.stringify({ type: 'assistant.message', data: { content: 'Finished.' } }));
+    const input = cli(`silent-wait-${purpose}`, purpose === 'speak' ? { transcriptPath }
+      : purpose === 'approve' ? { toolName: 'powershell', toolInput: { command: 'git status' } }
+        : { toolName: 'ask_user', toolArgs: { question: 'Choose', choices: ['First', 'Second'], allow_freeform: false } });
+    const held = holdPlayback();
+    const pending = run(purpose === 'speak' ? 'speak' : 'notify', input,
+      purpose === 'speak' ? [] : ['--event', purpose === 'approve' ? 'PermissionRequest' : 'PreToolUse']);
+    const microphoneRequested = () => signals.some((signal) => signal.event === 'listen' || signal.event === 'ask');
+    try {
+      await vi.waitFor(() => {
+        expect(microphoneRequested() || fs.readdirSync(held.queue).length > 1).toBe(true);
+      }, { timeout: 10_000 });
+      expect(microphoneRequested()).toBe(false);
+    } finally {
+      held.release();
+      await pending;
+    }
+    expect(microphoneRequested()).toBe(true);
+    expect(fs.readFileSync(audioTexts, 'utf8')).toBe('');
+  }, 20_000);
+
+  it.each([false, true])('uses Hands Free for muted end-of-turn listening: %s', async (handsFree) => {
+    configure({ voiceResponse: false, handsFree });
+    const transcriptPath = path.join(work, 'muted-stop.jsonl');
+    fs.writeFileSync(transcriptPath, JSON.stringify({ type: 'assistant.message', data: { content: 'Finished.' } }));
+    const before = log().length;
+    await run('speak', cli('muted-stop', { transcriptPath }));
+    expect(signals.some((signal) => signal.event === 'listen')).toBe(handsFree);
+    expect(signals.some((signal) => signal.event === 'attention')).toBe(true);
+    expect(log().slice(before)).not.toContain('play pid');
+    expect(fs.readFileSync(audioTexts, 'utf8')).toBe('');
+  });
+
   it('normalizes the CLI transcript path and carries CLI ancestry through detached playback', async () => {
     const transcriptPath = path.join(work, 'events.jsonl');
     fs.writeFileSync(transcriptPath, JSON.stringify({ type: 'assistant.message', data: { content: 'Finished.' } }) + '\n');
@@ -203,6 +267,29 @@ describe('Copilot CLI speech and terminal routing', () => {
     await run('speak', cli('cli-blocked-stop', { transcriptPath: path.join(work, 'events.jsonl'), stop_hook_active: true }));
     expect(signals).toEqual([]);
     expect(log().slice(before)).not.toContain('play pid');
+  });
+});
+
+describe('independent speech and microphone controls', () => {
+  const cases = [
+    { source: 'cli', event: 'PermissionRequest', input: cli('independent-approval', { toolName: 'powershell', toolInput: { command: 'git status' } }), heard: 'yes', expected: 'allow', reason: 'approve' },
+    { source: 'cli', event: 'PreToolUse', input: cli('independent-question', { toolName: 'ask_user', toolArgs: { question: 'Choose', choices: ['First', 'Second'], allow_freeform: false } }), heard: 'two', expected: 'deny', reason: 'answer' },
+    { source: 'chat', event: 'PreToolUse', input: { session_id: 'independent-approval', cwd: work, hook_event_name: 'PreToolUse', tool_name: 'run_in_terminal', tool_input: { command: 'git status' } }, heard: 'yes', expected: 'allow', reason: 'approve' },
+    { source: 'chat', event: 'PreToolUse', input: { session_id: 'independent-question', cwd: work, hook_event_name: 'PreToolUse', tool_name: 'vscode_askQuestions', tool_input: { questions: [{ header: 'Choice', question: 'Choose', options: [{ label: 'First' }, { label: 'Second' }], allowFreeformInput: false }] } }, heard: 'two', expected: 'deny', reason: 'answer' },
+  ];
+
+  describe.each([{ voiceResponse: false }, { voiceNotify: false }])('speech disabled: %j', (settings) => {
+    it.each(cases)('still listens for $source $reason without TTS', async (entry) => {
+      configure({ ...settings, handsFree: true });
+      heard = entry.heard;
+      const before = log().length;
+      const result = await run('notify', entry.input, ['--event', entry.event]);
+      expect(signals.some((signal) => signal.event === 'ask' && signal.reason === entry.reason)).toBe(true);
+      const output = JSON.parse(result.stdout);
+      expect(output.behavior ?? output.permissionDecision ?? output.hookSpecificOutput?.permissionDecision).toBe(entry.expected);
+      expect(fs.readFileSync(audioTexts, 'utf8')).toBe('');
+      expect(log().slice(before)).not.toMatch(/play pid|câu đầu sẵn sàng/);
+    });
   });
 });
 
@@ -286,8 +373,8 @@ describe('Copilot CLI voice permissions', () => {
   });
 
   it.each([
-    { voiceResponse: false },
-    { voiceResponse: true, voiceNotify: false, handsFree: true },
+    { voiceResponse: false, handsFree: false },
+    { voiceResponse: true, voiceNotify: false, handsFree: false },
   ])('draws CLI approval attention only for an actual prompt with disabled voice: %j', async (settings) => {
     configure(settings);
     const before = log().length;
@@ -415,9 +502,9 @@ describe('Copilot Chat voice controls', () => {
 
   it.each([
     [{ handsFree: false }, 'run_in_terminal', { command: 'git status' }],
-    [{ voiceResponse: false }, 'run_in_terminal', { command: 'git status' }],
+    [{ voiceResponse: false, handsFree: false }, 'run_in_terminal', { command: 'git status' }],
     [{ handsFree: false }, 'vscode_askQuestions', { questions: [question] }],
-    [{ voiceResponse: false }, 'vscode_askQuestions', { questions: [question] }],
+    [{ voiceResponse: false, handsFree: false }, 'vscode_askQuestions', { questions: [question] }],
   ])('respects disabled voice controls: %j', async (settings, tool, args) => {
     configure(settings);
     heard = 'yes';
@@ -539,8 +626,8 @@ describe('Copilot CLI voice questions', () => {
   });
 
   it.each([
-    { voiceResponse: false },
-    { voiceResponse: true, voiceNotify: false, handsFree: true },
+    { voiceResponse: false, handsFree: false },
+    { voiceResponse: true, voiceNotify: false, handsFree: false },
   ])('draws attention once for a question without speaking or opening the microphone with disabled voice: %j', async (settings) => {
     configure(settings);
     const before = log().length;

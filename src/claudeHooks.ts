@@ -127,9 +127,9 @@ export function applyHooks(settings: ClaudeSettings, o: HookOptions): ClaudeSett
 }
 
 /**
- * Hook được cài khi còn tính năng nào cần nó: đọc (voiceResponse), nháy taskbar (attentionFlash) hoặc đổi màu
+ * Hook được cài khi còn tính năng nào cần nó: đọc (voiceResponse), mic tự mở (handsFree), nháy taskbar (attentionFlash) hoặc đổi màu
  * (attentionColor). Từng tính năng bật/tắt lúc chạy qua hook-config, nên chỉ lúc tắt hết mới gỡ hook.
  */
-export function hooksEnabled(s: { voiceResponse: boolean; attentionFlash: boolean; attentionColor: boolean }): boolean {
-  return s.voiceResponse || s.attentionFlash || s.attentionColor;
+export function hooksEnabled(s: { voiceResponse: boolean; handsFree?: boolean; attentionFlash: boolean; attentionColor: boolean }): boolean {
+  return s.voiceResponse || s.handsFree === true || s.attentionFlash || s.attentionColor;
 }

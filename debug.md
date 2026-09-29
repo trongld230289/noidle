@@ -21,7 +21,7 @@ Chỉ lấy hai file trên, không gửi toàn bộ thư mục. Nếu không tì
 - Mô tả thao tác và kết quả mong đợi/thực tế; ví dụ "đọc cần approve 6 lần, hộp thoại chỉ hiện 1 lần".
 - Phiên bản NoIdle, VS Code, hệ điều hành và Copilot CLI hoặc Claude Code nếu đang dùng.
 - Đang dùng Copilot CLI trong terminal, Copilot Chat hay Claude Code; terminal trong VS Code hay bên ngoài.
-- Có mở nhiều cửa sổ/workspace không; trạng thái Hands Free, Voice Notify và Voice Mute.
+- Có mở nhiều cửa sổ/workspace không; trạng thái Voice Response, Voice Notify và Hands Free.
 - Vừa cập nhật extension hoặc reload cửa sổ trước khi xảy ra lỗi không.
 
 Ảnh hoặc video là tùy chọn, chỉ gửi khi đã che thông tin nhạy cảm.

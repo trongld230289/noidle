@@ -290,6 +290,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
         // Cài hay gỡ hook chỉ đổi khi bật/tắt hết đọc, nháy và đổi màu; syncHooks ghi lại hook-config trước nên
         // bật tắt từng tính năng vẫn có hiệu lực ngay ở lượt sau.
         e.affectsConfiguration('noIdle.voiceResponse') ||
+        e.affectsConfiguration('noIdle.handsFree') ||
         e.affectsConfiguration('noIdle.attentionFlash') ||
         e.affectsConfiguration('noIdle.attentionColor') ||
         e.affectsConfiguration('noIdle.voice') ||
@@ -616,7 +617,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     void vscode.window.showInformationMessage(`NoIdle: ${next ? on : off}`);
   }
   const toggleMute = () => flip('voiceResponse', true, 'đã bật lại giọng đọc.', 'đã tắt giọng đọc (cửa sổ vẫn nháy, không cần restart).');
-  const toggleHandsFree = () => flip('handsFree', false, 'đã bật hands-free, Claude đọc xong sẽ mở mic.', 'đã tắt hands-free, đọc xong thì thôi.');
+  const toggleHandsFree = () => flip('handsFree', false, 'đã bật hands-free, agent xong sẽ mở mic.', 'đã tắt hands-free, mic không tự mở.');
 
   async function testVoice(): Promise<void> {
     const cfg = config();

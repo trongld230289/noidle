@@ -13,6 +13,8 @@ const work = fs.mkdtempSync(path.join(os.tmpdir(), 'noidle-hook-test-'));
 const bundle = path.join(work, 'claude-hook.js');
 const cfgMuted = path.join(work, 'muted.json');
 const cfgNormal = path.join(work, 'normal.json');
+// Tắt giọng và tắt Hands Free: hook chỉ báo cửa sổ, không đọc, không chờ mic (Hands Free bật thì hook đi nghe duyệt lệnh).
+const cfgSilent = path.join(work, 'silent.json');
 const logFile = path.join(work, 'tmp', 'noidle-tts', 'hook.log');
 
 function run(args: string[], stdin: string, extraEnv: NodeJS.ProcessEnv = {}): Promise<{ code: number | null; stdout: string }> {
@@ -50,6 +52,7 @@ beforeAll(async () => {
   await run(['skip'], '');
   fs.writeFileSync(cfgMuted, JSON.stringify({ voiceResponse: false, handsFree: true }));
   fs.writeFileSync(cfgNormal, JSON.stringify({ voiceResponse: true, handsFree: false }));
+  fs.writeFileSync(cfgSilent, JSON.stringify({ voiceResponse: false, handsFree: false }));
 }, 30_000);
 
 describe('claude-hook voiceResponse off (im lặng, vẫn nháy)', () => {
@@ -66,7 +69,7 @@ describe('claude-hook voiceResponse off (im lặng, vẫn nháy)', () => {
     expect(r.stdout.trim()).toBe('');
   });
 
-  it('speak: mute thì không tách tiến trình play và không gửi tín hiệu listen', async () => {
+  it('speak: mute thì không phát tiếng nhưng vẫn gửi listen khi Hands Free bật', async () => {
     const transcript = path.join(work, 'transcript.jsonl');
     fs.writeFileSync(
       transcript,
@@ -78,13 +81,13 @@ describe('claude-hook voiceResponse off (im lặng, vẫn nháy)', () => {
     const added = readLog().slice(before);
     expect(added).toContain('voiceResponse tắt');
     expect(added).not.toContain('play pid');
-    expect(added).not.toContain('listen');
+    expect(added).toContain('signal listen');
   });
 
   it('notify: mute thì im lặng, không tách tiến trình play', async () => {
     const before = readLog().length;
     const r = await run(
-      ['notify', '--config', cfgMuted],
+      ['notify', '--config', cfgSilent],
       JSON.stringify({ session_id: 's3', cwd: work, hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'ls' } }),
     );
     expect(r.code).toBe(0);
@@ -526,7 +529,7 @@ describe('claude-hook tín hiệu attention', () => {
   it('notify: cần approve thì gửi attention (lý do approve), kể cả khi mute', async () => {
     const before = readLog().length;
     const r = await run(
-      ['notify', '--config', cfgMuted, '--player', bogusPlayer],
+      ['notify', '--config', cfgSilent, '--player', bogusPlayer],
       JSON.stringify({ session_id: 'att-2', cwd: work, hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'ls' } }),
     );
     expect(r.code).toBe(0);
@@ -540,7 +543,7 @@ describe('claude-hook attention với Copilot Chat', () => {
     fs.writeFileSync(transcript, JSON.stringify({ type: 'assistant.message', data: { content: 'Xong rồi.' } }) + '\n');
     const before = readLog().length;
     const r = await run(
-      ['speak', '--config', cfgMuted, '--source', 'copilot'],
+      ['speak', '--config', cfgSilent, '--source', 'copilot'],
       JSON.stringify({ session_id: 'cp-att', cwd: work, transcript_path: transcript, stop_hook_active: false }),
     );
     expect(r.code).toBe(0);

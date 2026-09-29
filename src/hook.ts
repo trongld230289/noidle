@@ -29,7 +29,7 @@ import { lastAssistantText, pickSpeech, hasSpeakSection, pendingBackgroundTasks,
 import { recapInstruction, type RecapPrompts } from './recapPrompt';
 import { langOf, isAuto, detectLang, effectiveVoice, usesVietPronunciation, DEFAULT_VOICE, type Lang } from './lang';
 import { parseApproval, isDangerous, voiceApprovable, parseChoice, isChoiceCancellation, isAmbiguousChoice, permissionRequestOutput } from './decision';
-import { signalWindow, askWindow, readRegistry, micHolder, MIC_LOCK_MAX_AGE_MS, type SignalSource, type AttentionReason } from './signal';
+import { signalWindow, askWindow, readRegistry, micHolder, MIC_LOCK_MAX_AGE_MS, type Signal, type SignalSource, type AttentionReason } from './signal';
 import { ancestorsOf, parentMap } from './proctree';
 import { resolvePlayer } from './findTool';
 import { flashHostWindow } from './attention';
@@ -53,7 +53,7 @@ async function readHookInput(event: string): Promise<AgentHookInput> {
 interface HookConfig {
   voice?: string;
   /**
-   * Setting noIdle.voiceResponse. false: không đọc, không nói câu báo, không chèn hướng dẫn 🔊, không mở mic; vẫn nháy
+   * Setting noIdle.voiceResponse. false: không đọc, không nói câu báo, không chèn hướng dẫn 🔊; mic theo handsFree, vẫn nháy
    * và đổi màu cửa sổ. Hook luôn được cài khi còn tính năng nào bật, nên đổi cờ này có hiệu lực ngay ở lượt sau.
    */
   voiceResponse?: boolean;
@@ -122,11 +122,25 @@ async function claudeAncestors(claudePid: number, session: string): Promise<numb
 /** Nhờ extension mở mic nghe một câu; trả '' nếu không có cửa sổ VS Code, im lặng hoặc lỗi. */
 async function askHeard(cwd: string, session: string, timeoutSec: number, label: string): Promise<string> {
   const t0 = Date.now();
-  const ancestors = sourceArg() === 'copilot' ? [] : await claudeAncestors(process.ppid, session);
   const reason = label === 'approve' ? 'approve' : 'answer';
-  const heard = (await askWindow({ event: 'ask', session, cwd, timeoutSec, ancestors, source: sourceArg(), reason }, undefined, log)) ?? '';
+  const heard = (await requestMicrophone({ event: 'ask', session, cwd, timeoutSec, reason })) ?? '';
   log(`${label}: nghe ${JSON.stringify(heard)} (${Date.now() - t0}ms)`);
   return heard.trim();
+}
+
+async function requestMicrophone(signal: Signal & { event: 'listen' | 'ask' }): Promise<string | undefined> {
+  const promptCount = readMark(signal.session).count;
+  const ticket = takeTicket('notify', signal.session);
+  try {
+    const ancestors = sourceArg() === 'copilot' ? [] : await claudeAncestors(process.ppid, signal.session);
+    await waitTurn(ticket);
+    if (listTickets()[0]?.file !== ticket || !loadConfig().handsFree || readMark(signal.session).count !== promptCount) return;
+    const request = { ...signal, ancestors, source: sourceArg() };
+    if (signal.event === 'ask') return await askWindow(request, undefined, log);
+    await signalWindow(request, undefined, log);
+  } finally {
+    fs.rmSync(ticketPath(ticket), { force: true });
+  }
 }
 
 function loadConfig(): HookConfig {
@@ -422,7 +436,14 @@ async function modePrompt(): Promise<void> {
   }
   // Tắt đọc thì không dặn Claude viết phần 🔊, nhưng vẫn báo submitted để tắt mic nếu đang mở.
   const cfg = loadConfig();
-  if (voiceOff(cfg)) log('prompt: voiceResponse tắt, không chèn hướng dẫn');
+  if (voiceOff(cfg)) {
+    if (input.session_id) {
+      const mark = readMark(input.session_id);
+      const lang = isAuto(cfg.language) ? detectLang(promptText) ?? mark.lang ?? 'vi' : langOf(cfg.language);
+      writeMark(input.session_id, { ...mark, count: mark.count + 1, lang });
+    }
+    log('prompt: voiceResponse tắt, không chèn hướng dẫn');
+  }
   else {
     // announce thường trả rỗng (vẫn cập nhật dấu phiên để speak/notify chọn đúng ngôn ngữ), chỉ có chữ khi vừa đổi kiểu.
     const additionalContext = promptContextFor(input.session_id, cfg, promptText, lastAnswerHadSpeak(input.transcript_path));
@@ -465,7 +486,10 @@ async function modeSpeak(): Promise<void> {
   // Làm nổi cửa sổ (nháy taskbar, đổi màu status bar) kể cả khi mute: không có tiếng, chỉ để tìm đúng cửa sổ.
   const attentionSent = waiting ? Promise.resolve(false) : attention('done', input.session_id ?? '', input.cwd || process.cwd(), cfg);
   if (voiceOff(cfg)) {
-    log('speak: voiceResponse tắt, chỉ báo cửa sổ');
+    log('speak: voiceResponse tắt, không đọc');
+    if (cfg.handsFree && !waiting) {
+      await requestMicrophone({ event: 'listen', session: input.session_id ?? '', cwd: input.cwd || process.cwd() });
+    }
     await attentionSent;
     return;
   }
@@ -497,8 +521,7 @@ async function modeSpeak(): Promise<void> {
     spawnPlay(text, 'speak', session, lang, listenCwd, ancestors);
   }
   else if (listenCwd) {
-    const ancestors = await claudeAncestors(process.ppid, session);
-    await signalWindow({ event: 'listen', session, cwd: listenCwd, source: sourceArg(), ancestors }, undefined, log);
+    await requestMicrophone({ event: 'listen', session, cwd: listenCwd });
   }
   // Nháy cửa sổ mất gần một giây (PowerShell): tách play trước rồi mới chờ, để giọng đọc không bị chậm theo.
   await attentionSent;
@@ -530,6 +553,7 @@ function modeSkip(): void {
 
 /** Tách tiến trình phát rồi thoát ngay để Claude Code không phải chờ. listenCwd: phát xong thì báo extension mở mic. */
 function spawnPlay(raw: string, kind: Ticket['kind'], session: string, lang: Lang, listenCwd?: string, ancestors?: number[]): void {
+  if (!speechEnabled(kind) && !listenCwd) return;
   // Giọng vi-VN đọc sai chữ viết tắt và đuôi file tiếng Anh; viết sẵn cách đọc trước khi tổng hợp.
   // Tiếng Anh hoặc giọng đa ngôn ngữ thì bỏ bảng mặc định (nó phiên âm sang tiếng Việt), chỉ giữ bảng của người dùng.
   const voice = voiceFor(lang);
@@ -597,13 +621,13 @@ async function modeNotify(): Promise<void> {
   const canVoiceApprove = !elevated && voiceApprovable(input.tool_name, input.tool_input);
   if (sourceArg() === 'copilot-cli') {
     // CLI permission hooks run before policy checks, not when a dialog opens.
-    if (input.hook_event_name === 'PermissionRequest' && (!cfg.handsFree || voiceOff(cfg) || cfg.voiceNotify === false || !canVoiceApprove)) {
+    if (input.hook_event_name === 'PermissionRequest' && (!cfg.handsFree || !canVoiceApprove)) {
       log('notify: CLI permission preflight, leaving permission handling to CLI without an alert');
       return;
     }
     // Manual questions emit elicitation_dialog when they actually need an answer.
     if (input.hook_event_name === 'PreToolUse' && input.tool_name === 'AskUserQuestion' &&
-        (!cfg.handsFree || voiceOff(cfg) || cfg.voiceNotify === false || input.question_fallback_reason)) {
+        (!cfg.handsFree || input.question_fallback_reason)) {
       log('notify: CLI manual question, waiting for elicitation_dialog');
       return;
     }
@@ -619,12 +643,10 @@ async function modeNotify(): Promise<void> {
   if (!text) return;
   await attention(/approve|approval/i.test(text) ? 'approve' : 'answer', input.session_id ?? '', input.cwd || process.cwd(), cfg);
   if (voiceOff(cfg)) {
-    log('notify: voiceResponse tắt, chỉ báo cửa sổ');
-    return;
+    log('notify: voiceResponse tắt, không đọc câu báo');
   }
   if (cfg.voiceNotify === false) {
     log('notify: voiceNotify tắt, không đọc câu báo');
-    return;
   }
   if (approval && cfg.handsFree) {
     // Danh sách trắng: chỉ tool và lệnh lành mới duyệt bằng giọng; lệnh nguy hiểm hay chưa phân loại thì bấm tay.
@@ -785,11 +807,17 @@ async function voiceApprove(text: string, input: HookInput & { session_id?: stri
       : permissionRequestOutput(decision, reason)));
 }
 
+function speechEnabled(kind: Ticket['kind']): boolean {
+  const cfg = loadConfig();
+  return !voiceOff(cfg) && (kind !== 'notify' || cfg.voiceNotify !== false);
+}
+
 /** Phát ngay trong tiến trình này và chờ phát xong (vẫn xếp hàng chung). */
 async function playNow(text: string, kind: Ticket['kind'], session: string, lang: Lang): Promise<void> {
+  if (!speechEnabled(kind)) return;
   const ticket = takeTicket(kind, session);
   await waitTurn(ticket);
-  await playText(text, ticket, voiceFor(lang));
+  if (speechEnabled(kind)) await playText(text, ticket, voiceFor(lang));
   try {
     fs.unlinkSync(ticketPath(ticket));
   } catch {
@@ -967,7 +995,7 @@ async function modePlay(): Promise<void> {
     : listenCwd ? claudeAncestors(Number(arg('claude-pid', '0')), session === '-' ? '' : session) : Promise.resolve([]);
   await waitTurn(ticket);
   // --voice ở đây đã được spawnPlay chọn theo ngôn ngữ.
-  await playText(text, ticket, arg('voice', DEFAULT_VOICE));
+  if (!arg('kind', '') || speechEnabled(kind)) await playText(text, ticket, arg('voice', DEFAULT_VOICE));
   try {
     fs.unlinkSync(file);
   } catch {

@@ -42,7 +42,6 @@ export function canAutoListen(
   signal: Pick<Signal, 'event' | 'reason'>,
   settings: { voiceResponse: boolean; handsFree: boolean },
 ): boolean {
-  if (!settings.voiceResponse) return false;
   if (signal.event === 'listen') return settings.handsFree;
   if (signal.event !== 'ask') return false;
   if (signal.reason === 'approve' || signal.reason === 'answer') return settings.handsFree;
