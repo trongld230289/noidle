@@ -285,8 +285,12 @@ describe('Copilot CLI voice permissions', () => {
     expect(signals).toEqual([]);
   });
 
-  it('draws muted CLI approval attention only for an actual prompt', async () => {
-    configure({ voiceResponse: false });
+  it.each([
+    { voiceResponse: false },
+    { voiceResponse: true, voiceNotify: false, handsFree: true },
+  ])('draws CLI approval attention only for an actual prompt with disabled voice: %j', async (settings) => {
+    configure(settings);
+    const before = log().length;
     heard = 'yes';
     const result = await run('notify', cli('cli-permission-muted', { toolName: 'powershell', toolInput: { command: 'git status' } }), ['--event', 'PermissionRequest']);
     expect(result.stdout).toBe('');
@@ -295,7 +299,8 @@ describe('Copilot CLI voice permissions', () => {
       notificationType: 'permission_prompt',
     }), ['--event', 'Notification']);
     expect(signals.some((s) => s.event === 'ask')).toBe(false);
-    expect(signals.some((s) => s.event === 'attention' && s.reason === 'approve')).toBe(true);
+    expect(signals.filter((s) => s.event === 'attention' && s.reason === 'approve')).toHaveLength(1);
+    expect(log().slice(before)).not.toContain('play pid');
   });
 
   it.each(['idle_prompt', 'auth_success', 'unknown'])('ignores unrelated CLI notifications: %s', async (notificationType) => {
@@ -533,8 +538,11 @@ describe('Copilot CLI voice questions', () => {
     expect(log().slice(before).match(/notify → play pid/g)).toHaveLength(1);
   });
 
-  it('draws attention once for a muted question without speaking or opening the microphone', async () => {
-    configure({ voiceResponse: false });
+  it.each([
+    { voiceResponse: false },
+    { voiceResponse: true, voiceNotify: false, handsFree: true },
+  ])('draws attention once for a question without speaking or opening the microphone with disabled voice: %j', async (settings) => {
+    configure(settings);
     const before = log().length;
     await run('notify', cli('cli-muted-question', {
       toolName: 'ask_user', toolArgs: question,

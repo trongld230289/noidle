@@ -597,13 +597,13 @@ async function modeNotify(): Promise<void> {
   const canVoiceApprove = !elevated && voiceApprovable(input.tool_name, input.tool_input);
   if (sourceArg() === 'copilot-cli') {
     // CLI permission hooks run before policy checks, not when a dialog opens.
-    if (input.hook_event_name === 'PermissionRequest' && (!cfg.handsFree || voiceOff(cfg) || !canVoiceApprove)) {
+    if (input.hook_event_name === 'PermissionRequest' && (!cfg.handsFree || voiceOff(cfg) || cfg.voiceNotify === false || !canVoiceApprove)) {
       log('notify: CLI permission preflight, leaving permission handling to CLI without an alert');
       return;
     }
     // Manual questions emit elicitation_dialog when they actually need an answer.
     if (input.hook_event_name === 'PreToolUse' && input.tool_name === 'AskUserQuestion' &&
-        (!cfg.handsFree || voiceOff(cfg) || input.question_fallback_reason)) {
+        (!cfg.handsFree || voiceOff(cfg) || cfg.voiceNotify === false || input.question_fallback_reason)) {
       log('notify: CLI manual question, waiting for elicitation_dialog');
       return;
     }
