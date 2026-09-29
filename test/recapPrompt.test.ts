@@ -27,6 +27,21 @@ describe('recapInstruction', () => {
     expect(DEFAULT_RECAP_PROMPT.en.length).toBeGreaterThan(100);
   });
 
+  it.each(['vi', 'en'] as const)('default body reads as a short list: one lead line, then "- " bullets (%s)', (lang) => {
+    const lines = DEFAULT_RECAP_PROMPT[lang].split('\n');
+    expect(lines.length).toBeGreaterThanOrEqual(4);
+    expect(lines[0].startsWith('- ')).toBe(false);
+    for (const line of lines.slice(1)) expect(line.startsWith('- ')).toBe(true);
+    expect(DEFAULT_RECAP_PROMPT[lang]).toMatch(lang === 'vi' ? /3 đến 8 câu/ : /3 to 8 sentences/);
+  });
+
+  it('keeps the body on its own lines between the contract and the language line', () => {
+    const lines = recapInstruction({ vi: 'Dòng một\n- Dòng hai' }, 'vi').split('\n');
+    expect(lines[0]).toContain('🔊');
+    expect(lines.slice(1, 3)).toEqual(['Dòng một', '- Dòng hai']);
+    expect(lines[3]).toMatch(/tiếng Việt\.$/);
+  });
+
   it('no custom prompt: default Vietnamese body wrapped with the 🔊 contract and a Vietnamese language line', () => {
     const text = recapInstruction(undefined, 'vi');
     expect(text).toContain('🔊');
@@ -101,6 +116,11 @@ describe('translationRequest', () => {
     expect(en.to).toBe('vi');
     expect(en.prompt).toContain('Keep it short.');
     expect(en.prompt).toMatch(/tiếng Việt/);
+  });
+
+  it('asks the model to keep line breaks and bullets', () => {
+    expect(translationRequest('Ngắn thôi.').prompt).toMatch(/line breaks/);
+    expect(translationRequest('Keep it short.').prompt).toMatch(/xuống dòng/);
   });
 });
 

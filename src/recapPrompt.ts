@@ -16,18 +16,21 @@ import { type Lang } from './lang';
  */
 
 export const DEFAULT_RECAP_PROMPT: Record<Lang, string> = {
-  vi:
-    'Phần đọc phải đủ nghĩa để chỉ nghe cũng hiểu trọn câu trả lời: kết luận, các ý chính, số liệu quan trọng, điều đang cần ở người dùng. ' +
-    'Hỏi thông tin thì kể đủ các mục chính bằng lời, thường ba đến tám câu; chỉ báo việc vừa làm thì hai đến ba câu. ' +
-    'Câu đầu tiên dưới mười hai từ, nêu ngay kết luận. ' +
-    'Văn nói; không code, đường dẫn, tên file, bảng hay ký hiệu markdown. Số viết bằng chữ số như 4200 hay 1.9.0, đừng đánh vần. ' +
-    'Tên ghép tiếng Anh chỉ tách thành từ khi chắc, như SuperAdmin thành Super Admin; không chắc thì giữ nguyên.',
-  en:
-    'That section must stand on its own so a listener understands the whole answer: the conclusion, the main points, the important numbers, what you need from the user. ' +
-    'For information questions say all the main items in words, usually three to eight sentences; when only reporting what you did, two to three sentences. ' +
-    'Keep the first sentence under twelve words, stating the conclusion. ' +
-    'Spoken style; no code, paths, file names, tables or markdown symbols. Write numbers as digits like 4200 or 1.9.0, do not spell them out. ' +
-    'Split compound English names into words only when confident, like SuperAdmin to Super Admin; otherwise leave them unchanged.',
+  // Nhiều dòng để ô setting (multilineText) dễ đọc; hook gửi nguyên các dòng này cho Claude.
+  vi: [
+    'Recap cuối câu trả lời, người dùng chỉ nghe, không nhìn màn hình.',
+    '- Độ dài: hỏi thông tin thì 3 đến 8 câu; báo việc vừa làm thì 2 đến 3 câu.',
+    '- Câu đầu dưới 12 từ, nói kết luận trước.',
+    '- Sau đó: các ý chính, số liệu quan trọng, điều cần người dùng làm.',
+    '- Văn nói; không code, đường dẫn, tên file, bảng hay markdown.',
+  ].join('\n'),
+  en: [
+    'Recap at the end of the answer; the user only listens and does not look at the screen.',
+    '- Length: 3 to 8 sentences for information questions; 2 to 3 sentences when reporting what you did.',
+    '- First sentence under 12 words, conclusion first.',
+    '- Then: the main points, important numbers, what the user needs to do.',
+    '- Spoken style; no code, paths, file names, tables or markdown.',
+  ].join('\n'),
 };
 
 /** Câu hợp đồng, hook nối trước phần thân: định nghĩa "phần đọc" và cách hook cắt text. */
@@ -52,7 +55,7 @@ const other = (lang: Lang): Lang => (lang === 'vi' ? 'en' : 'vi');
 /** Hướng dẫn chèn vào prompt: hợp đồng + thân (bản đúng ngôn ngữ, chưa dịch thì bản gốc, không có thì mặc định) + câu ngôn ngữ. */
 export function recapInstruction(prompts: RecapPrompts | undefined, lang: Lang): string {
   const body = prompts?.[lang] ?? prompts?.[other(lang)] ?? DEFAULT_RECAP_PROMPT[lang];
-  return `${CONTRACT[lang]} ${body} ${LANGUAGE_LINE[lang]}`;
+  return `${CONTRACT[lang]}\n${body.trim()}\n${LANGUAGE_LINE[lang]}`;
 }
 
 const VIET_LETTERS = /[ăâđêôơưàảãáạằẳẵắặầẩẫấậèẻẽéẹềểễếệìỉĩíịòỏõóọồổỗốộờởỡớợùủũúụừửữứựỳỷỹýỵ]/iu;
@@ -93,8 +96,8 @@ export function translationRequest(text: string): TranslationRequest {
   const to = other(from);
   const prompt =
     to === 'en'
-      ? `Translate the following instructions verbatim into English. Keep the ${SPEAK_MARK} symbol, numbers and example names unchanged. Reply with the translation only, no explanation or quotes.\n\n${text.trim()}`
-      : `Dịch nguyên văn hướng dẫn sau sang tiếng Việt. Giữ nguyên ký hiệu ${SPEAK_MARK}, các con số và tên ví dụ. Chỉ trả về bản dịch, không giải thích, không bọc trong ngoặc kép.\n\n${text.trim()}`;
+      ? `Translate the following instructions verbatim into English. Keep the ${SPEAK_MARK} symbol, numbers, example names, line breaks and "- " bullets unchanged. Reply with the translation only, no explanation or quotes.\n\n${text.trim()}`
+      : `Dịch nguyên văn hướng dẫn sau sang tiếng Việt. Giữ nguyên ký hiệu ${SPEAK_MARK}, các con số, tên ví dụ, chỗ xuống dòng và gạch đầu dòng "- ". Chỉ trả về bản dịch, không giải thích, không bọc trong ngoặc kép.\n\n${text.trim()}`;
   return { from, to, prompt };
 }
 

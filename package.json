@@ -99,7 +99,7 @@
           },
           "noIdle.recapPrompt": {
             "type": "string",
-            "default": "Phần đọc phải đủ nghĩa để chỉ nghe cũng hiểu trọn câu trả lời: kết luận, các ý chính, số liệu quan trọng, điều đang cần ở người dùng. Hỏi thông tin thì kể đủ các mục chính bằng lời, thường ba đến tám câu; chỉ báo việc vừa làm thì hai đến ba câu. Câu đầu tiên dưới mười hai từ, nêu ngay kết luận. Văn nói; không code, đường dẫn, tên file, bảng hay ký hiệu markdown. Số viết bằng chữ số như 4200 hay 1.9.0, đừng đánh vần. Tên ghép tiếng Anh chỉ tách thành từ khi chắc, như SuperAdmin thành Super Admin; không chắc thì giữ nguyên.",
+            "default": "Recap cuối câu trả lời, người dùng chỉ nghe, không nhìn màn hình.\n- Độ dài: hỏi thông tin thì 3 đến 8 câu; báo việc vừa làm thì 2 đến 3 câu.\n- Câu đầu dưới 12 từ, nói kết luận trước.\n- Sau đó: các ý chính, số liệu quan trọng, điều cần người dùng làm.\n- Văn nói; không code, đường dẫn, tên file, bảng hay markdown.",
             "editPresentation": "multilineText",
             "markdownDescription": "Dặn agent viết gì trong phần recap (kiểu `recap`). Sửa thẳng, ví dụ rút còn hai câu nếu nghe mệt. Phần kỹ thuật (bắt đầu bằng 🔊, đọc từ đó đến hết, viết bằng tiếng gì) extension tự nối thêm, không cần ghi.\n\nViết một thứ tiếng thôi: lần đầu extension dịch sang thứ tiếng còn lại bằng Copilot Chat hoặc Claude Code bạn đang có (không cần key) và nhớ bản dịch. Để trống là dùng bản mặc định.",
             "scope": "application",

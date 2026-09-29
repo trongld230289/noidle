@@ -124,11 +124,11 @@ describe('queuedPrompts: người dùng gõ tiếp lúc Claude đang làm, lư�
 });
 
 describe('speech word separation instructions', () => {
-  it.each(['vi', 'en'] as const)('guides AI word separation in the default recap prompt (%s)', (lang) => {
+  // 2026-09-29: người dùng bỏ câu tách tên ghép và câu viết số khỏi prompt mặc định cho gọn.
+  it.each(['vi', 'en'] as const)('default recap prompt no longer carries the name-splitting or number rules (%s)', (lang) => {
     const instruction = DEFAULT_RECAP_PROMPT[lang];
-    expect(instruction).toContain('SuperAdmin');
-    expect(instruction).toContain('Super Admin');
-    expect(instruction).toContain(lang === 'vi' ? 'không chắc' : 'confident');
+    expect(instruction).not.toContain('SuperAdmin');
+    expect(instruction).not.toContain('4200');
   });
 
   it('reads the AI-prepared section while preserving names in the main answer', () => {
