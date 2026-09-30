@@ -37,6 +37,19 @@ function run(args: string[], stdin: string, extraEnv: NodeJS.ProcessEnv = {}): P
 }
 
 const readLog = () => (fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8') : '');
+/**
+ * Chờ tiến trình play tách rời ghi dòng này vào log (tối đa ms). Test nào để hook tách play với --listen phải chờ
+ * dòng "signal listen" của nó, không thì dòng đó rớt sang cửa sổ log của test sau (test sau "không mở mic" đỏ giả).
+ */
+async function waitLog(from: number, text: string, ms = 15_000): Promise<string> {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) {
+    const s = readLog().slice(from);
+    if (s.includes(text)) return s;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return readLog().slice(from);
+}
 
 beforeAll(async () => {
   await build({
@@ -192,7 +205,9 @@ describe('claude-hook background task notifications', () => {
     const after = readLog().slice(resumed);
     expect(after).toContain('play pid');
     expect(after).toContain('signal attention');
-  });
+    // Mở mic: tiến trình play tách rời gửi listen sau khi phát (player giả lỗi ngay). Chờ nó ở đây cho đủ lời hứa của test.
+    expect(await waitLog(resumed, 'signal listen')).toContain('signal listen');
+  }, 30_000);
 
   it('reads the 🔊 section Claude wrote while background work is still running, without opening the mic', async () => {
     const session = 'background-report';

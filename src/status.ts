@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import type { Lang } from './lang';
 import { formatUsage, type ElevenUsage } from './elevenlabs';
 import type { AttentionReason } from './signal';
+import { idleStatus } from './statusText';
 
 export type State = 'idle' | 'recording' | 'listening' | 'transcribing';
 
@@ -15,11 +16,20 @@ export class StatusBar implements vscode.Disposable {
   /** Status bar luôn tiếng Anh (UI của extension), không theo noIdle.language, vì đó là ngôn ngữ nói và nghe. */
   /** Cửa sổ này đang có việc cần người dùng (Claude xong, approve, trả lời); chỉ hiện khi rảnh, tắt khi cửa sổ được focus. */
   private attentionReason: AttentionReason | undefined;
+  /** Không thấy ffplay: nút rảnh báo "no sound", bấm để cài ffmpeg. */
+  private playerMissing = false;
 
   constructor() {
     this.item.command = 'noIdle.toggle';
     this.set('idle');
     this.item.show();
+  }
+
+  /** Thiếu hay có ffplay; hiện khi rảnh và không có việc cần người dùng. */
+  missingPlayer(missing: boolean): void {
+    if (this.playerMissing === missing) return;
+    this.playerMissing = missing;
+    if (this.state === 'idle') this.render();
   }
 
   /** Đổi màu status bar để tìm đúng cửa sổ trong nhiều cửa sổ; giữ tới khi clearAttention. */
@@ -44,19 +54,17 @@ export class StatusBar implements vscode.Disposable {
 
   private render(): void {
     const state = this.state;
+    // Lúc rảnh có thể đổi sang lệnh cài ffmpeg; các trạng thái khác luôn là bật/tắt mic.
+    this.item.command = 'noIdle.toggle';
     switch (state) {
-      case 'idle':
-        if (this.attentionReason) {
-          const label = { done: `${this.agent} is done`, approve: 'needs approval', answer: 'needs your answer' }[this.attentionReason];
-          this.item.text = `$(bell-dot) ${label}`;
-          this.item.tooltip = 'This window needs you. Clears when the window gets focus';
-          this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
-          break;
-        }
-        this.item.text = '$(mic) NoIdle';
-        this.item.tooltip = 'F6 to start listening';
-        this.item.backgroundColor = undefined;
+      case 'idle': {
+        const s = idleStatus({ agent: this.agent, attention: this.attentionReason, missingPlayer: this.playerMissing });
+        this.item.text = s.text;
+        this.item.tooltip = s.tooltip;
+        this.item.command = s.command;
+        this.item.backgroundColor = s.warning ? new vscode.ThemeColor('statusBarItem.warningBackground') : undefined;
         break;
+      }
       case 'recording':
         this.item.text = '$(record) Listening…';
         this.item.tooltip = 'F6 to stop';

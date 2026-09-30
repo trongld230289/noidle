@@ -38,6 +38,7 @@ Ngoài ra: bấm **F6** để nói thành chữ ở bất kỳ đâu trong VS Co
 **1. Cài ffmpeg và Node.js** (ffmpeg để ghi âm và phát tiếng, Node.js để chạy phần đọc câu trả lời):
 - Windows: `winget install ffmpeg` và `winget install OpenJS.NodeJS.LTS`
 - macOS: `brew install ffmpeg node`
+- Hoặc để extension cài giúp: thiếu cái nào thì cảnh báo hiện nút **Cài ffmpeg** / **Cài Node.js**, cũng có trong Command Palette (`NoIdle: Cài ffmpeg`, `NoIdle: Cài Node.js`). Cài Node.js xong thì đóng hết VS Code rồi mở lại.
 
 Đã cài Claude Code bằng npm thì đã có Node.js. Extension tự tìm ffmpeg vừa cài (kể cả khi shell đang mở chưa có nó trong PATH) và ghi đường dẫn đầy đủ vào hook, nên chạy Claude từ PowerShell hay cmd đều có tiếng.
 
@@ -166,8 +167,8 @@ Tắt Voice Response hoặc Voice Notify không tắt Hands Free. Khi không có
 
 | Hiện tượng | Cách xử lý |
 |---|---|
-| Không tìm thấy ffmpeg, hoặc cửa sổ nháy mà không có tiếng | Bấm **Cài ffmpeg** trên cảnh báo (chạy winget/brew giúp, đóng terminal là xong), hoặc cài tay rồi đổi bất kỳ setting NoIdle nào để extension tìm lại, hoặc điền đường dẫn vào Ffmpeg Path. |
-| Báo cần Node.js, hoặc Copilot Chat hiện "Warning from ... hook" | Cài Node.js (bước 1) rồi mở lại VS Code. |
+| Không tìm thấy ffmpeg, hoặc cửa sổ nháy mà không có tiếng | Bấm **Cài ffmpeg** trên cảnh báo, hoặc bấm nút "NoIdle: no sound" trên status bar, hoặc chạy lệnh `NoIdle: Cài ffmpeg` (winget/brew chạy giúp, đóng terminal là xong). Cài tay thì đổi bất kỳ setting NoIdle nào để extension tìm lại, hoặc điền đường dẫn vào Ffmpeg Path. |
+| Báo cần Node.js, hoặc Copilot Chat hiện "Warning from ... hook" | Bấm **Cài Node.js** trên cảnh báo hoặc chạy lệnh `NoIdle: Cài Node.js` (winget/brew chạy giúp), rồi đóng hết cửa sổ VS Code và mở lại. |
 | Sai key | Chạy `NoIdle: Set Groq API Key`, nhập lại. |
 | Nói mà không ra chữ | Kiểm tra mic trong cài đặt Sound của máy (macOS: thêm quyền mic cho VS Code ở Privacy & Security > Microphone). Chạy `NoIdle: Chọn micro`. |
 | F6 trong terminal ra ký tự lạ | Mở lại VS Code; extension tự thêm F6 vào `terminal.integrated.commandsToSkipShell` lần đầu chạy. |

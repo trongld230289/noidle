@@ -61,6 +61,14 @@
       {
         "command": "noIdle.skipSpeech",
         "title": "NoIdle: Bỏ qua đang đọc"
+      },
+      {
+        "command": "noIdle.installFfmpeg",
+        "title": "NoIdle: Cài ffmpeg (để có tiếng đọc)"
+      },
+      {
+        "command": "noIdle.installNode",
+        "title": "NoIdle: Cài Node.js (để chạy hook)"
       }
     ],
     "configuration": [
