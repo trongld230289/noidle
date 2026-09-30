@@ -287,6 +287,7 @@ public static class NoIdleHost {
   [DllImport("kernel32.dll")] public static extern bool FreeConsole();
   [DllImport("kernel32.dll")] public static extern bool AttachConsole(uint pid);
   [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern uint GetConsoleTitle(StringBuilder text, uint count);
   [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hWnd, uint flags);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder text, int count);
   [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr lParam);
@@ -313,9 +314,11 @@ public static class NoIdleHost {
     return true;
   }
   public static string Chosen = "";
+  /** Cách đã chọn cửa sổ, ghi vào log: [console] owner của console, [title] tiêu đề trùng console, [z-order] cửa sổ đầu tiên của tiến trình. */
+  public static string How = "";
   public static int FlashHwnd(IntPtr h, IntPtr fg, string title) {
     uint pid; GetWindowThreadProcessId(h, out pid);
-    Chosen = "pid " + pid + " " + title;
+    Chosen = "pid " + pid + " " + title + " " + How;
     if (title.ToLowerInvariant().Contains("visual studio code")) return 4;
     if (h == fg) return 3;
     var f = new FLASHWINFO();
@@ -328,12 +331,15 @@ public static class NoIdleHost {
     return 0;
   }
   public static string TitleOf(IntPtr h) { var sb = new StringBuilder(512); GetWindowText(h, sb, sb.Capacity); return sb.ToString(); }
+  /** Tiêu đề console của agent (Windows Terminal đặt nó làm tiêu đề tab, và của cửa sổ khi tab đó đang mở). */
+  public static string ConsoleTitle = "";
   /** Cửa sổ terminal đang chứa console của một pid trong chuỗi; IntPtr.Zero nếu console không có cửa sổ hiện (conpty của VS Code). */
   public static IntPtr ConsoleHost(uint[] chain) {
     FreeConsole();
     bool attached = false;
     foreach (uint p in chain) { if (AttachConsole(p)) { attached = true; break; } }
     if (!attached) return IntPtr.Zero;
+    var ct = new StringBuilder(512); GetConsoleTitle(ct, (uint)ct.Capacity); ConsoleTitle = ct.ToString();
     IntPtr h = GetConsoleWindow();
     if (h == IntPtr.Zero) return IntPtr.Zero;
     IntPtr root = GetAncestor(h, 3);
@@ -345,7 +351,7 @@ public static class NoIdleHost {
   public static int Flash(uint[] chain) {
     IntPtr fg = GetForegroundWindow();
     IntPtr host = ConsoleHost(chain);
-    if (host != IntPtr.Zero) return FlashHwnd(host, fg, TitleOf(host));
+    if (host != IntPtr.Zero) { How = "[console]"; return FlashHwnd(host, fg, TitleOf(host)); }
     var parent = new Dictionary<uint, uint>();
     var exe = new Dictionary<uint, string>();
     IntPtr snap = CreateToolhelp32Snapshot(2, 0);
@@ -358,13 +364,20 @@ public static class NoIdleHost {
     }
     Handles.Clear(); Pids.Clear(); Titles.Clear();
     EnumWindows(Collect, IntPtr.Zero);
+    // Một tiến trình có thể chứa nhiều cửa sổ (Windows Terminal chạy mọi cửa sổ trong một WindowsTerminal.exe).
+    // EnumWindows trả theo thứ tự Z, cửa sổ đầu tiên là cửa sổ đang nằm trên, thường là cửa sổ người dùng đang nhìn
+    // chứ không phải cửa sổ của agent; nên ưu tiên cửa sổ có tiêu đề trùng tiêu đề console của agent.
     foreach (uint p in chain) {
       string name; if (exe.TryGetValue(p, out name) && name == "explorer.exe") continue;
+      int first = -1;
       for (int i = 0; i < Handles.Count; i++) {
         uint wp = Pids[i]; uint wpp;
         bool own = wp == p || (parent.TryGetValue(wp, out wpp) && wpp == p);
-        if (own) return FlashHwnd(Handles[i], fg, Titles[i]);
+        if (!own) continue;
+        if (ConsoleTitle.Length > 0 && Titles[i] == ConsoleTitle) { How = "[title]"; return FlashHwnd(Handles[i], fg, Titles[i]); }
+        if (first < 0) first = i;
       }
+      if (first >= 0) { How = "[z-order]"; return FlashHwnd(Handles[first], fg, Titles[first]); }
     }
     return 2;
   }

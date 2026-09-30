@@ -200,3 +200,18 @@ describe('attention: handle đã học phải là cửa sổ của workspace mì
     expect(await flashWindow('vi-voice', { platform: 'win32', run: run(10), hwnd: '1' })).toBe('flashed');
   });
 });
+
+describe('attention: một tiến trình Windows Terminal chứa nhiều cửa sổ', () => {
+  it('bước cây tiến trình ưu tiên cửa sổ có tiêu đề trùng tiêu đề console, không lấy cửa sổ trên cùng theo thứ tự Z', () => {
+    // 30/9/2026: hai Claude CLI ở hai cửa sổ WT (một tiến trình WindowsTerminal.exe). Khi console không cho biết
+    // cửa sổ chủ, bước cây tiến trình lấy cửa sổ đầu tiên EnumWindows trả về = cửa sổ đang nằm trên, tức cửa sổ
+    // người dùng đang nhìn (B) chứ không phải cửa sổ của agent vừa xong (A).
+    const s = flashHostScript([1]);
+    expect(s).toContain('GetConsoleTitle');
+    expect(s).toContain('Titles[i] == ConsoleTitle');
+  });
+  it('script ghi cách chọn cửa sổ (console, tiêu đề, thứ tự Z) vào dòng log', () => {
+    const s = flashHostScript([1]);
+    for (const how of ['[console]', '[title]', '[z-order]']) expect(s).toContain(how);
+  });
+});
