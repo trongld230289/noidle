@@ -73,26 +73,33 @@ public static class NoIdleWin {
     FlashWindowEx(ref f);
     return 0;
   }
+  public static string TitleOf(IntPtr h) { var sb = new StringBuilder(512); GetWindowText(h, sb, sb.Capacity); return sb.ToString(); }
+  public static bool TitleMatches(string title, string workspace) {
+    var t = title.ToLowerInvariant();
+    if (!t.Contains("visual studio code")) return false;
+    if (workspace.Length == 0) return true;
+    foreach (var raw in t.Split(new string[] { " - " }, StringSplitOptions.None)) {
+      var p = raw.TrimStart('\\u25CF', '\\u25CB', '\\u2022', '*', ' ').Trim();
+      if (p == workspace || p == workspace + " (workspace)") return true;
+    }
+    return false;
+  }
+  /** Handle đã học phải còn là cửa sổ VS Code mang tên workspace này (học nhầm lúc cửa sổ khác còn ở foreground); sai thì tìm theo tên và cộng 10 vào mã để extension quên handle. */
   public static int Flash(string workspace, long hwnd) {
     IntPtr fg = GetForegroundWindow();
+    int stale = 0;
     if (hwnd != 0) {
       IntPtr known = new IntPtr(hwnd);
-      if (IsWindow(known) && IsWindowVisible(known)) return FlashHandle(known, fg);
+      if (IsWindow(known) && IsWindowVisible(known) && TitleMatches(TitleOf(known), workspace)) return FlashHandle(known, fg);
+      stale = 10;
     }
     Handles.Clear(); Titles.Clear();
     EnumWindows(Collect, IntPtr.Zero);
     for (int i = 0; i < Titles.Count; i++) {
-      var t = Titles[i].ToLowerInvariant();
-      if (!t.Contains("visual studio code")) continue;
-      bool hit = false;
-      foreach (var raw in t.Split(new string[] { " - " }, StringSplitOptions.None)) {
-        var p = raw.TrimStart('\\u25CF', '\\u25CB', '\\u2022', '*', ' ').Trim();
-        if (p == workspace || p == workspace + " (workspace)") { hit = true; break; }
-      }
-      if (!hit) continue;
-      return FlashHandle(Handles[i], fg);
+      if (workspace.Length == 0 || !TitleMatches(Titles[i], workspace)) continue;
+      return stale + FlashHandle(Handles[i], fg);
     }
-    return 2;
+    return stale + 2;
   }
 }
 "@
@@ -205,21 +212,42 @@ function codeOf(r: number | RunResult): number {
   return typeof r === 'number' ? r : r.code;
 }
 
+export interface FlashOutcome {
+  result: FlashResult;
+  /** Handle đã học không còn là cửa sổ của workspace này: script đã tìm theo tên, extension nên quên handle và học lại. */
+  staleHandle: boolean;
+}
+
 /** Nháy nút taskbar của cửa sổ VS Code theo handle đã học, không có thì theo tên workspace. Không ném lỗi; kết quả để ghi log. */
-export async function flashWindow(workspaceName: string, deps: FlashDeps = {}): Promise<FlashResult> {
+export async function flashWindowEx(workspaceName: string, deps: FlashDeps = {}): Promise<FlashOutcome> {
   const platform = deps.platform ?? process.platform;
-  if (platform !== 'win32') return 'unsupported';
+  if (platform !== 'win32') return { result: 'unsupported', staleHandle: false };
   const run = deps.run ?? runPowerShell;
   let code: number;
   try {
     code = codeOf(await run(flashScript(workspaceName, deps.hwnd)));
   } catch {
-    return 'error';
+    return { result: 'error', staleHandle: false };
   }
-  if (code === 0) return 'flashed';
-  if (code === 2) return 'not-found';
-  if (code === 3) return 'foreground';
-  return 'error';
+  const staleHandle = code >= 10 && code <= 13;
+  const base = staleHandle ? code - 10 : code;
+  const result: FlashResult = base === 0 ? 'flashed' : base === 2 ? 'not-found' : base === 3 ? 'foreground' : 'error';
+  return { result, staleHandle };
+}
+
+export async function flashWindow(workspaceName: string, deps: FlashDeps = {}): Promise<FlashResult> {
+  return (await flashWindowEx(workspaceName, deps)).result;
+}
+
+/**
+ * Có nhận handle vừa đọc làm handle của cửa sổ mình không. Cửa sổ mới mở: extension đã "focused" nhưng OS có thể còn
+ * để cửa sổ cũ ở foreground, nên tiêu đề đọc được phải mang tên workspace này (biết tên). Hai cửa sổ trùng tên thì
+ * tên không phân biệt được, còn lại dựa vào focus: mất focus trong lúc đọc thì bỏ, học lại lần focus sau.
+ */
+export function acceptLearnedWindow(w: ForegroundWindow, workspaceName: string, stillFocused: boolean): boolean {
+  if (!stillFocused) return false;
+  if (!workspaceName) return true;
+  return windowTitleMatches(w.title, workspaceName);
 }
 
 /**

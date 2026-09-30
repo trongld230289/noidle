@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { StatusBar, UsageBar } from './status';
-import { flashWindow, learnForegroundWindow, blinkTitleBar, applyTint, removeTint, shellColorFor, normalizeHex, TINT, type ColorMap } from './attention';
+import { flashWindowEx, learnForegroundWindow, acceptLearnedWindow, blinkTitleBar, applyTint, removeTint, shellColorFor, normalizeHex, TINT, type ColorMap } from './attention';
 import { Recorder, SAMPLE_RATE, CHANNELS } from './recorder';
 import { Segmenter } from './segmenter';
 import { listenOnce } from './listen';
@@ -1313,10 +1313,12 @@ export function activate(ctx: vscode.ExtensionContext): void {
       );
       log(`attention ${reason}: nháy title bar → ${r}`);
     } else if (cfg.attentionFlash) {
-      const name = vscode.workspace.name ?? path.basename(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '');
+      const name = wsName();
       if (!name && !myHwnd) return;
-      const r = await flashWindow(name, { hwnd: myHwnd });
-      log(`attention ${reason}: nháy taskbar ${myHwnd ? `hwnd ${myHwnd}` : `"${name}"`} → ${r}`);
+      const used = myHwnd;
+      const r = await flashWindowEx(name, { hwnd: myHwnd });
+      log(`attention ${reason}: nháy taskbar ${used ? `hwnd ${used}` : `"${name}"`} → ${r.result}${r.staleHandle ? ' (handle không còn đúng, đã tìm theo tên; sẽ học lại)' : ''}`);
+      if (r.staleHandle && myHwnd === used) myHwnd = undefined;
     }
   }
 
@@ -1327,15 +1329,19 @@ export function activate(ctx: vscode.ExtensionContext): void {
    */
   let myHwnd: string | undefined;
   let learningHwnd = false;
+  const wsName = () => vscode.workspace.name ?? path.basename(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '');
   async function learnMyWindow(): Promise<void> {
     if (myHwnd || learningHwnd || process.platform !== 'win32' || !vscode.window.state.focused) return;
     learningHwnd = true;
     try {
+      // Cửa sổ vừa mở hay vừa được focus: chờ OS đổi foreground xong rồi mới đọc, không thì đọc trúng cửa sổ cũ.
+      await new Promise((r) => setTimeout(r, 800));
+      if (!vscode.window.state.focused) return;
       const w = await learnForegroundWindow();
-      // Script mất khoảng một giây; người dùng chuyển cửa sổ trong lúc đó thì cửa sổ đọc được không phải mình.
       if (!w) log('attention: không đọc được handle cửa sổ, sẽ nháy theo tên workspace');
-      else if (!vscode.window.state.focused) log('attention: mất focus trong lúc đọc handle, bỏ; học lại lần focus sau');
-      else {
+      else if (!acceptLearnedWindow(w, wsName(), vscode.window.state.focused)) {
+        log(`attention: cửa sổ foreground lúc đọc là "${w.title}", không phải cửa sổ này (hoặc đã mất focus); học lại lần focus sau`);
+      } else {
         myHwnd = w.hwnd;
         log(`attention: cửa sổ này là hwnd ${w.hwnd} "${w.title}"`);
       }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { windowTitleMatches, flashScript, flashWindow, flashHostScript, flashHostWindow, applyTint, removeTint, shellColorFor, tintForeground, normalizeHex, TINT, foregroundWindowScript, parseForegroundWindow, learnForegroundWindow } from '../src/attention';
+import { windowTitleMatches, flashScript, flashWindow, flashHostScript, flashHostWindow, applyTint, removeTint, shellColorFor, tintForeground, normalizeHex, TINT, foregroundWindowScript, parseForegroundWindow, learnForegroundWindow, acceptLearnedWindow, flashWindowEx } from '../src/attention';
 
 describe('attention: tìm cửa sổ VS Code theo tiêu đề', () => {
   it('khớp tiêu đề mặc định "file - workspace - Visual Studio Code"', () => {
@@ -171,5 +171,32 @@ describe('attention: nháy theo handle đã học thay vì theo tên (hai cửa 
     expect(script).toContain('Flash($ws, 4242)');
     expect(await flashWindow('vi-voice', { platform: 'win32', run, hwnd: 'garbage' })).toBe('flashed');
     expect(script).toContain('Flash($ws, 0)');
+  });
+});
+
+describe('attention: handle đã học phải là cửa sổ của workspace mình', () => {
+  it('acceptLearnedWindow: tiêu đề đọc được phải có tên workspace (khi biết tên); mất focus giữa chừng thì bỏ', () => {
+    const w = { hwnd: '66674', title: 'BillingPaymentService.cs - SHIPNGO-BE-HotFix (Workspace) - Visual Studio Code [Administrator]' };
+    // Cửa sổ mới mở: extension đã "focused" nhưng OS còn để cửa sổ cũ ở foreground → đọc nhầm handle cửa sổ khác.
+    expect(acceptLearnedWindow(w, 'role-permission-management (Workspace)', true)).toBe(false);
+    expect(acceptLearnedWindow(w, 'SHIPNGO-BE-HotFix (Workspace)', true)).toBe(true);
+    expect(acceptLearnedWindow(w, 'SHIPNGO-BE-HotFix (Workspace)', false)).toBe(false);
+    // Không biết tên (cửa sổ không có folder) thì chỉ dựa vào focus.
+    expect(acceptLearnedWindow(w, '', true)).toBe(true);
+    // Hai cửa sổ trùng tên: tên khớp cả hai, focus quyết định (đó là lý do cần handle).
+    expect(acceptLearnedWindow({ hwnd: '1', title: 'a.ts - Untitled (Workspace) - Visual Studio Code' }, 'Untitled (Workspace)', true)).toBe(true);
+  });
+  it('flashScript: handle chỉ được nháy khi tiêu đề của nó vẫn có tên workspace; sai thì tìm theo tên và báo handle cũ (mã +10)', () => {
+    const s = flashScript('vi-voice', '4242');
+    expect(s).toContain('TitleOf(known)');
+    expect(s).toContain('stale = 10');
+  });
+  it('flashWindowEx: mã 10..13 là kết quả của tìm theo tên sau khi handle sai, kèm cờ staleHandle để extension học lại', async () => {
+    const run = (code: number) => async () => code;
+    expect(await flashWindowEx('vi-voice', { platform: 'win32', run: run(0), hwnd: '1' })).toEqual({ result: 'flashed', staleHandle: false });
+    expect(await flashWindowEx('vi-voice', { platform: 'win32', run: run(10), hwnd: '1' })).toEqual({ result: 'flashed', staleHandle: true });
+    expect(await flashWindowEx('vi-voice', { platform: 'win32', run: run(12), hwnd: '1' })).toEqual({ result: 'not-found', staleHandle: true });
+    expect(await flashWindowEx('vi-voice', { platform: 'win32', run: run(13), hwnd: '1' })).toEqual({ result: 'foreground', staleHandle: true });
+    expect(await flashWindow('vi-voice', { platform: 'win32', run: run(10), hwnd: '1' })).toBe('flashed');
   });
 });
