@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { StatusBar, UsageBar } from './status';
-import { flashWindow, blinkTitleBar, applyTint, removeTint, shellColorFor, normalizeHex, TINT, type ColorMap } from './attention';
+import { flashWindow, learnForegroundWindow, blinkTitleBar, applyTint, removeTint, shellColorFor, normalizeHex, TINT, type ColorMap } from './attention';
 import { Recorder, SAMPLE_RATE, CHANNELS } from './recorder';
 import { Segmenter } from './segmenter';
 import { listenOnce } from './listen';
@@ -15,7 +15,7 @@ import { applyHooks, copilotHooksFile, copilotHookPaths, hooksEnabled, ClaudeSet
 import { inject, InjectorApi, Target } from './injector';
 import { startServer, writeRegistry, removeRegistry, pipeName, Signal, acquireMic, releaseMic, micHolder, signalPid, canAutoListen, type AttentionReason } from './signal';
 import { audioLevel, pcmToWav } from './wav';
-import { terminalForAgent } from './proctree';
+import { terminalForAgent, agentInWindow } from './proctree';
 import { planMigration, planMuteMigration, configProperties } from './migrate';
 import { checkRequirements } from './requirements';
 import { findExecutable } from './findTool';
@@ -1151,7 +1151,19 @@ export function activate(ctx: vscode.ExtensionContext): void {
       return;
     }
     if (s.event === 'submitted') chatPending.promptSubmitted(s.session);
-    if (s.event === 'attention') return onAttention(s.reason ?? 'done');
+    if (s.event === 'attention') {
+      // Hook hỏi mọi cửa sổ kèm chuỗi pid tổ tiên: extension host này (Copilot Chat) hay một terminal của cửa sổ này
+      // (Claude Code, Copilot CLI) nằm trong chuỗi thì mới là cửa sổ chứa agent. Trả 'owned' ngay, nháy sau.
+      if (s.ancestors?.length) {
+        if (!(await agentInWindow(s.ancestors, process.pid, vscode.window.terminals))) {
+          log(`attention ${s.reason ?? 'done'}: agent không ở cửa sổ này, bỏ qua`);
+          return;
+        }
+        void onAttention(s.reason ?? 'done').catch((err) => log(`attention lỗi: ${(err as Error).message}`));
+        return 'owned';
+      }
+      return onAttention(s.reason ?? 'done');
+    }
     if (s.event === 'ask') return askOnce(Math.max(3, s.timeoutSec ?? 15) * 1000, s.reason);
     if (s.event === 'resumed') {
       // Việc nền xong, Claude chạy tiếp: không còn "done". Mic đang mở thì để nguyên (câu đang nói vẫn vào hàng đợi).
@@ -1285,14 +1297,42 @@ export function activate(ctx: vscode.ExtensionContext): void {
       log(`attention ${reason}: nháy title bar → ${r}`);
     } else if (cfg.attentionFlash) {
       const name = vscode.workspace.name ?? path.basename(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '');
-      if (!name) return;
-      const r = await flashWindow(name);
-      log(`attention ${reason}: nháy taskbar "${name}" → ${r}`);
+      if (!name && !myHwnd) return;
+      const r = await flashWindow(name, { hwnd: myHwnd });
+      log(`attention ${reason}: nháy taskbar ${myHwnd ? `hwnd ${myHwnd}` : `"${name}"`} → ${r}`);
     }
   }
+
+  /**
+   * Handle cửa sổ này (Windows), học lúc cửa sổ vừa được focus: khi đó cửa sổ foreground là chính nó. VS Code không
+   * cho extension biết handle, và mọi cửa sổ chung một tiến trình nên không tra theo pid được. Có handle thì nháy
+   * đúng cửa sổ dù hai cửa sổ trùng tên workspace (hai "Untitled (Workspace)"). Học một lần; handle giữ suốt đời cửa sổ.
+   */
+  let myHwnd: string | undefined;
+  let learningHwnd = false;
+  async function learnMyWindow(): Promise<void> {
+    if (myHwnd || learningHwnd || process.platform !== 'win32' || !vscode.window.state.focused) return;
+    learningHwnd = true;
+    try {
+      const w = await learnForegroundWindow();
+      // Script mất khoảng một giây; người dùng chuyển cửa sổ trong lúc đó thì cửa sổ đọc được không phải mình.
+      if (!w) log('attention: không đọc được handle cửa sổ, sẽ nháy theo tên workspace');
+      else if (!vscode.window.state.focused) log('attention: mất focus trong lúc đọc handle, bỏ; học lại lần focus sau');
+      else {
+        myHwnd = w.hwnd;
+        log(`attention: cửa sổ này là hwnd ${w.hwnd} "${w.title}"`);
+      }
+    } finally {
+      learningHwnd = false;
+    }
+  }
+  void learnMyWindow();
   ctx.subscriptions.push(
     vscode.window.onDidChangeWindowState((st) => {
-      if (st.focused) clearAttention();
+      if (st.focused) {
+        clearAttention();
+        void learnMyWindow();
+      }
     }),
   );
 

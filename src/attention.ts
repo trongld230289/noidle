@@ -24,8 +24,17 @@ export function windowTitleMatches(title: string, workspaceName: string): boolea
 const FLASHW_ALL = 3;
 const FLASHW_TIMERNOFG = 12;
 
-/** Script PowerShell: tìm cửa sổ VS Code có tên workspace trong tiêu đề rồi nháy tới khi nó lên foreground. Exit 0 nháy, 2 không thấy, 3 đang ở foreground. */
-export function flashScript(workspaceName: string): string {
+/** Handle cửa sổ (số thập phân từ script) hợp lệ thì trả về, không thì '0' (script tìm theo tên). */
+function hwndArg(hwnd: string | undefined): string {
+  return hwnd && /^\d{1,19}$/.test(hwnd) ? hwnd : '0';
+}
+
+/**
+ * Script PowerShell: nháy cửa sổ VS Code tới khi nó lên foreground. Có handle đã học (xem learnForegroundWindow) và
+ * cửa sổ còn đó thì nháy thẳng handle; không thì tìm cửa sổ có tên workspace trong tiêu đề (hai cửa sổ trùng tên
+ * thì cách này có thể chọn nhầm). Exit 0 nháy, 2 không thấy, 3 đang ở foreground.
+ */
+export function flashScript(workspaceName: string, hwnd?: string): string {
   const name = workspaceName.replace(/'/g, "''");
   return `
 $ErrorActionPreference = 'Stop'
@@ -38,6 +47,7 @@ public static class NoIdleWin {
   public struct FLASHWINFO { public uint cbSize; public IntPtr hwnd; public uint dwFlags; public uint uCount; public uint dwTimeout; }
   public delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
   [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
@@ -52,10 +62,25 @@ public static class NoIdleWin {
     if (t.Length > 0) { Handles.Add(h); Titles.Add(t); }
     return true;
   }
-  public static int Flash(string workspace) {
+  public static int FlashHandle(IntPtr h, IntPtr fg) {
+    if (h == fg) return 3;
+    var f = new FLASHWINFO();
+    f.cbSize = (uint)Marshal.SizeOf(f);
+    f.hwnd = h;
+    f.dwFlags = ${FLASHW_ALL | FLASHW_TIMERNOFG};
+    f.uCount = 0;
+    f.dwTimeout = 0;
+    FlashWindowEx(ref f);
+    return 0;
+  }
+  public static int Flash(string workspace, long hwnd) {
+    IntPtr fg = GetForegroundWindow();
+    if (hwnd != 0) {
+      IntPtr known = new IntPtr(hwnd);
+      if (IsWindow(known) && IsWindowVisible(known)) return FlashHandle(known, fg);
+    }
     Handles.Clear(); Titles.Clear();
     EnumWindows(Collect, IntPtr.Zero);
-    IntPtr fg = GetForegroundWindow();
     for (int i = 0; i < Titles.Count; i++) {
       var t = Titles[i].ToLowerInvariant();
       if (!t.Contains("visual studio code")) continue;
@@ -65,23 +90,72 @@ public static class NoIdleWin {
         if (p == workspace || p == workspace + " (workspace)") { hit = true; break; }
       }
       if (!hit) continue;
-      if (Handles[i] == fg) return 3;
-      var f = new FLASHWINFO();
-      f.cbSize = (uint)Marshal.SizeOf(f);
-      f.hwnd = Handles[i];
-      f.dwFlags = ${FLASHW_ALL | FLASHW_TIMERNOFG};
-      f.uCount = 0;
-      f.dwTimeout = 0;
-      FlashWindowEx(ref f);
-      return 0;
+      return FlashHandle(Handles[i], fg);
     }
     return 2;
   }
 }
 "@
 $ws = '${name}'.ToLowerInvariant() -replace ' \(workspace\)$', ''
-exit [NoIdleWin]::Flash($ws)
+exit [NoIdleWin]::Flash($ws, ${hwndArg(hwnd)})
 `;
+}
+
+/** Script PowerShell: in "hwnd<tab>tiêu đề" của cửa sổ đang ở foreground (handle dạng số thập phân). */
+export function foregroundWindowScript(): string {
+  return `
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @"
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class NoIdleFg {
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+  public static string Read() {
+    IntPtr h = GetForegroundWindow();
+    var sb = new StringBuilder(512);
+    GetWindowText(h, sb, sb.Capacity);
+    return h.ToInt64().ToString() + "\`t" + sb.ToString();
+  }
+}
+"@
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::Out.Write([NoIdleFg]::Read())
+`;
+}
+
+export interface ForegroundWindow {
+  /** Handle dạng số thập phân, đưa lại cho flashScript. */
+  hwnd: string;
+  title: string;
+}
+
+/** Đọc "hwnd<tab>tiêu đề"; chỉ nhận cửa sổ VS Code (extension chỉ học handle khi chính nó đang focus). */
+export function parseForegroundWindow(out: string): ForegroundWindow | undefined {
+  const m = /^(\d+)\t(.*)$/.exec(out.trim());
+  if (!m) return undefined;
+  const title = m[2].trim();
+  if (!title.toLowerCase().includes('visual studio code')) return undefined;
+  return { hwnd: m[1], title };
+}
+
+/**
+ * Cửa sổ VS Code nào đang ở foreground. Extension gọi lúc cửa sổ của mình vừa được focus để biết handle của chính
+ * nó: VS Code không cho extension biết handle, và mọi cửa sổ chung một tiến trình nên không tra theo pid được.
+ * Có handle thì nháy đúng cửa sổ dù nhiều cửa sổ trùng tên workspace. undefined ngoài Windows hay khi lỗi.
+ */
+export async function learnForegroundWindow(deps: FlashDeps = {}): Promise<ForegroundWindow | undefined> {
+  const platform = deps.platform ?? process.platform;
+  if (platform !== 'win32') return undefined;
+  const run = deps.run ?? ((script) => runPowerShell(script, 'foreground'));
+  try {
+    const r = await run(foregroundWindowScript());
+    if (typeof r === 'number' || r.code !== 0) return undefined;
+    return parseForegroundWindow(r.out);
+  } catch {
+    return undefined;
+  }
 }
 
 export type FlashResult = 'flashed' | 'not-found' | 'foreground' | 'unsupported' | 'error';
@@ -90,6 +164,8 @@ export interface FlashDeps {
   platform?: NodeJS.Platform;
   /** Chạy script, trả exit code (kèm stdout nếu có). Mặc định: ghi ra file tạm rồi gọi powershell -File. */
   run?: (script: string) => Promise<number | RunResult>;
+  /** flashWindow: handle cửa sổ đã học (learnForegroundWindow); có thì nháy thẳng, không cần tìm theo tên. */
+  hwnd?: string;
 }
 
 /** Kết quả chạy script: exit code và stdout (script nháy cửa sổ chứa agent in ra cửa sổ đã chọn để ghi log). */
@@ -129,14 +205,14 @@ function codeOf(r: number | RunResult): number {
   return typeof r === 'number' ? r : r.code;
 }
 
-/** Nháy nút taskbar của cửa sổ VS Code có tên workspace này. Không ném lỗi; kết quả để ghi log. */
+/** Nháy nút taskbar của cửa sổ VS Code theo handle đã học, không có thì theo tên workspace. Không ném lỗi; kết quả để ghi log. */
 export async function flashWindow(workspaceName: string, deps: FlashDeps = {}): Promise<FlashResult> {
   const platform = deps.platform ?? process.platform;
   if (platform !== 'win32') return 'unsupported';
   const run = deps.run ?? runPowerShell;
   let code: number;
   try {
-    code = codeOf(await run(flashScript(workspaceName)));
+    code = codeOf(await run(flashScript(workspaceName, deps.hwnd)));
   } catch {
     return 'error';
   }

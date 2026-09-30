@@ -29,7 +29,7 @@ import { lastAssistantText, pickSpeech, hasSpeakSection, pendingBackgroundTasks,
 import { recapInstruction, type RecapPrompts } from './recapPrompt';
 import { langOf, isAuto, detectLang, effectiveVoice, usesVietPronunciation, DEFAULT_VOICE, type Lang } from './lang';
 import { parseApproval, isDangerous, voiceApprovable, parseChoice, isChoiceCancellation, isAmbiguousChoice, permissionRequestOutput } from './decision';
-import { signalWindow, askWindow, readRegistry, micHolder, MIC_LOCK_MAX_AGE_MS, type Signal, type SignalSource, type AttentionReason } from './signal';
+import { signalWindow, signalAgentWindow, askWindow, readRegistry, micHolder, MIC_LOCK_MAX_AGE_MS, type Signal, type SignalSource, type AttentionReason } from './signal';
 import { ancestorsOf, parentMap } from './proctree';
 import { resolvePlayer } from './findTool';
 import { flashHostWindow } from './attention';
@@ -647,14 +647,17 @@ function voiceFor(lang: Lang): string {
  * VI_VOICE_HOST_FLASH=0 tắt bước tự nháy (test chạy hook dưới terminal thật, không được nháy nó).
  */
 async function attention(reason: AttentionReason, session: string, cwd: string, cfg: HookConfig = {}): Promise<boolean> {
+  // Chuỗi pid tổ tiên của hook: qua Claude Code/Copilot CLI tới shell của terminal, hay qua powershell tới extension
+  // host của cửa sổ Copilot Chat. Dùng để nháy terminal rời và để cửa sổ VS Code nào chứa agent tự nhận tín hiệu.
+  const ancestors = await claudeAncestors(process.ppid, session);
   if (cfg.attentionFlash === false) log(`attention ${reason}: attentionFlash tắt, không nháy cửa sổ chứa agent`);
   else if (process.env.VI_VOICE_HOST_FLASH !== '0' && process.platform === 'win32') {
     const t0 = Date.now();
-    const host = await flashHostWindow(await claudeAncestors(process.ppid, session));
+    const host = await flashHostWindow(ancestors);
     log(`attention ${reason}: nháy cửa sổ chứa agent → ${host.result}${host.window ? ` (${host.window})` : ''} (${Date.now() - t0}ms)`);
     if (host.result === 'flashed' || host.result === 'foreground') return true;
   }
-  return signalWindow({ event: 'attention', session, cwd, reason }, undefined, log, false).catch((err) => {
+  return signalAgentWindow({ event: 'attention', session, cwd, reason, ancestors }, undefined, log).catch((err) => {
     log(`signal attention lỗi: ${(err as Error).message}`);
     return false;
   });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ancestorsOf, parentMap, parseParentTable, pickTerminal, terminalForAgent } from '../src/proctree';
+import { ancestorsOf, parentMap, parseParentTable, pickTerminal, terminalForAgent, agentInWindow } from '../src/proctree';
 
 describe('parseParentTable', () => {
   it('đọc bảng "pid ppid" mỗi dòng, bỏ dòng rác và tiêu đề', () => {
@@ -82,5 +82,23 @@ describe('pickTerminal', () => {
     const none = term('y', undefined);
     const ok = term('z', 70);
     expect(await pickTerminal([dead, none, ok], [70])).toBe(ok);
+  });
+});
+
+describe('agentInWindow', () => {
+  const term = (name: string, pid: number | undefined) => ({ name, processId: Promise.resolve(pid) });
+  it('Copilot Chat: hook là con của extension host, nên pid extension host nằm trong chuỗi tổ tiên', async () => {
+    // hook node → powershell → extension host (4321) → Code chính
+    expect(await agentInWindow([100, 99, 4321, 10], 4321, [])).toBe(true);
+  });
+  it('Claude Code / Copilot CLI: một terminal của cửa sổ có shell pid trong chuỗi', async () => {
+    expect(await agentInWindow([100, 90, 80, 70, 60], 4321, [term('a', 111), term('b', 70)])).toBe(true);
+  });
+  it('không phải extension host của mình, không terminal nào khớp: không phải cửa sổ này', async () => {
+    expect(await agentInWindow([100, 90, 80, 70, 60], 4321, [term('a', 111)])).toBe(false);
+  });
+  it('không có chuỗi tổ tiên thì không nhận', async () => {
+    expect(await agentInWindow([], 4321, [term('a', 111)])).toBe(false);
+    expect(await agentInWindow(undefined, 4321, [term('a', 111)])).toBe(false);
   });
 });

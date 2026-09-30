@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { windowTitleMatches, flashScript, flashWindow, flashHostScript, flashHostWindow, applyTint, removeTint, shellColorFor, tintForeground, normalizeHex, TINT } from '../src/attention';
+import { windowTitleMatches, flashScript, flashWindow, flashHostScript, flashHostWindow, applyTint, removeTint, shellColorFor, tintForeground, normalizeHex, TINT, foregroundWindowScript, parseForegroundWindow, learnForegroundWindow } from '../src/attention';
 
 describe('attention: tìm cửa sổ VS Code theo tiêu đề', () => {
   it('khớp tiêu đề mặc định "file - workspace - Visual Studio Code"', () => {
@@ -132,5 +132,44 @@ describe('attention: nháy cửa sổ chứa agent theo chuỗi pid (terminal r�
     const run = async () => ({ code: 0, out: 'pid 31388 Web gallery\r\n' });
     expect(await flashHostWindow([1], { platform: 'win32', run })).toEqual({ result: 'flashed', window: 'pid 31388 Web gallery' });
     expect(flashHostScript([1])).toContain('[NoIdleHost]::Chosen');
+  });
+});
+
+describe('attention: học handle cửa sổ của chính mình lúc được focus', () => {
+  it('script lấy cửa sổ foreground và in "hwnd<tab>tiêu đề"', () => {
+    const s = foregroundWindowScript();
+    expect(s).toContain('GetForegroundWindow');
+    expect(s).toContain('GetWindowText');
+    expect(s).toContain('"`t"');
+  });
+  it('parseForegroundWindow: đọc hwnd và tiêu đề; không phải VS Code hay dòng hỏng thì undefined', () => {
+    expect(parseForegroundWindow('1234567\t● hook.ts - vi-voice - Visual Studio Code\r\n')).toEqual({ hwnd: '1234567', title: '● hook.ts - vi-voice - Visual Studio Code' });
+    expect(parseForegroundWindow('1234567\tvi-voice - Google Chrome')).toBeUndefined();
+    expect(parseForegroundWindow('abc\tx - Visual Studio Code')).toBeUndefined();
+    expect(parseForegroundWindow('')).toBeUndefined();
+  });
+  it('learnForegroundWindow: ngoài Windows thì undefined, không chạy gì; Windows thì trả cửa sổ đã đọc', async () => {
+    let ran = 0;
+    expect(await learnForegroundWindow({ platform: 'darwin', run: async () => (ran++, { code: 0, out: '1\tx - Visual Studio Code' }) })).toBeUndefined();
+    expect(ran).toBe(0);
+    expect(await learnForegroundWindow({ platform: 'win32', run: async () => ({ code: 0, out: '99\ta.ts - vi-voice - Visual Studio Code' }) })).toEqual({ hwnd: '99', title: 'a.ts - vi-voice - Visual Studio Code' });
+    expect(await learnForegroundWindow({ platform: 'win32', run: async () => ({ code: 1, out: '' }) })).toBeUndefined();
+  });
+});
+
+describe('attention: nháy theo handle đã học thay vì theo tên (hai cửa sổ trùng tên)', () => {
+  it('flashScript có hwnd thì kiểm tra IsWindow rồi nháy thẳng handle đó, chỉ tìm theo tên khi handle không còn', () => {
+    const s = flashScript('vi-voice', '1234567');
+    expect(s).toContain('IsWindow(');
+    expect(s).toContain('Flash($ws, 1234567)');
+    expect(flashScript('vi-voice')).toContain('Flash($ws, 0)');
+  });
+  it('flashWindow đưa hwnd vào script', async () => {
+    let script = '';
+    const run = async (s: string) => ((script = s), 0);
+    expect(await flashWindow('vi-voice', { platform: 'win32', run, hwnd: '4242' })).toBe('flashed');
+    expect(script).toContain('Flash($ws, 4242)');
+    expect(await flashWindow('vi-voice', { platform: 'win32', run, hwnd: 'garbage' })).toBe('flashed');
+    expect(script).toContain('Flash($ws, 0)');
   });
 });

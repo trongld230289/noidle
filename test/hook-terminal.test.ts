@@ -99,7 +99,8 @@ beforeAll(async () => {
       : path.join(os.tmpdir(), `vv-term-${process.pid}-${Date.now()}.sock`);
   server = startServer(pipe, (s) => void got.push(s));
   await new Promise((r) => server.once('listening', r));
-  writeRegistry({ pid: 4242, pipe, folders: [work] }, windowsDir);
+  // pid của chính tiến trình test: registry dọn pid chết trước khi gửi attention, cửa sổ giả phải còn sống.
+  writeRegistry({ pid: process.pid, pipe, folders: [work] }, windowsDir);
 }, 30_000);
 
 afterAll(() => server.close());
@@ -186,7 +187,7 @@ describe('standalone Claude playback after VS Code closes', () => {
     await speak('The first standalone reply plays while the extension IPC server is available.');
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await speak('The next standalone reply must still play when the extension IPC server has stopped.');
-    removeRegistry(4242, windowsDir);
+    removeRegistry(process.pid, windowsDir);
     await speak('The final standalone reply must still play with no registered editor window at all.');
   }, 40_000);
 

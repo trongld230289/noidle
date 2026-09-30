@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { build } from 'esbuild';
+import { startServer, writeRegistry, removeRegistry, pipeName, type Signal } from '../src/signal';
 
 /**
  * Chạy hook thật (bundle như dist/claude-hook.js) với TEMP riêng để không đụng registry cửa sổ
@@ -565,5 +566,34 @@ describe('claude-hook default voice', () => {
     );
     expect(r.code).toBe(0);
     expect(readLog().slice(before)).toContain('(en-US-BrianMultilingualNeural): "Claude đã đọc README.md và gọi API."');
+  });
+});
+
+describe('claude-hook attention chọn cửa sổ theo chuỗi pid của agent', () => {
+  const regDir = path.join(work, 'tmp', 'noidle-tts', 'windows');
+  it('Copilot Chat: cửa sổ có pid trong chuỗi tổ tiên của hook nhận attention, dù cwd không thuộc folder của nó', async () => {
+    // Hook là con của tiến trình test, như hook Copilot Chat là con của extension host: pid test nằm trong chuỗi.
+    const got: Signal[] = [];
+    const pipe = pipeName(process.pid * 1000 + 7);
+    const server = startServer(pipe, (s) => {
+      got.push(s);
+      return s.ancestors?.includes(process.pid) ? 'owned' : undefined;
+    });
+    await new Promise((r) => server.once('listening', r));
+    writeRegistry({ pid: process.pid, pipe, folders: [path.join(work, 'elsewhere')] }, regDir);
+    const transcript = path.join(work, 'transcript-copilot-owner.jsonl');
+    fs.writeFileSync(transcript, JSON.stringify({ type: 'assistant.message', data: { content: 'Xong rồi.' } }) + '\n');
+    const before = readLog().length;
+    try {
+      const r = await run(['speak', '--config', cfgSilent, '--source', 'copilot'], JSON.stringify({ session_id: 'cp-owner', cwd: work, transcript_path: transcript }));
+      expect(r.code).toBe(0);
+      const att = got.filter((s) => s.event === 'attention');
+      expect(att.length).toBe(1);
+      expect(att[0].ancestors).toContain(process.pid);
+      expect(readLog().slice(before)).toMatch(/signal attention → cửa sổ pid \d+ \(đang chứa agent\)/);
+    } finally {
+      removeRegistry(process.pid, regDir);
+      server.close();
+    }
   });
 });

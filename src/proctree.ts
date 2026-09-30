@@ -78,3 +78,14 @@ export async function terminalForAgent<T extends TerminalLike>(
   if (source === 'copilot-cli' || ancestors?.length) return undefined;
   return active;
 }
+
+/**
+ * Cửa sổ này có đang chứa agent không, theo chuỗi pid tổ tiên của hook. Copilot Chat chạy hook bằng child_process
+ * ngay trong extension host, nên pid extension host (process.pid của extension) nằm trong chuỗi. Claude Code và
+ * Copilot CLI chạy trong một terminal của cửa sổ, nên shell pid của terminal đó nằm trong chuỗi.
+ */
+export async function agentInWindow<T extends TerminalLike>(ancestors: number[] | undefined, hostPid: number, terminals: readonly T[]): Promise<boolean> {
+  if (!ancestors?.length) return false;
+  if (ancestors.includes(hostPid)) return true;
+  return (await pickTerminal(terminals, ancestors)) !== undefined;
+}

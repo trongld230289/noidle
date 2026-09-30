@@ -361,3 +361,49 @@ export async function askWindow(signal: Signal, dir = WINDOWS_DIR, log?: (m: str
   log?.(`ask → cửa sổ pid ${entry.pid}: ${JSON.stringify(heard)}`);
   return heard;
 }
+
+/** Xoá đăng ký của cửa sổ đã chết (pid không còn) và trả về các cửa sổ còn sống. */
+export function pruneRegistry(dir = WINDOWS_DIR, alive: (pid: number) => boolean = pidAlive): WindowEntry[] {
+  const live: WindowEntry[] = [];
+  for (const e of readRegistry(dir)) {
+    if (alive(e.pid)) live.push(e);
+    else removeRegistry(e.pid, dir);
+  }
+  return live;
+}
+
+/** Bao lâu chờ một cửa sổ trả lời có chứa agent hay không (chỉ so pid, không chờ nháy). */
+const OWNER_REPLY_MS = 3000;
+
+/**
+ * Gửi tín hiệu tới cửa sổ đang chứa agent. Có chuỗi pid tổ tiên thì hỏi mọi cửa sổ còn sống; cửa sổ nào thấy pid
+ * extension host của mình hay shell pid của một terminal của mình trong chuỗi thì xử lý và trả 'owned'. Không ai
+ * nhận (agent ở terminal ngoài VS Code, hay hook không tra được cây tiến trình) thì lùi về cửa sổ theo cwd như cũ,
+ * gửi tín hiệu không kèm chuỗi pid để cửa sổ đó xử lý không cần kiểm tra.
+ */
+export async function signalAgentWindow(
+  signal: Signal,
+  dir = WINDOWS_DIR,
+  log?: (m: string) => void,
+  alive: (pid: number) => boolean = pidAlive,
+): Promise<boolean> {
+  const entries = pruneRegistry(dir, alive);
+  if (signal.ancestors?.length && entries.length) {
+    const replies = await Promise.all(entries.map(async (e) => ({ e, reply: await askSignal(e.pipe, signal, OWNER_REPLY_MS) })));
+    const owner = replies.find((r) => r.reply === 'owned');
+    if (owner) {
+      log?.(`signal ${signal.event} → cửa sổ pid ${owner.e.pid} (đang chứa agent)`);
+      return true;
+    }
+    log?.(`signal ${signal.event}: không cửa sổ nào chứa agent (đã hỏi ${entries.length}), chọn theo cwd`);
+  }
+  const { ancestors: _ancestors, ...plain } = signal;
+  const entry = pickWindow(entries, plain.cwd);
+  if (!entry) {
+    log?.(`signal ${plain.event}: không có cửa sổ nào cho ${plain.cwd}`);
+    return false;
+  }
+  const ok = await sendSignal(entry.pipe, plain);
+  log?.(ok ? `signal ${plain.event} → cửa sổ pid ${entry.pid} (theo cwd)` : `signal ${plain.event}: cửa sổ pid ${entry.pid} không trả lời`);
+  return ok;
+}

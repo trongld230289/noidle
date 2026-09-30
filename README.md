@@ -113,7 +113,7 @@ Tắt Voice Response hoặc Voice Notify không tắt Hands Free. Khi không có
 
 | Setting | Mặc định | Ý nghĩa |
 |---|---|---|
-| Attention Flash | bật | Windows: nút trên taskbar nháy cam. Agent chạy ở Windows Terminal, cmd hay PowerShell rời thì nháy cửa sổ đó. macOS: title bar nháy vài lần. |
+| Attention Flash | bật | Windows: nút trên taskbar nháy cam, đúng cửa sổ đang chạy agent kể cả khi nhiều cửa sổ trùng tên hay lồng nhau. Agent chạy ở Windows Terminal, cmd hay PowerShell rời thì nháy cửa sổ đó. macOS: title bar nháy vài lần. |
 | Attention Color | bật | Title bar đổi màu và status bar ghi "Claude xong" / "cần approve" tới khi bạn quay lại. |
 | Attention Tint Color | `#15803d` | Màu title bar lúc đó. |
 

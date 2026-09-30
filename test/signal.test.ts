@@ -16,6 +16,9 @@ import {
   askWindow,
   canAutoListen,
   WindowEntry,
+  Signal,
+  pruneRegistry,
+  signalAgentWindow,
 } from '../src/signal';
 
 const w = (pid: number, ...folders: string[]): WindowEntry => ({ pid, pipe: `p${pid}`, folders });
@@ -175,5 +178,79 @@ describe('ask', () => {
     expect(await askWindow({ event: 'ask', session: '', cwd: 'D:/live/x', timeoutSec: 1 }, dir)).toBe('đồng ý');
     expect(await askWindow({ event: 'ask', session: '', cwd: 'D:/none', timeoutSec: 1 }, dir)).toBeUndefined();
     server.close();
+  });
+});
+
+describe('pruneRegistry', () => {
+  it('xoá file đăng ký của pid đã chết, trả về các cửa sổ còn sống', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'noidle-prune-'));
+    writeRegistry(w(21, 'D:/a'), dir);
+    writeRegistry(w(22, 'D:/b'), dir);
+    writeRegistry(w(23, 'D:/c'), dir);
+    const live = pruneRegistry(dir, (pid) => pid !== 22);
+    expect(live.map((e) => e.pid).sort()).toEqual([21, 23]);
+    expect(readRegistry(dir).map((e) => e.pid).sort()).toEqual([21, 23]);
+  });
+});
+
+describe('signalAgentWindow: chọn cửa sổ theo chuỗi pid của agent', () => {
+  /** Server giả của một cửa sổ: nhận 'owned' khi pid của nó nằm trong chuỗi tổ tiên của tín hiệu. */
+  const win = async (pid: number, got: Signal[]) => {
+    const pipe = testPipe();
+    const server = startServer(pipe, (s) => {
+      got.push(s);
+      return s.ancestors?.includes(pid) ? 'owned' : undefined;
+    });
+    await new Promise((r) => server.once('listening', r));
+    return { pipe, server };
+  };
+  const attention = (cwd: string, ancestors?: number[]): Signal => ({ event: 'attention', session: '', cwd, reason: 'done', ...(ancestors ? { ancestors } : {}) });
+
+  it('cửa sổ nào có pid trong chuỗi thì nhận, dù cwd khớp cửa sổ khác (workspace cha và project con)', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'noidle-agent-'));
+    const gotParent: Signal[] = [];
+    const gotChild: Signal[] = [];
+    const parent = await win(1001, gotParent);
+    const child = await win(1002, gotChild);
+    writeRegistry({ pid: 1001, pipe: parent.pipe, folders: ['D:/parent/child', 'D:/parent/other'] }, dir);
+    writeRegistry({ pid: 1002, pipe: child.pipe, folders: ['D:/parent/child'] }, dir);
+    const alive = () => true;
+    expect(await signalAgentWindow(attention('D:/parent/child', [500, 400, 1001, 10]), dir, undefined, alive)).toBe(true);
+    await new Promise((r) => setTimeout(r, 50));
+    // Cả hai được hỏi kèm chuỗi pid; chỉ cửa sổ cha nhận. Không gửi thêm tín hiệu dự phòng (không có ancestors) cho ai.
+    expect(gotParent.map((s) => s.ancestors)).toEqual([[500, 400, 1001, 10]]);
+    expect(gotChild.map((s) => s.ancestors)).toEqual([[500, 400, 1001, 10]]);
+    parent.server.close();
+    child.server.close();
+  });
+
+  it('không cửa sổ nào nhận (agent ở terminal ngoài VS Code) thì lùi về cửa sổ theo cwd, gửi tín hiệu không kèm chuỗi pid', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'noidle-agent-'));
+    const gotA: Signal[] = [];
+    const gotB: Signal[] = [];
+    const a = await win(1001, gotA);
+    const b = await win(1002, gotB);
+    writeRegistry({ pid: 1001, pipe: a.pipe, folders: ['D:/a'] }, dir);
+    writeRegistry({ pid: 1002, pipe: b.pipe, folders: ['D:/b'] }, dir);
+    expect(await signalAgentWindow(attention('D:/b/sub', [500, 400, 9999]), dir, undefined, () => true)).toBe(true);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(gotA.map((s) => s.ancestors)).toEqual([[500, 400, 9999]]);
+    expect(gotB.map((s) => s.ancestors)).toEqual([[500, 400, 9999], undefined]);
+    a.server.close();
+    b.server.close();
+  });
+
+  it('không có chuỗi pid thì gửi thẳng cho cửa sổ theo cwd; cửa sổ chết bị dọn trước khi hỏi', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'noidle-agent-'));
+    const gotA: Signal[] = [];
+    const a = await win(1001, gotA);
+    writeRegistry({ pid: 1001, pipe: a.pipe, folders: ['D:/a'] }, dir);
+    writeRegistry({ pid: 1002, pipe: testPipe(), folders: ['D:/a'] }, dir);
+    expect(await signalAgentWindow(attention('D:/a'), dir, undefined, (pid) => pid === 1001)).toBe(true);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(gotA.length).toBe(1);
+    expect(readRegistry(dir).map((e) => e.pid)).toEqual([1001]);
+    expect(await signalAgentWindow(attention('D:/none'), dir, undefined, () => true)).toBe(false);
+    a.server.close();
   });
 });
