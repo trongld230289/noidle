@@ -18,7 +18,7 @@ import { audioLevel, pcmToWav } from './wav';
 import { terminalForAgent, agentInWindow } from './proctree';
 import { planMigration, planMuteMigration, configProperties } from './migrate';
 import { checkRequirements } from './requirements';
-import { installCommand, manualHint, afterInstallNote, TOOL_LABEL, type Tool } from './installTool';
+import { installPlan, installLabel, manualHint, afterInstallNote, type Tool } from './installTool';
 import { findExecutable } from './findTool';
 import { needsTranslation, recapPromptsFor, translateRecap, type RecapTranslator } from './recapPrompt';
 import { claudeCliTranslator } from './translate';
@@ -483,29 +483,30 @@ export function activate(ctx: vscode.ExtensionContext): void {
    * tiến trình. Đóng terminal: ffmpeg thì tìm lại đường dẫn và đồng bộ hook ngay; Node.js thì nhắc mở lại VS Code
    * vì tiến trình đang chạy giữ PATH cũ. Linux chỉ hướng dẫn cài tay.
    */
-  function installTool(tool: Tool): void {
-    const cmd = installCommand(tool);
-    if (!cmd) {
-      void vscode.window.showInformationMessage(manualHint(tool), 'Hướng dẫn cài').then((pick) => {
+  function installTools(tools: Tool[]): void {
+    const cmds = installPlan(tools);
+    if (!cmds.length) {
+      void vscode.window.showInformationMessage(manualHint(tools), 'Hướng dẫn cài').then((pick) => {
         if (pick) void vscode.env.openExternal(vscode.Uri.parse('https://github.com/trongld230289/noidle#readme'));
       });
       return;
     }
-    const terminal = vscode.window.createTerminal({ name: `NoIdle: cài ${TOOL_LABEL[tool]}` });
+    const terminal = vscode.window.createTerminal({ name: `NoIdle: ${installLabel(tools).toLowerCase()}` });
     terminal.show();
-    terminal.sendText(cmd, true);
+    // Gửi từng lệnh, shell chạy lần lượt (không nối bằng && vì PowerShell 5 không có).
+    for (const cmd of cmds) terminal.sendText(cmd, true);
     const sub = vscode.window.onDidCloseTerminal((t) => {
       if (t !== terminal) return;
       sub.dispose();
       warnedMissing = '';
-      const note = afterInstallNote(tool);
+      const note = afterInstallNote(tools);
       if (note) void vscode.window.showInformationMessage(note);
-      void syncHooks().catch((err) => log(`lỗi đồng bộ hook sau khi cài ${TOOL_LABEL[tool]}: ${(err as Error).message}`));
+      void syncHooks().catch((err) => log(`lỗi đồng bộ hook sau khi ${installLabel(tools).toLowerCase()}: ${(err as Error).message}`));
     });
     ctx.subscriptions.push(sub);
   }
-  const installFfmpeg = () => installTool('ffmpeg');
-  const installNode = () => installTool('node');
+  const installFfmpeg = () => installTools(['ffmpeg']);
+  const installNode = () => installTools(['node']);
 
   /** Chép dist/claude-hook.js ra globalStorage (ghi file tạm rồi rename). Trả về đường dẫn hook nên dùng. */
   async function installHookScript(): Promise<string> {
@@ -536,26 +537,28 @@ export function activate(ctx: vscode.ExtensionContext): void {
   async function hooksAllowed(opts: HookOptions): Promise<boolean> {
     if (!opts.enabled) return true;
     const have = await checkRequirements(opts.player);
-    // Thiếu ffplay chỉ đáng báo khi người dùng muốn nghe đọc.
-    const missing = !have.node ? 'node' : !have.player && config().voiceResponse ? 'ffplay' : '';
+    // Thiếu ffplay chỉ đáng báo khi người dùng muốn nghe đọc. Máy mới thường thiếu cả hai: báo và cài một lần.
+    const tools: Tool[] = [];
+    if (!have.node) tools.push('node');
+    if (!have.player && config().voiceResponse) tools.push('ffmpeg');
+    const missing = tools.join('+');
     // Popup chỉ hiện một lần mỗi phiên; nút status bar nhắc tới khi có ffplay, bấm là cài.
-    status.missingPlayer(missing === 'ffplay');
+    status.missingPlayer(!have.node ? false : tools.includes('ffmpeg'));
     if (!missing) return true;
     if (warnedMissing !== missing) {
       warnedMissing = missing;
-      const text = missing === 'node'
-        ? 'NoIdle: cần Node.js để đọc câu trả lời và nháy cửa sổ khi agent xong. Cài Node.js (và ffmpeg để có tiếng) rồi mở lại VS Code.'
+      const text = !have.node
+        ? `NoIdle: cần Node.js để đọc câu trả lời và nháy cửa sổ khi agent xong${tools.includes('ffmpeg') ? ', và ffmpeg để có tiếng' : ''}. Cài xong thì mở lại VS Code.`
         : 'NoIdle: không thấy ffplay (đi kèm ffmpeg) nên chỉ nháy cửa sổ, không đọc thành tiếng. Cài ffmpeg, hoặc điền đường dẫn vào Ffmpeg Path.';
-      log(`thiếu ${missing}: ${missing === 'node' ? 'không ghi hook' : 'hook chỉ nháy cửa sổ'}`);
-      const button = missing === 'node' ? 'Cài Node.js' : 'Cài ffmpeg';
-      const install = installCommand(missing === 'node' ? 'node' : 'ffmpeg') ? [button] : [];
+      log(`thiếu ${missing}: ${!have.node ? 'không ghi hook' : 'hook chỉ nháy cửa sổ'}`);
+      const button = installLabel(tools);
+      const install = installPlan(tools).length ? [button] : [];
       void vscode.window.showWarningMessage(text, ...install, 'Hướng dẫn cài').then((pick) => {
-        if (pick === 'Cài ffmpeg') installFfmpeg();
-        else if (pick === 'Cài Node.js') installNode();
+        if (pick === button) installTools(tools);
         else if (pick) void vscode.env.openExternal(vscode.Uri.parse('https://github.com/trongld230289/noidle#readme'));
       });
     }
-    return missing !== 'node';
+    return have.node;
   }
 
   /** Đồng bộ hook cho Claude Code, Copilot Chat và Copilot CLI. */

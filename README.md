@@ -38,7 +38,7 @@ Ngoài ra: bấm **F6** để nói thành chữ ở bất kỳ đâu trong VS Co
 **1. Cài ffmpeg và Node.js** (ffmpeg để ghi âm và phát tiếng, Node.js để chạy phần đọc câu trả lời):
 - Windows: `winget install ffmpeg` và `winget install OpenJS.NodeJS.LTS`
 - macOS: `brew install ffmpeg node`
-- Hoặc để extension cài giúp: thiếu cái nào thì cảnh báo hiện nút **Cài ffmpeg** / **Cài Node.js**, cũng có trong Command Palette (`NoIdle: Cài ffmpeg`, `NoIdle: Cài Node.js`). Cài Node.js xong thì đóng hết VS Code rồi mở lại.
+- Hoặc để extension cài giúp: thiếu cái nào thì cảnh báo hiện nút cài đúng cái đó, thiếu cả hai thì một nút **Cài Node.js và ffmpeg** chạy cả hai trong một terminal. Cũng có trong Command Palette (`NoIdle: Cài ffmpeg`, `NoIdle: Cài Node.js`). Cài Node.js xong thì đóng hết VS Code rồi mở lại.
 
 Đã cài Claude Code bằng npm thì đã có Node.js. Extension tự tìm ffmpeg vừa cài (kể cả khi shell đang mở chưa có nó trong PATH) và ghi đường dẫn đầy đủ vào hook, nên chạy Claude từ PowerShell hay cmd đều có tiếng.
 
