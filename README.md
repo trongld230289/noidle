@@ -91,7 +91,7 @@ Khi approve hoặc chọn đáp án, im lặng hoặc nói không rõ thì chuy�
 |---|---|---|
 | Voice Response | bật | Đọc câu trả lời và câu báo của Claude Code, Copilot Chat, Copilot CLI. Tắt thì không đọc; mic vẫn hoạt động theo Hands Free, cửa sổ vẫn nháy. Lệnh nhanh: `NoIdle: Tắt/bật giọng đọc`. |
 | Voice Style | `recap` | `recap`: đọc tóm tắt nội dung (tốn thêm ít token mỗi lượt). `announce`: chỉ đọc "Workspace X is done" (tiếng Anh), không tốn token. |
-| Recap Prompt | bản tiếng Việt sẵn | Dặn agent viết gì trong phần recap; nghe mệt thì sửa ngắn lại. Viết một thứ tiếng, extension tự dịch sang tiếng kia bằng Copilot Chat hoặc Claude Code đang có (không cần key). |
+| Recap Prompt | bản tiếng Việt sẵn | Dặn agent viết gì trong phần recap; nghe mệt thì sửa ngắn lại. Viết một thứ tiếng, extension tự dịch sang tiếng kia bằng Copilot Chat hoặc Claude Code đang có (không cần key). Quy tắc số viết bằng chữ số luôn được nối sẵn, không cần ghi. |
 | Voice Notify | bật | Đọc "Workspace X cần approve" / "cần bạn trả lời". Tắt Voice Response thì không đọc dù đang bật. |
 | Voice Say Workspace | `auto` | Đọc tên workspace ở đầu câu. `auto`: chỉ khi mở hơn một cửa sổ. |
 

@@ -45,6 +45,15 @@ const LANGUAGE_LINE: Record<Lang, string> = {
   en: 'Write that section in English.',
 };
 
+/**
+ * Quy tắc số, hook tự nối như câu hợp đồng, người dùng không phải nhớ khi tự viết prompt: giọng đọc phát âm
+ * chữ số tự nhiên ("1.0.22" nghe rõ hơn "một chấm không chấm hai mươi hai" và đỡ tốn chữ).
+ */
+const NUMBERS_LINE: Record<Lang, string> = {
+  vi: 'Số viết bằng chữ số như 4200 hay 1.9.0, đừng đánh vần.',
+  en: 'Write numbers as digits, like 4200 or 1.9.0; do not spell them out.',
+};
+
 export interface RecapPrompts {
   vi?: string;
   en?: string;
@@ -52,10 +61,10 @@ export interface RecapPrompts {
 
 const other = (lang: Lang): Lang => (lang === 'vi' ? 'en' : 'vi');
 
-/** Hướng dẫn chèn vào prompt: hợp đồng + thân (bản đúng ngôn ngữ, chưa dịch thì bản gốc, không có thì mặc định) + câu ngôn ngữ. */
+/** Hướng dẫn chèn vào prompt: hợp đồng + thân (bản đúng ngôn ngữ, chưa dịch thì bản gốc, không có thì mặc định) + quy tắc số và câu ngôn ngữ. */
 export function recapInstruction(prompts: RecapPrompts | undefined, lang: Lang): string {
   const body = prompts?.[lang] ?? prompts?.[other(lang)] ?? DEFAULT_RECAP_PROMPT[lang];
-  return `${CONTRACT[lang]}\n${body.trim()}\n${LANGUAGE_LINE[lang]}`;
+  return `${CONTRACT[lang]}\n${body.trim()}\n${NUMBERS_LINE[lang]} ${LANGUAGE_LINE[lang]}`;
 }
 
 const VIET_LETTERS = /[ăâđêôơưàảãáạằẳẵắặầẩẫấậèẻẽéẹềểễếệìỉĩíịòỏõóọồổỗốộờởỡớợùủũúụừửữứựỳỷỹýỵ]/iu;

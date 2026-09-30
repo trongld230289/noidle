@@ -35,6 +35,12 @@ describe('recapInstruction', () => {
     expect(DEFAULT_RECAP_PROMPT[lang]).toMatch(lang === 'vi' ? /3 đến 8 câu/ : /3 to 8 sentences/);
   });
 
+  it.each(['vi', 'en'] as const)('numbers as digits is a hook rule in code, applied even to a custom body, not part of the editable default (%s)', (lang) => {
+    const text = recapInstruction({ vi: 'Tuỳ ý', en: 'Anything' }, lang);
+    expect(text).toMatch(lang === 'vi' ? /chữ số như 4200 hay 1.9.0/ : /digits, like 4200 or 1.9.0/);
+    expect(DEFAULT_RECAP_PROMPT[lang]).not.toMatch(/4200/);
+  });
+
   it('keeps the body on its own lines between the contract and the language line', () => {
     const lines = recapInstruction({ vi: 'Dòng một\n- Dòng hai' }, 'vi').split('\n');
     expect(lines[0]).toContain('🔊');
