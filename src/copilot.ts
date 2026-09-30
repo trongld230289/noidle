@@ -48,6 +48,42 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return prototype === Object.prototype || prototype === null;
 }
 
+/** CLI records permission.requested immediately before its notification hook; the hook itself has no request ID. */
+export function copilotPermissionState(
+  jsonl: string,
+  notification: { timestamp: number | string; message: string } | string,
+): { requestId: string; completed: boolean } | undefined {
+  let requestId = typeof notification === 'string' ? notification : undefined;
+  let previousRequest: string | undefined;
+  const requested = new Set<string>();
+  const completed = new Set<string>();
+  for (const line of jsonl.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    let event: unknown;
+    try { event = JSON.parse(line); } catch { previousRequest = undefined; continue; }
+    if (!isRecord(event) || !isRecord(event.data)) { previousRequest = undefined; continue; }
+    const data = event.data;
+    if (event.type === 'permission.requested' && nonempty(data.requestId)) {
+      requested.add(data.requestId);
+      previousRequest = data.requestId;
+      continue;
+    }
+    if (event.type === 'permission.completed' && nonempty(data.requestId)) completed.add(data.requestId);
+    if (typeof notification !== 'string' && event.type === 'hook.start' && data.hookType === 'notification') {
+      let input: unknown = data.input;
+      if (typeof input === 'string') {
+        try { input = JSON.parse(input); } catch { input = undefined; }
+      }
+      if (isRecord(input) && input.notificationType === 'permission_prompt' &&
+          input.timestamp === notification.timestamp && input.message === notification.message) {
+        requestId = previousRequest;
+      }
+    }
+    previousRequest = undefined;
+  }
+  return requestId && requested.has(requestId) ? { requestId, completed: completed.has(requestId) } : undefined;
+}
+
 function checkStrings(record: Record<string, unknown>, keys: string[]): void {
   for (const key of keys) {
     if (has(record, key) && typeof record[key] !== 'string') throw new Error(`Invalid Copilot ${key}: expected a string`);

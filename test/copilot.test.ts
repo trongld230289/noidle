@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeCopilotInput } from '../src/copilot';
+import { normalizeCopilotInput, copilotPermissionState } from '../src/copilot';
 import type { AgentHookInput, VoiceQuestion } from '../src/copilot';
 import type { HookInput } from '../src/speech';
 import { isDangerous, voiceApprovable } from '../src/decision';
@@ -9,6 +9,40 @@ const cli = (data: Record<string, unknown> = {}, event = 'PreToolUse') =>
 const ask = (toolArgs: unknown) => cli({ toolName: 'ask_user', toolArgs }).input;
 const form = (properties: unknown, extra: Record<string, unknown> = {}) =>
   ask({ message: 'Configure deployment', requestedSchema: { type: 'object', properties, ...extra } });
+
+describe('Copilot permission notification lifecycle', () => {
+  const notification = { timestamp: 123, message: 'Fetch URL' };
+  const request = { type: 'permission.requested', data: { requestId: 'request-1' } };
+  const hook = { type: 'hook.start', data: { hookType: 'notification', input: {
+    ...notification, notificationType: 'permission_prompt',
+  } } };
+  const completed = { type: 'permission.completed', data: { requestId: 'request-1' } };
+  const transcript = (...events: unknown[]) => events.map((e) => JSON.stringify(e)).join('\n');
+
+  it('correlates a notification with its permission request', () => {
+    expect(copilotPermissionState(transcript(request, hook), notification)).toEqual({ requestId: 'request-1', completed: false });
+  });
+  it('detects completion even when a different permission is still pending', () => {
+    expect(copilotPermissionState(transcript(request, hook, completed, {
+      type: 'permission.requested', data: { requestId: 'request-2' },
+    }), notification)).toEqual({ requestId: 'request-1', completed: true });
+  });
+  it('rechecks only the correlated request during playback', () => {
+    expect(copilotPermissionState(transcript(request, hook, {
+      type: 'permission.completed', data: { requestId: 'request-2' },
+    }), 'request-1')).toEqual({ requestId: 'request-1', completed: false });
+    expect(copilotPermissionState(transcript(request, hook, completed), 'request-1')?.completed).toBe(true);
+  });
+  it('does not guess when the notification or adjacent request cannot be identified', () => {
+    expect(copilotPermissionState(transcript(request, hook), { ...notification, message: 'Other URL' })).toBeUndefined();
+    expect(copilotPermissionState(transcript(request, { type: 'other' }, hook), notification)).toBeUndefined();
+    expect(copilotPermissionState('', notification)).toBeUndefined();
+  });
+  it('supports serialized hook inputs and ignores a partially written last line', () => {
+    const serialized = { ...hook, data: { ...hook.data, input: JSON.stringify(hook.data.input) } };
+    expect(copilotPermissionState(transcript(request, serialized, completed) + '\n{"type":', notification)?.completed).toBe(true);
+  });
+});
 
 describe('normalizeCopilotInput source and lifecycle', () => {
   it('normalizes CLI lifecycle fields without mutating the original record', () => {

@@ -37,10 +37,54 @@ import { hedged } from './hedge';
 import { pronounce } from './pronounce';
 import { prefetchInOrder } from './prefetch';
 import { synthElevenLabs, rateToSpeed, fetchUsage, writeUsage, readUsage, formatUsage, isQuotaError, elevenExhausted } from './elevenlabs';
-import { normalizeCopilotInput, type AgentHookInput } from './copilot';
+import { normalizeCopilotInput, copilotPermissionState, type AgentHookInput } from './copilot';
 import { chatWouldAutoApprove, type ChatAutoApprove } from './chatAutoApprove';
 
 let inputSource: SignalSource | undefined;
+let permissionPlayback: { transcript: string; requestId: string } | undefined;
+let permissionReadWarning = false;
+
+function trackPermissionNotification(input: AgentHookInput): void {
+  if (sourceArg() !== 'copilot-cli' || input.hook_event_name !== 'Notification' ||
+      input.notification_type !== 'permission_prompt') return;
+  if ((typeof input.timestamp !== 'number' && typeof input.timestamp !== 'string') || typeof input.message !== 'string') {
+    log('notify: permission lifecycle unavailable (missing notification identity), keeping legacy alert');
+    return;
+  }
+  const session = input.session_id ?? '';
+  const transcript = input.transcript_path || (/^[\w-]+$/.test(session)
+    ? path.join(os.homedir(), '.copilot', 'session-state', session, 'events.jsonl') : '');
+  try {
+    const state = copilotPermissionState(fs.readFileSync(transcript, 'utf8'), {
+      timestamp: input.timestamp, message: input.message,
+    });
+    if (state) permissionPlayback = { transcript, requestId: state.requestId };
+    else log('notify: permission lifecycle could not be correlated, keeping legacy alert');
+  } catch (err) {
+    log(`notify: cannot read permission lifecycle, keeping legacy alert: ${(err as Error).message}`);
+  }
+}
+
+function permissionCompleted(): boolean {
+  if (!permissionPlayback) return false;
+  try {
+    const state = copilotPermissionState(fs.readFileSync(permissionPlayback.transcript, 'utf8'), permissionPlayback.requestId);
+    if (state?.completed) {
+      log(`notify: permission ${permissionPlayback.requestId} already completed, dropping stale alert`);
+      return true;
+    }
+    if (!state && !permissionReadWarning) {
+      log('notify: tracked permission missing from transcript, keeping legacy alert');
+      permissionReadWarning = true;
+    }
+  } catch (err) {
+    if (!permissionReadWarning) {
+      log(`notify: cannot recheck permission, keeping legacy alert: ${(err as Error).message}`);
+      permissionReadWarning = true;
+    }
+  }
+  return false;
+}
 
 async function readHookInput(event: string): Promise<AgentHookInput> {
   const value: unknown = JSON.parse((await readStdin()) || '{}');
@@ -569,6 +613,7 @@ function spawnPlay(raw: string, kind: Ticket['kind'], session: string, lang: Lan
   fs.writeFileSync(file, text, 'utf8');
   const args = [__filename, 'play', file, '--voice', voice, '--rate', arg('rate', '+0%'), '--player', arg('player', 'ffplay')];
   args.push('--kind', kind, '--session', session || '-');
+  if (permissionPlayback) args.push('--permission-transcript', permissionPlayback.transcript, '--permission-request', permissionPlayback.requestId);
   // play đọc file cấu hình để biết giọng ElevenLabs (key không đi qua dòng lệnh).
   if (arg('config', '')) args.push('--config', arg('config', ''));
   // Tiến trình play tách rời nên không còn biết cha; đưa pid của Claude Code (cha của hook) để nó tra cây tiến trình.
@@ -617,6 +662,8 @@ async function attention(reason: AttentionReason, session: string, cwd: string, 
 
 async function modeNotify(): Promise<void> {
   const input = await readHookInput(arg('event', 'Notification'));
+  trackPermissionNotification(input);
+  if (permissionCompleted()) return;
   const cfg = loadConfig();
   const chat = sourceArg() === 'copilot';
   if (chat && input.hook_event_name === 'PostToolUse') {
@@ -689,6 +736,7 @@ async function modeNotify(): Promise<void> {
     return;
   }
   await attention(/approve|approval/i.test(text) ? 'approve' : 'answer', input.session_id ?? '', input.cwd || process.cwd(), cfg);
+  if (permissionCompleted()) return;
   if (voiceOff(cfg)) {
     log('notify: voiceResponse tắt, không đọc câu báo');
   }
@@ -1039,6 +1087,9 @@ async function synth(voice: string, rate: string, text: string): Promise<Buffer>
 }
 
 async function modePlay(): Promise<void> {
+  const permissionTranscript = arg('permission-transcript', '');
+  const permissionRequest = arg('permission-request', '');
+  if (permissionTranscript && permissionRequest) permissionPlayback = { transcript: permissionTranscript, requestId: permissionRequest };
   const file = process.argv[3];
   const text = fs.readFileSync(file, 'utf8').trim();
   if (!text) return;
@@ -1109,6 +1160,7 @@ async function waitMicFree(): Promise<boolean> {
 
 async function playText(text: string, ticket: string, voice: string): Promise<void> {
   if (!(await waitMicFree())) return;
+  if (permissionCompleted()) return;
   const t0 = Date.now();
   const rate = arg('rate', '+0%');
   // --player là tên trần (settings cũ) hay đường dẫn không còn (ffmpeg dời chỗ) thì tìm lại theo registry PATH
@@ -1124,6 +1176,7 @@ async function playText(text: string, ticket: string, voice: string): Promise<vo
   updateTicket(ticket, { player: player.pid });
   let stopped = false;
   let failed = false;
+  let cancelled = false;
   let stderrTail = '';
   player.stderr.setEncoding('utf8');
   player.stderr.on('data', (chunk: string) => { stderrTail = (stderrTail + chunk).slice(-4096); });
@@ -1136,7 +1189,7 @@ async function playText(text: string, ticket: string, voice: string): Promise<vo
   player.on('exit', () => (stopped = true));
   const finished = new Promise<void>((resolve) => {
     player.once('close', (code, signal) => {
-      if (!failed && code !== 0) {
+      if (!failed && !cancelled && code !== 0) {
         failed = true;
         log(`player exited with code ${code}${signal ? ` (${signal})` : ''}: ${stderrTail.trim() || 'no stderr'}`);
       }
@@ -1164,13 +1217,18 @@ async function playText(text: string, ticket: string, voice: string): Promise<vo
           if (ms > 100) log(`giữ câu đầu ${ms}ms chờ câu hai`);
         }
       }
+      if (!stopped && permissionCompleted()) {
+        cancelled = true;
+        stopped = true;
+        player.kill();
+      }
       if (!stopped) player.stdin.write(audio);
     },
     onError: (err, i) => log(`bỏ câu ${i + 1}: ${err.message}`),
   });
   player.stdin.end();
   await finished;
-  if (!failed) log(`phát xong sau ${Date.now() - t0}ms`);
+  if (!failed && !cancelled) log(`phát xong sau ${Date.now() - t0}ms`);
 }
 
 async function main(): Promise<void> {

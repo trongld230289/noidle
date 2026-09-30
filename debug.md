@@ -56,6 +56,7 @@ Nếu không thể chia sẻ toàn bộ log, gửi đoạn quanh thời điểm 
 
 - Thời gian trong `hook.log` dùng ISO UTC với hậu tố `Z`; `noidle.log` hiện dùng giờ địa phương và không có ngày trên từng dòng. Cần ngày và múi giờ người dùng cung cấp để đối chiếu.
 - Một `PermissionRequest` của Copilot CLI chưa chứng minh hộp thoại duyệt đã xuất hiện: hook này có thể chạy trước bước kiểm tra quyền của CLI.
+- `Notification permission_prompt` cũng có thể đã hết hiệu lực khi bắt đầu phát. Hook đối chiếu `permission.requested` và `permission.completed` trong transcript CLI trước khi báo, sau khi nháy cửa sổ, sau khi chờ hàng đợi/mic và trước khi đưa âm thanh vào player. Dòng `dropping stale alert` nghĩa là yêu cầu đã kết thúc nên bỏ tiếng báo; nếu không đọc hoặc ghép được lifecycle, log ghi rõ và giữ hành vi cũ.
 - Một câu hỏi thủ công có thể đi qua cả `PreToolUse AskUserQuestion` và `Notification elicitation_dialog`. Hai sự kiện không có nghĩa là hai câu hỏi.
 - Đối chiếu sự kiện nhận vào với `notify → play pid` để biết có tạo nhiều lượt đọc không. Không kết luận chỉ dựa vào số dòng log sự kiện.
 - Kiểm tra phiên bản lúc extension khởi động và bản hook thực tế. Pull source hoặc cài extension mới không đảm bảo các cửa sổ đang mở đã nạp bản mới.

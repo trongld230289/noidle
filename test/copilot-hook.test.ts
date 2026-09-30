@@ -12,8 +12,11 @@ const bundle = path.join(work, 'claude-hook.js');
 const config = path.join(work, 'config.json');
 const logFile = path.join(tmp, 'noidle-tts', 'hook.log');
 const audioTexts = path.join(work, 'audio-texts.jsonl');
+const playedAudio = path.join(work, 'played-audio.txt');
+const synthesisGate = path.join(work, 'synthesis.gate');
 const signals: Signal[] = [];
 let heard: string | string[] = '';
+let onAttention: (() => void) | undefined;
 let server: ReturnType<typeof startServer>;
 
 function run(mode: string, input: unknown, args: string[] = []) {
@@ -52,12 +55,12 @@ beforeAll(async () => {
     platform: 'node',
     target: 'node20',
     logLevel: 'silent',
-    // Only replace the remote audio transport; parsing, playback lifecycle and IPC remain real.
+    // Replace audio transports; parsing, playback lifecycle and IPC remain real.
     plugins: [{
       name: 'offline-tts',
       setup(builder) {
         builder.onResolve({ filter: /^msedge-tts$/ }, () => ({ path: 'tts', namespace: 'offline' }));
-        builder.onLoad({ filter: /.*/, namespace: 'offline' }, () => ({
+        builder.onLoad({ filter: /^tts$/, namespace: 'offline' }, () => ({
           contents: `
             const { Readable } = require('stream');
             const fs = require('fs');
@@ -66,9 +69,29 @@ beforeAll(async () => {
               async setMetadata() {}
               toStream(text) {
                 fs.appendFileSync(${JSON.stringify(audioTexts)}, JSON.stringify(text) + '\\n');
-                return { audioStream: Readable.from([Buffer.from('audio')]) };
+                return { audioStream: Readable.from((async function* () {
+                  while (fs.existsSync(${JSON.stringify(synthesisGate)})) await new Promise(r => setTimeout(r, 20));
+                  yield Buffer.from('audio');
+                })()) };
               }
               close() {}
+            };
+          `,
+        }));
+        builder.onResolve({ filter: /^child_process$/ }, () => ({ path: 'process', namespace: 'offline' }));
+        builder.onLoad({ filter: /^process$/, namespace: 'offline' }, () => ({
+          contents: `
+            const childProcess = require('node:child_process');
+            module.exports = {
+              ...childProcess,
+              spawn(command, args, options) {
+                if (command === process.execPath && args[0] === '-nodisp') {
+                  return childProcess.spawn(command, ['-e', ${JSON.stringify(`
+                    process.stdin.on('data', chunk => require('fs').appendFileSync(${JSON.stringify(playedAudio)}, chunk));
+                  `)}], options);
+                }
+                return childProcess.spawn(command, args, options);
+              },
             };
           `,
         }));
@@ -80,6 +103,7 @@ beforeAll(async () => {
     : path.join(work, 'cli.sock');
   server = startServer(pipe, (signal) => {
     signals.push(signal);
+    if (signal.event === 'attention') onAttention?.();
     if (signal.event === 'ask') return typeof heard === 'string' ? heard : heard.shift() ?? '';
   });
   await new Promise<void>((resolve) => server.once('listening', resolve));
@@ -91,7 +115,9 @@ beforeAll(async () => {
 beforeEach(() => {
   signals.length = 0;
   heard = '';
+  onAttention = undefined;
   fs.writeFileSync(audioTexts, '');
+  fs.writeFileSync(playedAudio, '');
   configure();
 });
 
@@ -315,6 +341,86 @@ describe('Copilot CLI voice permissions', () => {
     expect(signals.filter((s) => s.event === 'attention' && s.reason === 'approve')).toHaveLength(1);
     expect(signals.some((s) => s.event === 'ask')).toBe(false);
     expect(log().slice(before).match(/notify → play pid/g)).toHaveLength(1);
+  });
+
+  function permissionFixture(session: string) {
+    const transcriptPath = path.join(work, `${session}.jsonl`);
+    const input = cli(session, { notificationType: 'permission_prompt', message: 'Fetch URL', transcriptPath });
+    const events = [
+      { type: 'permission.requested', data: { requestId: session } },
+      { type: 'hook.start', data: { hookType: 'notification', input } },
+    ];
+    fs.writeFileSync(transcriptPath, events.map((e) => JSON.stringify(e)).join('\n') + '\n');
+    return {
+      input,
+      complete: () => fs.appendFileSync(transcriptPath, JSON.stringify({
+        type: 'permission.completed', data: { requestId: session, result: { kind: 'approved' } },
+      }) + '\n'),
+    };
+  }
+
+  it('does not announce or highlight a permission that completed before notification handling', async () => {
+    configure({ handsFree: false });
+    const fixture = permissionFixture('cli-permission-completed');
+    fixture.complete();
+    const before = log().length;
+    await run('notify', fixture.input, ['--event', 'Notification']);
+    expect(signals).toEqual([]);
+    expect(log().slice(before)).not.toContain('play pid');
+  });
+
+  it('drops a permission announcement that completes while waiting in the audio queue', async () => {
+    configure({ handsFree: false });
+    const fixture = permissionFixture('cli-permission-queued');
+    const held = holdPlayback();
+    try {
+      await run('notify', fixture.input, ['--event', 'Notification']);
+      await vi.waitFor(() => expect(fs.readdirSync(held.queue).length).toBeGreaterThan(1), { timeout: 10_000 });
+      fixture.complete();
+    } finally {
+      held.release();
+      await playbackFinished();
+    }
+    expect(fs.readFileSync(audioTexts, 'utf8')).toBe('');
+    expect(fs.readFileSync(playedAudio, 'utf8')).toBe('');
+  });
+
+  it('does not queue speech if the permission completes during visual attention', async () => {
+    configure({ handsFree: false });
+    const fixture = permissionFixture('cli-permission-attention');
+    onAttention = fixture.complete;
+    const before = log().length;
+    await run('notify', fixture.input, ['--event', 'Notification']);
+    expect(signals.some((s) => s.event === 'attention')).toBe(true);
+    expect(log().slice(before)).not.toContain('play pid');
+  });
+
+  it('drops synthesized audio if permission completes before the first sound', async () => {
+    configure({ handsFree: false, voice: 'en-US-JennyNeural' });
+    const fixture = permissionFixture('cli-permission-synthesis');
+    fs.writeFileSync(synthesisGate, '');
+    const before = log().length;
+    try {
+      await run('notify', fixture.input, ['--event', 'Notification']);
+      await vi.waitFor(() => expect(fs.readFileSync(audioTexts, 'utf8')).not.toBe(''), { timeout: 10_000 });
+      fixture.complete();
+    } finally {
+      fs.rmSync(synthesisGate, { force: true });
+      await playbackFinished();
+    }
+    expect(fs.readFileSync(playedAudio, 'utf8')).toBe('');
+    expect(log().slice(before)).toContain('dropping stale alert');
+    expect(log().slice(before)).not.toContain('player exited with code');
+  });
+
+  it('still speaks a tracked permission while it remains pending', async () => {
+    configure({ handsFree: false });
+    const fixture = permissionFixture('cli-permission-pending');
+    await run('notify', fixture.input, ['--event', 'Notification']);
+    await vi.waitFor(() => expect(fs.readFileSync(playedAudio, 'utf8')).not.toBe(''), { timeout: 10_000 });
+    await playbackFinished();
+    expect(signals.some((s) => s.event === 'attention' && s.reason === 'approve')).toBe(true);
+    expect(fs.readFileSync(playedAudio, 'utf8')).not.toBe('');
   });
 
   it('announces only one dialog after six concurrent permission checks', async () => {
