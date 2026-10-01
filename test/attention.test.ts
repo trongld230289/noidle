@@ -214,4 +214,11 @@ describe('attention: một tiến trình Windows Terminal chứa nhiều cửa s
     const s = flashHostScript([1]);
     for (const how of ['[console]', '[title]', '[z-order]']) expect(s).toContain(how);
   });
+  it('bỏ cửa sổ của explorer.exe cả khi explorer là con của một pid trong chuỗi, không chỉ khi nó là pid trong chuỗi', () => {
+    // 1/10/2026: PowerShell mở từ Explorer (chuỗi ... ← powershell ← explorer ← userinit). Explorer bị bỏ qua khi
+    // duyệt tới chính nó, nhưng khi duyệt tới cha của nó, luật "cửa sổ của con" nhận lại cửa sổ File Explorer và
+    // hook nháy nhầm File Explorer thay vì báo không thấy.
+    const s = flashHostScript([1]);
+    expect(s).toMatch(/exe\.TryGetValue\(wp, out \w+\) && \w+ == "explorer\.exe"\) continue/);
+  });
 });

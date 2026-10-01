@@ -374,6 +374,8 @@ public static class NoIdleHost {
         uint wp = Pids[i]; uint wpp;
         bool own = wp == p || (parent.TryGetValue(wp, out wpp) && wpp == p);
         if (!own) continue;
+        // Explorer cũng là con của một pid trong chuỗi (userinit) khi PowerShell được mở từ Explorer: bỏ nốt ở đây.
+        string wname; if (exe.TryGetValue(wp, out wname) && wname == "explorer.exe") continue;
         if (ConsoleTitle.Length > 0 && Titles[i] == ConsoleTitle) { How = "[title]"; return FlashHwnd(Handles[i], fg, Titles[i]); }
         if (first < 0) first = i;
       }
