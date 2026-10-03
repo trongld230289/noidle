@@ -288,6 +288,19 @@ export function applyTint(current: ColorMap | undefined, shell: string, bg = TIN
   return { next, saved };
 }
 
+/**
+ * Màu còn sót trong settings workspace sau khi extension khởi động lại (tắt máy lúc đang tô: lệnh gỡ trong dispose
+ * không kịp ghi). remembered: màu đã tô mà extension ghi vào workspaceState trước khi tô; configured: màu trong setting
+ * hiện tại (bản cũ không nhớ gì). Có màu của mình trong file thì trả bảng màu sau khi gỡ; không thì undefined.
+ */
+export function staleTintPlan(input: { current: ColorMap | undefined; remembered?: string; configured: string; shell: string }): { bg: string; next: ColorMap | undefined } | undefined {
+  const found = input.current?.['titleBar.activeBackground'];
+  if (typeof found !== 'string') return undefined;
+  const bg = [input.remembered, input.configured].find((c) => c && c === found);
+  if (!bg) return undefined;
+  return { bg, next: removeTint(input.current, {}, input.shell, bg) };
+}
+
 /** Bỏ màu đã tô: trả giá trị cũ, xoá khoá mình thêm; khoá người dùng đã tự đổi trong lúc đó thì giữ. Rỗng thì undefined. */
 export function removeTint(current: ColorMap | undefined, saved: ColorMap, shell: string, bg = TINT.activeBackground): ColorMap | undefined {
   const next: ColorMap = { ...(current ?? {}) };

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { StatusBar, UsageBar } from './status';
-import { flashWindowEx, learnForegroundWindow, acceptLearnedWindow, blinkTitleBar, applyTint, removeTint, shellColorFor, normalizeHex, shouldFlash, nextBlurAt, TINT, type ColorMap } from './attention';
+import { flashWindowEx, learnForegroundWindow, acceptLearnedWindow, blinkTitleBar, applyTint, removeTint, shellColorFor, normalizeHex, shouldFlash, nextBlurAt, staleTintPlan, TINT, type ColorMap } from './attention';
 import { Recorder, SAMPLE_RATE, CHANNELS } from './recorder';
 import { Segmenter } from './segmenter';
 import { listenOnce } from './listen';
@@ -1254,12 +1254,17 @@ export function activate(ctx: vscode.ExtensionContext): void {
   /** Màu đã dùng lúc tô, để gỡ đúng màu đó dù người dùng đổi setting giữa chừng. */
   let tintBg = TINT.activeBackground;
 
+  /** Khoá workspaceState nhớ màu đã tô (bền qua tắt máy, theo từng workspace) để lần khởi động sau gỡ chắc chắn. */
+  const TINT_STATE = 'noidle.tintBg';
+
   async function tintTitleBar(): Promise<void> {
     if (tintSaved || !vscode.workspace.workspaceFolders?.length) return;
     tintBg = config().attentionTintColor;
     const { next, saved } = applyTint(workspaceColors(), shellColor(), tintBg);
     tintSaved = saved;
     try {
+      // Nhớ trước khi ghi màu: tắt máy giữa chừng thì lần sau vẫn biết màu nào là của mình.
+      await ctx.workspaceState.update(TINT_STATE, tintBg);
       await colorCfg().update('colorCustomizations', next, vscode.ConfigurationTarget.Workspace);
     } catch (err) {
       tintSaved = undefined;
@@ -1267,17 +1272,36 @@ export function activate(ctx: vscode.ExtensionContext): void {
     }
   }
 
-  async function untintTitleBar(): Promise<void> {
-    const saved = tintSaved ?? {};
+  /** why: ghi log vì sao gỡ (focus, khởi động, thử lại...). Không có gì để gỡ thì im, trừ khi còn nhớ màu cũ. */
+  async function untintTitleBar(why = 'focus'): Promise<void> {
     const current = workspaceColors();
-    // Không nhớ gì (extension vừa khởi động lại) mà file vẫn còn màu mình tô thì cũng gỡ.
-    const bg = tintSaved ? tintBg : config().attentionTintColor;
-    if (!tintSaved && current?.['titleBar.activeBackground'] !== bg) return;
+    let saved: ColorMap = {};
+    let bg: string;
+    let next: ColorMap | undefined;
+    if (tintSaved) {
+      saved = tintSaved;
+      bg = tintBg;
+      next = removeTint(current, saved, shellColor(), bg);
+    } else {
+      // Extension vừa khởi động lại: màu của mình còn trong file (đã nhớ, hoặc bằng màu setting với bản cũ) thì gỡ.
+      const remembered = ctx.workspaceState.get<string>(TINT_STATE);
+      const plan = staleTintPlan({ current, remembered, configured: config().attentionTintColor, shell: shellColor() });
+      if (!plan) {
+        if (remembered) {
+          log(`attention: còn nhớ màu ${remembered} đã tô nhưng settings không có, chỉ xoá dấu nhớ (${why})`);
+          await ctx.workspaceState.update(TINT_STATE, undefined);
+        }
+        return;
+      }
+      ({ bg, next } = plan);
+      log(`attention: settings còn màu ${bg} từ lần trước, gỡ (${why})`);
+    }
     tintSaved = undefined;
     try {
-      await colorCfg().update('colorCustomizations', removeTint(current, saved, shellColor(), bg), vscode.ConfigurationTarget.Workspace);
+      await colorCfg().update('colorCustomizations', next, vscode.ConfigurationTarget.Workspace);
+      await ctx.workspaceState.update(TINT_STATE, undefined);
     } catch (err) {
-      log(`attention: không gỡ được màu title bar: ${(err as Error).message}`);
+      log(`attention: không gỡ được màu title bar (${why}): ${(err as Error).message}`);
     }
   }
   /** Tăng mỗi lần bắt đầu hoặc huỷ nháy title bar (macOS), để lượt nháy cũ tự dừng. */
@@ -1288,8 +1312,17 @@ export function activate(ctx: vscode.ExtensionContext): void {
     void untintTitleBar();
   };
   // Cửa sổ trước đóng lúc đang tô thì màu còn nằm trong settings của workspace: gỡ khi khởi động và khi tắt extension.
-  void untintTitleBar();
-  ctx.subscriptions.push({ dispose: () => void untintTitleBar() });
+  // Lúc mới bật máy nhiều cửa sổ cùng khởi động, cấu hình workspace có thể chưa nạp xong: thử lại sau 3 và 15 giây,
+  // và khi workspace được cấp trust (Restricted Mode không cho ghi settings workspace).
+  void untintTitleBar('khởi động');
+  for (const ms of [3000, 15000]) {
+    const t = setTimeout(() => void untintTitleBar(`thử lại sau ${ms / 1000}s`), ms);
+    ctx.subscriptions.push({ dispose: () => clearTimeout(t) });
+  }
+  ctx.subscriptions.push(
+    vscode.workspace.onDidGrantWorkspaceTrust(() => void untintTitleBar('workspace được trust')),
+    { dispose: () => void untintTitleBar('tắt extension') },
+  );
 
   /** Lần cửa sổ mất focus gần nhất (ms); 0 nếu chưa từng focus từ khi extension chạy. */
   let lastBlurAt = 0;

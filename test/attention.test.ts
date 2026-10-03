@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { windowTitleMatches, flashScript, flashWindow, flashHostScript, flashHostWindow, applyTint, removeTint, shellColorFor, tintForeground, normalizeHex, TINT, foregroundWindowScript, parseForegroundWindow, learnForegroundWindow, acceptLearnedWindow, flashWindowEx, shouldFlash, nextBlurAt } from '../src/attention';
+import { windowTitleMatches, flashScript, flashWindow, flashHostScript, flashHostWindow, applyTint, removeTint, shellColorFor, tintForeground, normalizeHex, TINT, foregroundWindowScript, parseForegroundWindow, learnForegroundWindow, acceptLearnedWindow, flashWindowEx, shouldFlash, nextBlurAt, staleTintPlan } from '../src/attention';
 import { NATIVE_SOURCE } from '../src/native';
 
 describe('attention: tìm cửa sổ VS Code theo tiêu đề', () => {
@@ -60,6 +60,28 @@ describe('attention: flashWindow', () => {
     expect(await flashWindow('vi-voice', { platform: 'win32', run: run(0) })).toBe('flashed');
     expect(await flashWindow('vi-voice', { platform: 'win32', run: run(2) })).toBe('not-found');
     expect(seen[0]).toContain('FlashWindowEx');
+  });
+});
+
+describe('attention: gỡ màu còn sót sau khi tắt máy (staleTintPlan)', () => {
+  // 3/10/2026: tắt máy lúc cửa sổ đang tô, lệnh gỡ trong dispose không kịp ghi; mở lại thì extension chỉ gỡ khi màu
+  // trong file bằng đúng màu setting hiện tại. Nhớ màu đã tô trong workspaceState để gỡ chắc chắn.
+  const shell = '#181818';
+  const tinted = (bg: string) => ({ 'titleBar.activeBackground': bg, 'titleBar.inactiveBackground': bg, 'titleBar.activeForeground': '#ffffff', 'titleBar.inactiveForeground': '#ffffff', 'modernUI.shellBackground': shell, 'modernUI.inactiveShellBackground': shell, 'editor.background': '#000000' });
+  it('màu đã nhớ khác màu setting hiện tại: vẫn gỡ đúng màu đã nhớ', () => {
+    const plan = staleTintPlan({ current: tinted('#15803d'), remembered: '#15803d', configured: '#ff0000', shell });
+    expect(plan).toEqual({ bg: '#15803d', next: { 'editor.background': '#000000' } });
+  });
+  it('không nhớ gì (bản cũ) nhưng file có màu bằng màu setting: gỡ như trước', () => {
+    expect(staleTintPlan({ current: tinted('#15803d'), configured: '#15803d', shell })?.bg).toBe('#15803d');
+  });
+  it('file sạch hay không có màu của mình thì không có gì để gỡ, kể cả khi còn nhớ', () => {
+    expect(staleTintPlan({ current: undefined, remembered: '#15803d', configured: '#15803d', shell })).toBeUndefined();
+    expect(staleTintPlan({ current: { 'titleBar.activeBackground': '#123456' }, remembered: '#15803d', configured: '#15803d', shell })).toBeUndefined();
+  });
+  it('gỡ hết thì next là undefined để xoá khoá colorCustomizations', () => {
+    const { 'editor.background': _e, ...onlyTint } = tinted('#15803d');
+    expect(staleTintPlan({ current: onlyTint, remembered: '#15803d', configured: '#15803d', shell })).toEqual({ bg: '#15803d', next: undefined });
   });
 });
 
