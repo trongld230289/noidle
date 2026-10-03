@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { windowTitleMatches, flashScript, flashWindow, flashHostScript, flashHostWindow, applyTint, removeTint, shellColorFor, tintForeground, normalizeHex, TINT, foregroundWindowScript, parseForegroundWindow, learnForegroundWindow, acceptLearnedWindow, flashWindowEx } from '../src/attention';
+import { windowTitleMatches, flashScript, flashWindow, flashHostScript, flashHostWindow, applyTint, removeTint, shellColorFor, tintForeground, normalizeHex, TINT, foregroundWindowScript, parseForegroundWindow, learnForegroundWindow, acceptLearnedWindow, flashWindowEx, shouldFlash } from '../src/attention';
+import { NATIVE_SOURCE } from '../src/native';
 
 describe('attention: tìm cửa sổ VS Code theo tiêu đề', () => {
   it('khớp tiêu đề mặc định "file - workspace - Visual Studio Code"', () => {
@@ -19,15 +20,22 @@ describe('attention: tìm cửa sổ VS Code theo tiêu đề', () => {
   it('không phân biệt hoa thường', () => {
     expect(windowTitleMatches('x.ts - VI-Voice - Visual Studio Code', 'vi-voice')).toBe(true);
   });
+  it('tên workspace ở đoạn đầu (tên file đang mở) không tính khi tiêu đề có từ 3 đoạn', () => {
+    expect(windowTitleMatches('Research - vi-voice - Visual Studio Code', 'Research')).toBe(false);
+    expect(windowTitleMatches('Research - Visual Studio Code', 'Research')).toBe(true);
+    expect(windowTitleMatches('a.ts - Research - Default - Visual Studio Code', 'Research')).toBe(true);
+  });
 });
 
 describe('attention: script PowerShell nháy taskbar', () => {
-  it('gọi FlashWindowEx với cờ FLASHW_ALL | FLASHW_TIMERNOFG và tên workspace đã escape', () => {
-    const s = flashScript("vi-voice's");
+  it('gọi FlashWindow của helper (cờ FLASHW_ALL | FLASHW_TIMERNOFG) với tên workspace đã escape và hwnd', () => {
+    const s = flashScript("it's - acme", '4242');
     expect(s).toContain('FlashWindowEx');
-    expect(s).toContain('dwFlags = 15');
-    expect(s).toContain("'vi-voice''s'");
-    expect(s).toContain('GetForegroundWindow');
+    expect(s).toContain('FLASH_FLAGS = 15');
+    expect(s).toContain("'it''s - acme'");
+    expect(s).toContain('[NoIdleNative]::FlashWindow($ws, 4242)');
+    expect(flashScript('x')).toContain('FlashWindow($ws, 0)');
+    expect(flashScript('x', 'abc')).toContain('FlashWindow($ws, 0)');
   });
 });
 
@@ -99,48 +107,74 @@ describe('attention: tô màu title bar qua workbench.colorCustomizations', () =
 });
 
 describe('attention: nháy cửa sổ chứa agent theo chuỗi pid (terminal rời)', () => {
-  it('script nhận chuỗi pid, tra cây tiến trình bằng Toolhelp32, liệt kê cửa sổ, bỏ explorer, nhường VS Code cho extension', () => {
-    const s = flashHostScript([1234, 88, 7]);
-    expect(s).toContain('1234, 88, 7');
-    expect(s).toContain('AttachConsole');
-    expect(s).toContain('GetConsoleWindow');
-    expect(s).toContain('GetAncestor');
-    expect(s).toContain('CreateToolhelp32Snapshot');
-    expect(s).toContain('EnumWindows');
-    expect(s).toContain('GetWindowThreadProcessId');
-    expect(s).toContain('FlashWindowEx');
-    expect(s).toContain('explorer.exe');
-    expect(s).toContain('visual studio code');
+  it('script tự tra chuỗi pid từ pid cho sẵn, nhận danh sách pid editor, in chuỗi và cửa sổ đã chọn', () => {
+    const s = flashHostScript(1234, [11384, 2000]);
+    expect(s).toContain('[NoIdleNative]::Chain(1234, 14)');
+    expect(s).toContain('[uint32[]]@(11384, 2000)');
+    expect(s).toContain('HostFlash(');
+    expect(s).toContain('"chain`t"');
+    expect(s).toContain('"chosen`t"');
+    expect(flashHostScript(1, [])).toContain('[uint32[]]@()');
   });
-  it('ngoài Windows là unsupported, chuỗi rỗng là not-found; cả hai không chạy gì', async () => {
+  it('ngoài Windows là unsupported, pid 0 là not-found; cả hai không chạy gì', async () => {
     let spawned = 0;
     const run = async () => { spawned++; return 0; };
-    expect((await flashHostWindow([1], { platform: 'linux', run })).result).toBe('unsupported');
-    expect((await flashHostWindow([], { platform: 'win32', run })).result).toBe('not-found');
+    expect((await flashHostWindow(1, { platform: 'linux', run })).result).toBe('unsupported');
+    expect((await flashHostWindow(0, { platform: 'win32', run })).result).toBe('not-found');
     expect(spawned).toBe(0);
   });
   it('Windows: exit 0 flashed, 2 not-found, 3 foreground, 4 vscode (để extension nháy theo tên workspace)', async () => {
     const run = (code: number) => async () => code;
-    const result = async (code: number) => (await flashHostWindow([1], { platform: 'win32', run: run(code) })).result;
+    const result = async (code: number) => (await flashHostWindow(1, { platform: 'win32', run: run(code) })).result;
     expect(await result(0)).toBe('flashed');
     expect(await result(2)).toBe('not-found');
     expect(await result(3)).toBe('foreground');
     expect(await result(4)).toBe('vscode');
     expect(await result(-1)).toBe('error');
   });
-  it('script in ra cửa sổ đã chọn (pid, tiêu đề) để hook ghi log', async () => {
-    const run = async () => ({ code: 0, out: 'pid 31388 Web gallery\r\n' });
-    expect(await flashHostWindow([1], { platform: 'win32', run })).toEqual({ result: 'flashed', window: 'pid 31388 Web gallery' });
-    expect(flashHostScript([1])).toContain('[NoIdleHost]::Chosen');
+  it('script in ra chuỗi pid (gần nhất trước) và cửa sổ đã chọn để hook dùng và ghi log', async () => {
+    const run = async () => ({ code: 0, out: 'chain\t12\tbash.exe\r\nchain\t34\tclaude.exe\r\nchosen\tpid 31388 Web gallery [console]\r\n' });
+    expect(await flashHostWindow(1, { platform: 'win32', run })).toEqual({
+      result: 'flashed',
+      window: 'pid 31388 Web gallery [console]',
+      chain: [{ pid: 12, exe: 'bash.exe' }, { pid: 34, exe: 'claude.exe' }],
+    });
+  });
+});
+
+describe('attention: mã C# chọn cửa sổ chứa agent', () => {
+  it('bước console duyệt hết chuỗi (console ẩn của bash/powershell bọc hook không được dừng vòng lặp)', () => {
+    // 3/10/2026: vòng lặp cũ dừng ở console đầu tiên attach được = conhost ẩn của bash wrapper, không bao giờ tới WT.
+    expect(NATIVE_SOURCE).toMatch(/if \(h == IntPtr\.Zero\) continue;/);
+    expect(NATIVE_SOURCE).toContain('"PseudoConsoleWindow") {');
+  });
+  it('bước cây tiến trình chỉ nhận cửa sổ của con khi con là console host, không nhận app mở từ terminal', () => {
+    expect(NATIVE_SOURCE).toContain('HostExes.Contains(ExeOf(wp))');
+    expect(NATIVE_SOURCE).toContain('"conhost.exe", "openconsole.exe", "windowsterminal.exe"');
+  });
+  it('cửa sổ của pid editor đã đăng ký là editor dù tiêu đề không có "Visual Studio Code" (Cursor, VSCodium)', () => {
+    expect(NATIVE_SOURCE).toContain('editors.Contains(pid) ||');
+  });
+});
+
+describe('attention: bỏ nháy khi người dùng đã xem', () => {
+  it('shouldFlash: nháy khi cửa sổ không focus và chưa được focus lại từ lúc hook bắt đầu', () => {
+    expect(shouldFlash({ focused: true, lastBlurAt: 0, startedAt: 1000 })).toBe(false);
+    expect(shouldFlash({ focused: false, lastBlurAt: 0, startedAt: 1000 })).toBe(true);
+    // Người dùng còn ở cửa sổ lúc agent xong (rời sau đó): đã thấy, không nháy.
+    expect(shouldFlash({ focused: false, lastBlurAt: 1500, startedAt: 1000 })).toBe(false);
+    // Rời trước khi agent xong: chưa thấy, nháy.
+    expect(shouldFlash({ focused: false, lastBlurAt: 900, startedAt: 1000 })).toBe(true);
+    // Hook cũ không gửi giờ: giữ hành vi cũ.
+    expect(shouldFlash({ focused: false, lastBlurAt: 1500 })).toBe(true);
   });
 });
 
 describe('attention: học handle cửa sổ của chính mình lúc được focus', () => {
-  it('script lấy cửa sổ foreground và in "hwnd<tab>tiêu đề"', () => {
+  it('script lấy cửa sổ foreground qua helper và in "hwnd<tab>tiêu đề"', () => {
     const s = foregroundWindowScript();
-    expect(s).toContain('GetForegroundWindow');
-    expect(s).toContain('GetWindowText');
-    expect(s).toContain('"`t"');
+    expect(s).toContain('[NoIdleNative]::Foreground()');
+    expect(NATIVE_SOURCE).toContain('h.ToInt64().ToString() + "\\t" + TitleOf(h)');
   });
   it('parseForegroundWindow: đọc hwnd và tiêu đề; không phải VS Code hay dòng hỏng thì undefined', () => {
     expect(parseForegroundWindow('1234567\t● hook.ts - vi-voice - Visual Studio Code\r\n')).toEqual({ hwnd: '1234567', title: '● hook.ts - vi-voice - Visual Studio Code' });
@@ -161,16 +195,16 @@ describe('attention: nháy theo handle đã học thay vì theo tên (hai cửa 
   it('flashScript có hwnd thì kiểm tra IsWindow rồi nháy thẳng handle đó, chỉ tìm theo tên khi handle không còn', () => {
     const s = flashScript('vi-voice', '1234567');
     expect(s).toContain('IsWindow(');
-    expect(s).toContain('Flash($ws, 1234567)');
-    expect(flashScript('vi-voice')).toContain('Flash($ws, 0)');
+    expect(s).toContain('FlashWindow($ws, 1234567)');
+    expect(flashScript('vi-voice')).toContain('FlashWindow($ws, 0)');
   });
   it('flashWindow đưa hwnd vào script', async () => {
     let script = '';
     const run = async (s: string) => ((script = s), 0);
     expect(await flashWindow('vi-voice', { platform: 'win32', run, hwnd: '4242' })).toBe('flashed');
-    expect(script).toContain('Flash($ws, 4242)');
+    expect(script).toContain('FlashWindow($ws, 4242)');
     expect(await flashWindow('vi-voice', { platform: 'win32', run, hwnd: 'garbage' })).toBe('flashed');
-    expect(script).toContain('Flash($ws, 0)');
+    expect(script).toContain('FlashWindow($ws, 0)');
   });
 });
 
@@ -206,19 +240,18 @@ describe('attention: một tiến trình Windows Terminal chứa nhiều cửa s
     // 30/9/2026: hai Claude CLI ở hai cửa sổ WT (một tiến trình WindowsTerminal.exe). Khi console không cho biết
     // cửa sổ chủ, bước cây tiến trình lấy cửa sổ đầu tiên EnumWindows trả về = cửa sổ đang nằm trên, tức cửa sổ
     // người dùng đang nhìn (B) chứ không phải cửa sổ của agent vừa xong (A).
-    const s = flashHostScript([1]);
+    const s = flashHostScript(1, []);
     expect(s).toContain('GetConsoleTitle');
     expect(s).toContain('Titles[i] == ConsoleTitle');
   });
   it('script ghi cách chọn cửa sổ (console, tiêu đề, thứ tự Z) vào dòng log', () => {
-    const s = flashHostScript([1]);
+    const s = flashHostScript(1, []);
     for (const how of ['[console]', '[title]', '[z-order]']) expect(s).toContain(how);
   });
   it('bỏ cửa sổ của explorer.exe cả khi explorer là con của một pid trong chuỗi, không chỉ khi nó là pid trong chuỗi', () => {
     // 1/10/2026: PowerShell mở từ Explorer (chuỗi ... ← powershell ← explorer ← userinit). Explorer bị bỏ qua khi
     // duyệt tới chính nó, nhưng khi duyệt tới cha của nó, luật "cửa sổ của con" nhận lại cửa sổ File Explorer và
     // hook nháy nhầm File Explorer thay vì báo không thấy.
-    const s = flashHostScript([1]);
-    expect(s).toMatch(/exe\.TryGetValue\(wp, out \w+\) && \w+ == "explorer\.exe"\) continue/);
+    expect(NATIVE_SOURCE).toContain('if (ExeOf(wp) == "explorer.exe") continue;');
   });
 });

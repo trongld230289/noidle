@@ -5,12 +5,15 @@
  * Tất cả cửa sổ VS Code chung một tiến trình chính, nên chọn cửa sổ theo tiêu đề: tiêu đề mặc định luôn có
  * tên workspace giữa hai dấu " - " ("hook.ts - vi-voice - Visual Studio Code").
  */
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
-import { spawn } from 'child_process';
+import { nativeScript, runPowerShell, parseChain, type RunResult } from './native';
+import type { ProcEntry } from './proctree';
+export type { RunResult } from './native';
 
-/** Tiêu đề là của VS Code và có đúng tên workspace là một đoạn riêng (không phải một phần của tên khác). */
+/**
+ * Tiêu đề là của VS Code và có đúng tên workspace là một đoạn riêng. Tiêu đề mặc định
+ * "file - workspace - [profile -] Visual Studio Code": đoạn đầu là tên file đang mở, có thể trùng tên workspace khác,
+ * nên không tính khi tiêu đề có từ 3 đoạn.
+ */
 export function windowTitleMatches(title: string, workspaceName: string): boolean {
   const t = title.toLowerCase();
   if (!t.includes('visual studio code')) return false;
@@ -18,11 +21,9 @@ export function windowTitleMatches(title: string, workspaceName: string): boolea
   // Multi-root: tiêu đề ghi "tên (Workspace)"; tên truyền vào có thể có hoặc không có hậu tố đó.
   const bare = name.replace(/ \(workspace\)$/, '');
   const parts = t.split(' - ').map((p) => p.replace(/^[●○•*]\s*/, '').trim());
-  return parts.some((p) => p === bare || p === `${bare} (workspace)`);
+  const candidates = parts.length >= 3 ? parts.slice(1) : parts;
+  return candidates.some((p) => p === bare || p === `${bare} (workspace)`);
 }
-
-const FLASHW_ALL = 3;
-const FLASHW_TIMERNOFG = 12;
 
 /** Handle cửa sổ (số thập phân từ script) hợp lệ thì trả về, không thì '0' (script tìm theo tên). */
 function hwndArg(hwnd: string | undefined): string {
@@ -32,104 +33,20 @@ function hwndArg(hwnd: string | undefined): string {
 /**
  * Script PowerShell: nháy cửa sổ VS Code tới khi nó lên foreground. Có handle đã học (xem learnForegroundWindow) và
  * cửa sổ còn đó thì nháy thẳng handle; không thì tìm cửa sổ có tên workspace trong tiêu đề (hai cửa sổ trùng tên
- * thì cách này có thể chọn nhầm). Exit 0 nháy, 2 không thấy, 3 đang ở foreground.
+ * thì cách này có thể chọn nhầm). Exit 0 nháy, 2 không thấy, 3 đang ở foreground; +10 nếu handle đã học sai.
  */
 export function flashScript(workspaceName: string, hwnd?: string): string {
   const name = workspaceName.replace(/'/g, "''");
-  return `
-$ErrorActionPreference = 'Stop'
-Add-Type -TypeDefinition @"
-using System;
-using System.Text;
-using System.Runtime.InteropServices;
-public static class NoIdleWin {
-  [StructLayout(LayoutKind.Sequential)]
-  public struct FLASHWINFO { public uint cbSize; public IntPtr hwnd; public uint dwFlags; public uint uCount; public uint dwTimeout; }
-  public delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
-  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr lParam);
-  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
-  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
-  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
-  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-  [DllImport("user32.dll")] public static extern bool FlashWindowEx(ref FLASHWINFO pwfi);
-  public static System.Collections.Generic.List<IntPtr> Handles = new System.Collections.Generic.List<IntPtr>();
-  public static System.Collections.Generic.List<string> Titles = new System.Collections.Generic.List<string>();
-  public static bool Collect(IntPtr h, IntPtr l) {
-    if (!IsWindowVisible(h)) return true;
-    var sb = new StringBuilder(512);
-    GetWindowText(h, sb, sb.Capacity);
-    var t = sb.ToString();
-    if (t.Length > 0) { Handles.Add(h); Titles.Add(t); }
-    return true;
-  }
-  public static int FlashHandle(IntPtr h, IntPtr fg) {
-    if (h == fg) return 3;
-    var f = new FLASHWINFO();
-    f.cbSize = (uint)Marshal.SizeOf(f);
-    f.hwnd = h;
-    f.dwFlags = ${FLASHW_ALL | FLASHW_TIMERNOFG};
-    f.uCount = 0;
-    f.dwTimeout = 0;
-    FlashWindowEx(ref f);
-    return 0;
-  }
-  public static string TitleOf(IntPtr h) { var sb = new StringBuilder(512); GetWindowText(h, sb, sb.Capacity); return sb.ToString(); }
-  public static bool TitleMatches(string title, string workspace) {
-    var t = title.ToLowerInvariant();
-    if (!t.Contains("visual studio code")) return false;
-    if (workspace.Length == 0) return true;
-    foreach (var raw in t.Split(new string[] { " - " }, StringSplitOptions.None)) {
-      var p = raw.TrimStart('\\u25CF', '\\u25CB', '\\u2022', '*', ' ').Trim();
-      if (p == workspace || p == workspace + " (workspace)") return true;
-    }
-    return false;
-  }
-  /** Handle đã học phải còn là cửa sổ VS Code mang tên workspace này (học nhầm lúc cửa sổ khác còn ở foreground); sai thì tìm theo tên và cộng 10 vào mã để extension quên handle. */
-  public static int Flash(string workspace, long hwnd) {
-    IntPtr fg = GetForegroundWindow();
-    int stale = 0;
-    if (hwnd != 0) {
-      IntPtr known = new IntPtr(hwnd);
-      if (IsWindow(known) && IsWindowVisible(known) && TitleMatches(TitleOf(known), workspace)) return FlashHandle(known, fg);
-      stale = 10;
-    }
-    Handles.Clear(); Titles.Clear();
-    EnumWindows(Collect, IntPtr.Zero);
-    for (int i = 0; i < Titles.Count; i++) {
-      if (workspace.Length == 0 || !TitleMatches(Titles[i], workspace)) continue;
-      return stale + FlashHandle(Handles[i], fg);
-    }
-    return stale + 2;
-  }
-}
-"@
-$ws = '${name}'.ToLowerInvariant() -replace ' \(workspace\)$', ''
-exit [NoIdleWin]::Flash($ws, ${hwndArg(hwnd)})
-`;
+  return nativeScript(`
+$ws = '${name}'.ToLowerInvariant() -replace ' \\(workspace\\)$', ''
+exit [NoIdleNative]::FlashWindow($ws, ${hwndArg(hwnd)})`);
 }
 
 /** Script PowerShell: in "hwnd<tab>tiêu đề" của cửa sổ đang ở foreground (handle dạng số thập phân). */
 export function foregroundWindowScript(): string {
-  return `
-$ErrorActionPreference = 'Stop'
-Add-Type -TypeDefinition @"
-using System;
-using System.Text;
-using System.Runtime.InteropServices;
-public static class NoIdleFg {
-  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
-  public static string Read() {
-    IntPtr h = GetForegroundWindow();
-    var sb = new StringBuilder(512);
-    GetWindowText(h, sb, sb.Capacity);
-    return h.ToInt64().ToString() + "\`t" + sb.ToString();
-  }
-}
-"@
+  return nativeScript(`
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-[Console]::Out.Write([NoIdleFg]::Read())
-`;
+[Console]::Out.Write([NoIdleNative]::Foreground())`);
 }
 
 export interface ForegroundWindow {
@@ -169,43 +86,10 @@ export type FlashResult = 'flashed' | 'not-found' | 'foreground' | 'unsupported'
 
 export interface FlashDeps {
   platform?: NodeJS.Platform;
-  /** Chạy script, trả exit code (kèm stdout nếu có). Mặc định: ghi ra file tạm rồi gọi powershell -File. */
+  /** Chạy script, trả exit code (kèm stdout nếu có). Mặc định: ghi ra file tạm rồi gọi powershell -File (native.ts). */
   run?: (script: string) => Promise<number | RunResult>;
   /** flashWindow: handle cửa sổ đã học (learnForegroundWindow); có thì nháy thẳng, không cần tìm theo tên. */
   hwnd?: string;
-}
-
-/** Kết quả chạy script: exit code và stdout (script nháy cửa sổ chứa agent in ra cửa sổ đã chọn để ghi log). */
-export interface RunResult {
-  code: number;
-  out: string;
-}
-
-async function runPowerShell(script: string, name = 'flash'): Promise<RunResult> {
-  const dir = path.join(os.tmpdir(), 'noidle-tts');
-  fs.mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, `${name}-${process.pid}.ps1`);
-  fs.writeFileSync(file, script, 'utf8');
-  return new Promise((resolve) => {
-    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], {
-      stdio: ['ignore', 'pipe', 'ignore'],
-      windowsHide: true,
-    });
-    let out = '';
-    child.stdout.on('data', (d: Buffer) => (out += d.toString('utf8')));
-    const timer = setTimeout(() => {
-      child.kill();
-      resolve({ code: -1, out });
-    }, 15_000);
-    child.on('error', () => {
-      clearTimeout(timer);
-      resolve({ code: -1, out });
-    });
-    child.on('exit', (code) => {
-      clearTimeout(timer);
-      resolve({ code: code ?? -1, out });
-    });
-  });
 }
 
 function codeOf(r: number | RunResult): number {
@@ -222,7 +106,7 @@ export interface FlashOutcome {
 export async function flashWindowEx(workspaceName: string, deps: FlashDeps = {}): Promise<FlashOutcome> {
   const platform = deps.platform ?? process.platform;
   if (platform !== 'win32') return { result: 'unsupported', staleHandle: false };
-  const run = deps.run ?? runPowerShell;
+  const run = deps.run ?? ((script) => runPowerShell(script, 'flash'));
   let code: number;
   try {
     code = codeOf(await run(flashScript(workspaceName, deps.hwnd)));
@@ -252,171 +136,76 @@ export function acceptLearnedWindow(w: ForegroundWindow, workspaceName: string, 
 
 /**
  * Agent chạy ở terminal rời (Windows Terminal, cmd, PowerShell): không có extension nào để nháy hộ, hook tự nháy
- * cửa sổ đang chứa tiến trình agent. Hook là con của agent nên chuỗi pid tổ tiên (gần nhất trước) là của nó.
+ * cửa sổ đang chứa tiến trình agent. Script tự tra chuỗi pid từ startPid (cha của hook) bằng Toolhelp32 rồi in
+ * chuỗi ra để hook dùng lại, không cần tra bảng tiến trình riêng (CIM mất 5 đến 15 giây).
  *
- * Bước 1, theo console: gắn vào console của một pid trong chuỗi (AttachConsole; hook có thể bị spawn không có
- * console) rồi lấy GetConsoleWindow. Windows Terminal (kể cả khi Win11 giao cmd/PowerShell mở rời cho nó qua
- * "default terminal", lúc đó WT không nằm trong cây tiến trình) trả một PseudoConsoleWindow ẩn mà owner gốc
- * (GetAncestor GA_ROOTOWNER) là cửa sổ WT. Conhost cổ điển trả thẳng cửa sổ console. Conpty của VS Code thì
- * owner gốc là chính nó, không có gì để nháy ở bước này.
+ * Bước 1, theo console: duyệt cả chuỗi, attach vào console của từng pid. Hook bị bash/cmd/powershell bọc, console của
+ * chúng ẩn nên đi tiếp tới console của agent. Windows Terminal trả một PseudoConsoleWindow mà owner gốc
+ * (GetAncestor GA_ROOTOWNER) là cửa sổ WT; conhost cổ điển trả thẳng cửa sổ console; conpty của VS Code thì owner
+ * là chính nó, bỏ qua.
  *
- * Bước 2, theo cây tiến trình (Toolhelp32, vài ms): duyệt chuỗi, lấy cửa sổ hiện của pid đó hoặc của con nó.
- * Cửa sổ là VS Code thì không nháy ở đây mà trả 4: mọi cửa sổ VS Code chung một pid, extension chọn theo tên
- * workspace. explorer.exe (desktop, File Explorer) bị bỏ qua để không nháy nhầm khi nó nằm trong chuỗi.
- * Exit 0 nháy, 2 không thấy, 3 đang ở foreground, 4 là VS Code.
+ * Bước 2, theo cây tiến trình: cửa sổ của chính pid trong chuỗi, hoặc của con nó khi con là console host (conhost);
+ * app người dùng mở từ terminal (notepad, trình duyệt) không được nhận. Ưu tiên cửa sổ có tiêu đề trùng tiêu đề
+ * console của agent (WT nhiều cửa sổ). explorer.exe bị bỏ qua.
+ *
+ * editorPids: pid tiến trình chính của các editor đang mở (extension đăng ký); cửa sổ của chúng, hay có
+ * "Visual Studio Code" trong tiêu đề, trả 4 để extension nháy theo tên workspace. Exit 0 nháy, 2 không thấy,
+ * 3 đang ở foreground, 4 là editor.
  */
-export function flashHostScript(pids: number[]): string {
-  const list = pids.filter((p) => Number.isSafeInteger(p) && p > 0).join(', ');
-  return `
-$ErrorActionPreference = 'Stop'
-Add-Type -TypeDefinition @"
-using System;
-using System.Text;
-using System.Collections.Generic;
-using System.Runtime.InteropServices;
-public static class NoIdleHost {
-  [StructLayout(LayoutKind.Sequential)]
-  public struct FLASHWINFO { public uint cbSize; public IntPtr hwnd; public uint dwFlags; public uint uCount; public uint dwTimeout; }
-  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-  public struct PROCESSENTRY32W {
-    public uint dwSize; public uint cntUsage; public uint th32ProcessID; public IntPtr th32DefaultHeapID; public uint th32ModuleID;
-    public uint cntThreads; public uint th32ParentProcessID; public int pcPriClassBase; public uint dwFlags;
-    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string szExeFile;
-  }
-  public delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
-  [DllImport("kernel32.dll")] public static extern bool FreeConsole();
-  [DllImport("kernel32.dll")] public static extern bool AttachConsole(uint pid);
-  [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
-  [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern uint GetConsoleTitle(StringBuilder text, uint count);
-  [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hWnd, uint flags);
-  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder text, int count);
-  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr lParam);
-  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
-  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
-  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
-  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-  [DllImport("user32.dll")] public static extern bool FlashWindowEx(ref FLASHWINFO pwfi);
-  [DllImport("kernel32.dll")] public static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint pid);
-  [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern bool Process32FirstW(IntPtr snap, ref PROCESSENTRY32W e);
-  [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern bool Process32NextW(IntPtr snap, ref PROCESSENTRY32W e);
-  [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
-  public static List<IntPtr> Handles = new List<IntPtr>();
-  public static List<uint> Pids = new List<uint>();
-  public static List<string> Titles = new List<string>();
-  public static bool Collect(IntPtr h, IntPtr l) {
-    if (!IsWindowVisible(h)) return true;
-    var sb = new StringBuilder(512);
-    GetWindowText(h, sb, sb.Capacity);
-    var t = sb.ToString();
-    if (t.Length == 0) return true;
-    uint pid; GetWindowThreadProcessId(h, out pid);
-    Handles.Add(h); Pids.Add(pid); Titles.Add(t);
-    return true;
-  }
-  public static string Chosen = "";
-  /** Cách đã chọn cửa sổ, ghi vào log: [console] owner của console, [title] tiêu đề trùng console, [z-order] cửa sổ đầu tiên của tiến trình. */
-  public static string How = "";
-  public static int FlashHwnd(IntPtr h, IntPtr fg, string title) {
-    uint pid; GetWindowThreadProcessId(h, out pid);
-    Chosen = "pid " + pid + " " + title + " " + How;
-    if (title.ToLowerInvariant().Contains("visual studio code")) return 4;
-    if (h == fg) return 3;
-    var f = new FLASHWINFO();
-    f.cbSize = (uint)Marshal.SizeOf(f);
-    f.hwnd = h;
-    f.dwFlags = ${FLASHW_ALL | FLASHW_TIMERNOFG};
-    f.uCount = 0;
-    f.dwTimeout = 0;
-    FlashWindowEx(ref f);
-    return 0;
-  }
-  public static string TitleOf(IntPtr h) { var sb = new StringBuilder(512); GetWindowText(h, sb, sb.Capacity); return sb.ToString(); }
-  /** Tiêu đề console của agent (Windows Terminal đặt nó làm tiêu đề tab, và của cửa sổ khi tab đó đang mở). */
-  public static string ConsoleTitle = "";
-  /** Cửa sổ terminal đang chứa console của một pid trong chuỗi; IntPtr.Zero nếu console không có cửa sổ hiện (conpty của VS Code). */
-  public static IntPtr ConsoleHost(uint[] chain) {
-    FreeConsole();
-    bool attached = false;
-    foreach (uint p in chain) { if (AttachConsole(p)) { attached = true; break; } }
-    if (!attached) return IntPtr.Zero;
-    var ct = new StringBuilder(512); GetConsoleTitle(ct, (uint)ct.Capacity); ConsoleTitle = ct.ToString();
-    IntPtr h = GetConsoleWindow();
-    if (h == IntPtr.Zero) return IntPtr.Zero;
-    IntPtr root = GetAncestor(h, 3);
-    if (root != IntPtr.Zero && root != h) return IsWindowVisible(root) ? root : IntPtr.Zero;
-    var cls = new StringBuilder(256); GetClassName(h, cls, cls.Capacity);
-    if (cls.ToString() == "PseudoConsoleWindow") return IntPtr.Zero;
-    return IsWindowVisible(h) ? h : IntPtr.Zero;
-  }
-  public static int Flash(uint[] chain) {
-    IntPtr fg = GetForegroundWindow();
-    IntPtr host = ConsoleHost(chain);
-    if (host != IntPtr.Zero) { How = "[console]"; return FlashHwnd(host, fg, TitleOf(host)); }
-    var parent = new Dictionary<uint, uint>();
-    var exe = new Dictionary<uint, string>();
-    IntPtr snap = CreateToolhelp32Snapshot(2, 0);
-    if (snap != IntPtr.Zero && snap.ToInt64() != -1) {
-      var e = new PROCESSENTRY32W(); e.dwSize = (uint)Marshal.SizeOf(e);
-      if (Process32FirstW(snap, ref e)) {
-        do { parent[e.th32ProcessID] = e.th32ParentProcessID; exe[e.th32ProcessID] = e.szExeFile.ToLowerInvariant(); } while (Process32NextW(snap, ref e));
-      }
-      CloseHandle(snap);
-    }
-    Handles.Clear(); Pids.Clear(); Titles.Clear();
-    EnumWindows(Collect, IntPtr.Zero);
-    // Một tiến trình có thể chứa nhiều cửa sổ (Windows Terminal chạy mọi cửa sổ trong một WindowsTerminal.exe).
-    // EnumWindows trả theo thứ tự Z, cửa sổ đầu tiên là cửa sổ đang nằm trên, thường là cửa sổ người dùng đang nhìn
-    // chứ không phải cửa sổ của agent; nên ưu tiên cửa sổ có tiêu đề trùng tiêu đề console của agent.
-    foreach (uint p in chain) {
-      string name; if (exe.TryGetValue(p, out name) && name == "explorer.exe") continue;
-      int first = -1;
-      for (int i = 0; i < Handles.Count; i++) {
-        uint wp = Pids[i]; uint wpp;
-        bool own = wp == p || (parent.TryGetValue(wp, out wpp) && wpp == p);
-        if (!own) continue;
-        // Explorer cũng là con của một pid trong chuỗi (userinit) khi PowerShell được mở từ Explorer: bỏ nốt ở đây.
-        string wname; if (exe.TryGetValue(wp, out wname) && wname == "explorer.exe") continue;
-        if (ConsoleTitle.Length > 0 && Titles[i] == ConsoleTitle) { How = "[title]"; return FlashHwnd(Handles[i], fg, Titles[i]); }
-        if (first < 0) first = i;
-      }
-      if (first >= 0) { How = "[z-order]"; return FlashHwnd(Handles[first], fg, Titles[first]); }
-    }
-    return 2;
-  }
-}
-"@
-$code = [NoIdleHost]::Flash([uint32[]]@(${list}))
-[Console]::Out.Write([NoIdleHost]::Chosen)
-exit $code
-`;
+export function flashHostScript(startPid: number, editorPids: number[]): string {
+  const editors = editorPids.filter((p) => Number.isSafeInteger(p) && p > 0).join(', ');
+  return nativeScript(`
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$chain = @([NoIdleNative]::Chain(${startPid}, 14))
+$pids = [uint32[]]@($chain | ForEach-Object { [uint32](($_ -split "\`t")[0]) })
+$code = [NoIdleNative]::HostFlash($pids, [uint32[]]@(${editors}))
+$chain | ForEach-Object { [Console]::Out.WriteLine("chain\`t" + $_) }
+[Console]::Out.WriteLine("chosen\`t" + [NoIdleNative]::Chosen)
+exit $code`);
 }
 
 export type HostFlashResult = FlashResult | 'vscode';
 
 export interface HostFlash {
   result: HostFlashResult;
-  /** Cửa sổ script đã chọn ("pid N tiêu đề"), để ghi log; rỗng nếu không chọn được. */
+  /** Cửa sổ script đã chọn ("pid N tiêu đề [cách chọn]"), để ghi log; rỗng nếu không chọn được. */
   window: string;
+  /** Chuỗi tiến trình từ startPid lên, gần nhất trước; rỗng nếu script không chạy. */
+  chain: ProcEntry[];
 }
 
-/** Nháy cửa sổ chứa agent theo chuỗi pid tổ tiên (gần nhất trước). 'vscode': để extension nháy theo tên workspace. */
-export async function flashHostWindow(pids: number[], deps: FlashDeps = {}): Promise<HostFlash> {
+function parseChosen(out: string): string {
+  const m = /^chosen\t(.*)$/m.exec(out);
+  return m ? m[1].trim() : '';
+}
+
+/** Nháy cửa sổ chứa agent theo chuỗi pid tổ tiên của startPid. 'vscode': để extension nháy theo tên workspace. */
+export async function flashHostWindow(startPid: number, deps: FlashDeps & { editorPids?: number[] } = {}): Promise<HostFlash> {
   const platform = deps.platform ?? process.platform;
-  if (platform !== 'win32') return { result: 'unsupported', window: '' };
-  const chain = pids.filter((p) => Number.isSafeInteger(p) && p > 0);
-  if (!chain.length) return { result: 'not-found', window: '' };
+  if (platform !== 'win32') return { result: 'unsupported', window: '', chain: [] };
+  if (!Number.isSafeInteger(startPid) || startPid <= 0) return { result: 'not-found', window: '', chain: [] };
   const run = deps.run ?? ((script) => runPowerShell(script, 'flash-host'));
   let r: number | RunResult;
   try {
-    r = await run(flashHostScript(chain));
+    r = await run(flashHostScript(startPid, deps.editorPids ?? []));
   } catch {
-    return { result: 'error', window: '' };
+    return { result: 'error', window: '', chain: [] };
   }
   const code = codeOf(r);
-  const window = typeof r === 'number' ? '' : r.out.trim();
+  const out = typeof r === 'number' ? '' : r.out;
   const result: HostFlashResult =
     code === 0 ? 'flashed' : code === 2 ? 'not-found' : code === 3 ? 'foreground' : code === 4 ? 'vscode' : 'error';
-  return { result, window };
+  return { result, window: parseChosen(out), chain: parseChain(out) };
+}
+
+/**
+ * Có nên nháy không: cửa sổ đang focus thì không; hook gửi kèm giờ bắt đầu (startedAt) thì chỉ nháy khi cửa sổ
+ * không được focus từ lúc đó tới giờ (lastBlurAt là lần mất focus gần nhất; đã xem rồi mới rời thì thôi).
+ */
+export function shouldFlash(w: { focused: boolean; lastBlurAt: number; startedAt?: number }): boolean {
+  if (w.focused) return false;
+  if (w.startedAt && w.lastBlurAt >= w.startedAt) return false;
+  return true;
 }
 
 /**
