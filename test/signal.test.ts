@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
+import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
 import {
@@ -198,7 +199,7 @@ describe('routeSignal: hỏi cửa sổ nào chứa agent (probe) rồi mới g�
   const win = async (pid: number, got: Signal[], heard = 'yes') => {
     const pipe = testPipe();
     const server = startServer(pipe, (s) => {
-      if (s.probe) return s.ancestors?.includes(pid) ? 'owned' : 'no';
+      if (s.event === 'probe') return s.ancestors?.includes(pid) ? 'owned' : 'no';
       got.push(s);
       return s.event === 'ask' ? heard : undefined;
     });
@@ -217,7 +218,7 @@ describe('routeSignal: hỏi cửa sổ nào chứa agent (probe) rồi mới g�
     const r = await routeSignal(sig('listen', 'D:/parent/child', [500, 400, 1001, 10]), { cwdFallback: false }, dir, undefined, () => true);
     expect(r).toEqual({ ok: true, pid: 1001, via: 'owner' });
     await new Promise((r) => setTimeout(r, 50));
-    expect(gotParent.map((s) => [s.event, s.probe, s.ancestors])).toEqual([['listen', undefined, [500, 400, 1001, 10]]]);
+    expect(gotParent.map((s) => [s.event, s.ancestors])).toEqual([['listen', [500, 400, 1001, 10]]]);
     expect(gotChild).toEqual([]);
     parent.server.close(); child.server.close();
   });
@@ -262,6 +263,33 @@ describe('routeSignal: hỏi cửa sổ nào chứa agent (probe) rồi mới g�
   });
 });
 
+describe('routeSignal: probe là sự kiện riêng để extension cũ không xử lý nhầm', () => {
+  it('cửa sổ chạy extension cũ (không biết probe, đóng kết nối không trả lời) được coi là không chứa agent', async () => {
+    // Extension cũ: parseSignal không nhận event lạ → đóng socket không trả lời. Nếu probe là tín hiệu thật kèm cờ,
+    // extension cũ sẽ mở mic / đọc "cần approve" / tắt mic ở mọi cửa sổ trong lúc chưa reload.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'noidle-route-'));
+    const oldGot: string[] = [];
+    const oldPipe = testPipe();
+    const old = net.createServer((socket) => {
+      socket.setEncoding('utf8');
+      socket.on('data', (d) => { oldGot.push(String(d)); socket.end(); });
+    });
+    old.listen(oldPipe);
+    await new Promise((r) => old.once('listening', r));
+    writeRegistry({ pid: 1001, pipe: oldPipe, folders: ['D:/a'] }, dir);
+    const r = await routeSignal({ event: 'ask', session: 's', cwd: 'D:/a', ancestors: [7, 1001], timeoutSec: 1 }, { ask: true, cwdFallback: false }, dir, undefined, () => true);
+    expect(r).toEqual({ ok: false });
+    // Cửa sổ cũ chỉ thấy một dòng probe (event riêng), không thấy tín hiệu ask.
+    expect(oldGot).toHaveLength(1);
+    expect(JSON.parse(oldGot[0]).event).toBe('probe');
+    old.close();
+  });
+  it('parseSignal nhận probe là một event, và không còn cờ probe trên tín hiệu khác', () => {
+    expect(parseSignal(JSON.stringify({ event: 'probe', cwd: 'D:/a', ancestors: [1, 2] }))).toEqual({ event: 'probe', session: '', cwd: 'D:/a', ancestors: [1, 2] });
+    expect(parseSignal(JSON.stringify({ event: 'listen', cwd: 'D:/a', probe: true }))).toEqual({ event: 'listen', session: '', cwd: 'D:/a' });
+  });
+});
+
 describe('registry và parseSignal mang thêm pid editor, probe, startedAt', () => {
   it('editorPid được ghi và đọc lại; thiếu thì undefined', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'noidle-reg-'));
@@ -270,9 +298,9 @@ describe('registry và parseSignal mang thêm pid editor, probe, startedAt', () 
     const byPid = Object.fromEntries(readRegistry(dir).map((e) => [e.pid, e.editorPid]));
     expect(byPid).toEqual({ 1: 11384, 2: undefined });
   });
-  it('parseSignal giữ probe, startedAt và source của attention', () => {
-    const s = parseSignal(JSON.stringify({ event: 'attention', cwd: 'D:/a', reason: 'done', probe: true, startedAt: 1700000000000, source: 'copilot' }));
-    expect(s).toMatchObject({ probe: true, startedAt: 1700000000000, source: 'copilot' });
-    expect(parseSignal(JSON.stringify({ event: 'listen', cwd: 'D:/a', probe: 'yes', startedAt: 'x' }))).toEqual({ event: 'listen', session: '', cwd: 'D:/a' });
+  it('parseSignal giữ startedAt và source của attention', () => {
+    const s = parseSignal(JSON.stringify({ event: 'attention', cwd: 'D:/a', reason: 'done', startedAt: 1700000000000, source: 'copilot' }));
+    expect(s).toMatchObject({ startedAt: 1700000000000, source: 'copilot' });
+    expect(parseSignal(JSON.stringify({ event: 'listen', cwd: 'D:/a', startedAt: 'x' }))).toEqual({ event: 'listen', session: '', cwd: 'D:/a' });
   });
 });

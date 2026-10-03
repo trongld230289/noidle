@@ -592,7 +592,7 @@ describe('claude-hook attention chọn cửa sổ theo chuỗi pid của agent',
     const got: Signal[] = [];
     const pipe = pipeName(process.pid * 1000 + 7);
     const server = startServer(pipe, (s) => {
-      if (s.probe) return s.ancestors?.includes(process.pid) ? 'owned' : 'no';
+      if (s.event === 'probe') return s.ancestors?.includes(process.pid) ? 'owned' : 'no';
       got.push(s);
       return undefined;
     });

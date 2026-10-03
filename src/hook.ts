@@ -224,7 +224,9 @@ async function requestMicrophone(signal: Signal & { event: 'listen' | 'ask' }): 
     await waitTurn(ticket);
     if (listTickets()[0]?.file !== ticket || !loadConfig().handsFree || readMark(signal.session).count !== promptCount) return;
     const request = { ...signal, ancestors, source: sourceArg() };
-    const r = await routeSignal(request, { ask: signal.event === 'ask', cwdFallback: ancestors.length === 0 }, undefined, log);
+    // ask (duyệt/trả lời bằng giọng): câu trả lời về hook, không gõ vào terminal nào, nên agent ở terminal rời vẫn
+    // nghe được qua cửa sổ VS Code cùng folder như trước. listen thì không: mic sẽ gõ vào terminal của cửa sổ đó.
+    const r = await routeSignal(request, { ask: signal.event === 'ask', cwdFallback: signal.event === 'ask' || ancestors.length === 0 }, undefined, log);
     return signal.event === 'ask' ? r.heard : undefined;
   } finally {
     fs.rmSync(ticketPath(ticket), { force: true });
@@ -611,8 +613,9 @@ async function modeSpeak(): Promise<void> {
   // không có gì để đọc thì gửi ngay từ đây.
   const listenCwd = cfg.handsFree && !waiting ? cwd : undefined;
   if (text) {
-    // Shell chạy hook CLI thoát ngay sau hook; lấy chuỗi pid trước khi tách play.
-    const ancestors = listenCwd ? await agentChain(session) : undefined;
+    // Không chờ tra chuỗi ở đây (giọng đọc sẽ chậm): đưa chuỗi đã lưu nếu có; không thì play đọc lại từ dấu phiên
+    // sau khi phát xong, lúc đó attention() chạy song song đã lưu chuỗi.
+    const ancestors = listenCwd ? cachedChain(session) : undefined;
     spawnPlay(text, 'speak', session, lang, listenCwd, ancestors);
   }
   else if (listenCwd) {
@@ -1161,9 +1164,6 @@ async function modePlay(): Promise<void> {
   // Tra cây tiến trình song song với lúc chờ và đọc, để không làm chậm việc mở mic.
   const listenCwd = arg('listen', '');
   const savedAncestors = arg('ancestors', '').split(',').map(Number).filter((pid) => Number.isSafeInteger(pid) && pid > 0);
-  const ancestors = savedAncestors.length
-    ? Promise.resolve(savedAncestors)
-    : listenCwd ? agentChain(session === '-' ? '' : session) : Promise.resolve([]);
   await waitTurn(ticket);
   // --voice ở đây đã được spawnPlay chọn theo ngôn ngữ.
   if (!arg('kind', '') || speechEnabled(kind)) await playText(text, ticket, arg('voice', DEFAULT_VOICE));
@@ -1185,9 +1185,16 @@ async function modePlay(): Promise<void> {
       await usage;
       return;
     }
-    const chain = await ancestors;
+    // Chuỗi pid: hook đưa sẵn, không thì lấy từ dấu phiên (attention() của hook chạy song song lúc đang phát đã lưu;
+    // chờ thêm tối đa vài giây). Không tự tra: cha của play là hook đã thoát, tra từ đó ra chuỗi rỗng. Không có thì
+    // chọn cửa sổ theo cwd như cũ.
+    const sid = session === '-' ? '' : session;
+    let chain = savedAncestors.length ? savedAncestors : cachedChain(sid);
+    for (const t0 = Date.now(); !chain.length && sid && Date.now() - t0 < 5000; chain = cachedChain(sid)) {
+      await new Promise((r) => setTimeout(r, 200));
+    }
     await routeSignal(
-      { event: 'listen', session: session === '-' ? '' : session, cwd: listenCwd, source: sourceArg(), ancestors: chain },
+      { event: 'listen', session: sid, cwd: listenCwd, source: sourceArg(), ancestors: chain },
       { cwdFallback: chain.length === 0 },
       undefined,
       log,

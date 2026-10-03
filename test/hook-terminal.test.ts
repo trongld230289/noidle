@@ -97,7 +97,11 @@ beforeAll(async () => {
     process.platform === 'win32'
       ? `\\\\.\\pipe\\noidle-term-${process.pid}-${Date.now()}`
       : path.join(os.tmpdir(), `vv-term-${process.pid}-${Date.now()}.sock`);
-  server = startServer(pipe, (s) => void got.push(s));
+  server = startServer(pipe, (s) => {
+    // Như extension thật: hook là con của tiến trình test, nên pid test nằm trong chuỗi → cửa sổ này chứa agent.
+    if (s.event === 'probe') return s.ancestors?.includes(process.pid) ? 'owned' : 'no';
+    got.push(s);
+  });
   await new Promise((r) => server.once('listening', r));
   // pid của chính tiến trình test: registry dọn pid chết trước khi gửi attention, cửa sổ giả phải còn sống.
   writeRegistry({ pid: process.pid, pipe, folders: [work] }, windowsDir);

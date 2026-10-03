@@ -103,7 +103,7 @@ beforeAll(async () => {
     : path.join(work, 'cli.sock');
   server = startServer(pipe, (signal) => {
     // Như extension thật: hook là con của tiến trình test, nên pid test nằm trong chuỗi tổ tiên → cửa sổ này chứa agent.
-    if (signal.probe) return signal.ancestors?.includes(process.pid) ? 'owned' : 'no';
+    if (signal.event === 'probe') return signal.ancestors?.includes(process.pid) ? 'owned' : 'no';
     signals.push(signal);
     if (signal.event === 'attention') onAttention?.();
     if (signal.event === 'ask') return typeof heard === 'string' ? heard : heard.shift() ?? '';
@@ -273,17 +273,19 @@ describe('Copilot CLI speech and terminal routing', () => {
   it('keeps terminal ancestry after the per-hook shell has exited', async () => {
     const transcriptPath = path.join(work, 'ephemeral.jsonl');
     fs.writeFileSync(transcriptPath, JSON.stringify({ type: 'assistant.message', data: { content: 'Finished.' } }));
+    // Shell trung gian thật (cmd /c, sh -c) như Copilot CLI/Claude Code dùng: pid của nó bị bỏ khi neo chuỗi, neo là
+    // tiến trình test. (Trước đây dùng node làm shell giả: node không phải vỏ bọc nên neo trúng tiến trình đã thoát.)
     await new Promise<void>((resolve, reject) => {
-      const wrapper = spawn(process.execPath, ['-e', `
-        const child = require('child_process').spawn(process.execPath, process.argv.slice(1), { stdio: ['pipe', 'ignore', 'ignore'] });
-        child.stdin.end(${JSON.stringify(JSON.stringify(cli('cli-ephemeral', { transcriptPath })))});
-        child.on('exit', () => process.exit(0));
-      `, bundle, 'speak', '--source', 'copilot', '--config', config, '--player', process.execPath], {
+      const cmd = [process.execPath, bundle, 'speak', '--source', 'copilot', '--config', config, '--player', process.execPath].map((a) => `"${a}"`).join(' ');
+      const [sh, shArgs] = process.platform === 'win32' ? ['cmd.exe', ['/d', '/s', '/c', `"${cmd}"`]] : ['sh', ['-c', cmd]];
+      const wrapper = spawn(sh, shArgs, {
         env: { ...process.env, TEMP: tmp, TMP: tmp, TMPDIR: tmp },
-        stdio: 'ignore',
+        stdio: ['pipe', 'ignore', 'ignore'],
+        windowsVerbatimArguments: process.platform === 'win32',
       });
       wrapper.on('error', reject);
       wrapper.on('exit', () => resolve());
+      wrapper.stdin.end(JSON.stringify(cli('cli-ephemeral', { transcriptPath })));
     });
     await vi.waitFor(() => {
       expect(signals.find((s) => s.event === 'listen' && s.session === 'cli-ephemeral')?.ancestors).toContain(process.pid);

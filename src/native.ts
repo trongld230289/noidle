@@ -107,12 +107,14 @@ public static class NoIdleNative {
    * Tieu de VS Code "file - workspace - [profile -] Visual Studio Code": ten workspace phai la mot doan rieng,
    * va khong phai doan dau khi co tu 3 doan (doan dau la ten file dang mo, co the trung ten workspace khac).
    */
-  public static bool TitleMatches(string title, string workspace) {
+  public static bool TitleMatches(string title, string workspace, bool hasEditor) {
     var t = title.ToLowerInvariant();
     if (!t.Contains("visual studio code")) return false;
     if (workspace.Length == 0) return true;
     var parts = t.Split(new string[] { " - " }, StringSplitOptions.None);
-    int start = parts.Length >= 3 ? 1 : 0;
+    // hasEditor: cua so dang mo tab nao do (extension biet qua tabGroups) thi doan dau la ten tab, bo qua;
+    // khong mo tab nao thi doan dau la workspace ("vi-voice - Work - Visual Studio Code" voi profile Work).
+    int start = hasEditor && parts.Length >= 3 ? 1 : 0;
     for (int i = start; i < parts.Length; i++) {
       var p = parts[i].TrimStart('\\u25CF', '\\u25CB', '\\u2022', '*', ' ').Trim();
       if (p == workspace || p == workspace + " (workspace)") return true;
@@ -120,18 +122,18 @@ public static class NoIdleNative {
     return false;
   }
   /** Handle da hoc con dung thi nhay thang; sai thi tim theo ten va cong 10 vao ma. 0 nhay, 2 khong thay, 3 dang foreground. */
-  public static int FlashWindow(string workspace, long hwnd) {
+  public static int FlashWindow(string workspace, long hwnd, bool hasEditor) {
     IntPtr fg = GetForegroundWindow();
     int stale = 0;
     if (hwnd != 0) {
       IntPtr known = new IntPtr(hwnd);
-      if (IsWindow(known) && IsWindowVisible(known) && TitleMatches(TitleOf(known), workspace)) return FlashHandle(known, fg);
+      if (IsWindow(known) && IsWindowVisible(known) && TitleMatches(TitleOf(known), workspace, hasEditor)) return FlashHandle(known, fg);
       stale = 10;
     }
     Handles.Clear(); Pids.Clear(); Titles.Clear();
     EnumWindows(Collect, IntPtr.Zero);
     for (int i = 0; i < Titles.Count; i++) {
-      if (workspace.Length == 0 || !TitleMatches(Titles[i], workspace)) continue;
+      if (workspace.Length == 0 || !TitleMatches(Titles[i], workspace, hasEditor)) continue;
       return stale + FlashHandle(Handles[i], fg);
     }
     return stale + 2;

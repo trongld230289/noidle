@@ -14,14 +14,17 @@ export type { RunResult } from './native';
  * "file - workspace - [profile -] Visual Studio Code": đoạn đầu là tên file đang mở, có thể trùng tên workspace khác,
  * nên không tính khi tiêu đề có từ 3 đoạn.
  */
-export function windowTitleMatches(title: string, workspaceName: string): boolean {
+export function windowTitleMatches(title: string, workspaceName: string, opts: { hasEditor?: boolean } = {}): boolean {
   const t = title.toLowerCase();
   if (!t.includes('visual studio code')) return false;
   const name = workspaceName.toLowerCase().trim();
   // Multi-root: tiêu đề ghi "tên (Workspace)"; tên truyền vào có thể có hoặc không có hậu tố đó.
   const bare = name.replace(/ \(workspace\)$/, '');
   const parts = t.split(' - ').map((p) => p.replace(/^[●○•*]\s*/, '').trim());
-  const candidates = parts.length >= 3 ? parts.slice(1) : parts;
+  // hasEditor false (extension biết cửa sổ không mở tab nào): đoạn đầu là workspace, kể cả khi có tên profile
+  // ("vi-voice - Work - Visual Studio Code"). Không biết thì coi như có editor.
+  const skipFirst = opts.hasEditor !== false && parts.length >= 3;
+  const candidates = skipFirst ? parts.slice(1) : parts;
   return candidates.some((p) => p === bare || p === `${bare} (workspace)`);
 }
 
@@ -35,11 +38,11 @@ function hwndArg(hwnd: string | undefined): string {
  * cửa sổ còn đó thì nháy thẳng handle; không thì tìm cửa sổ có tên workspace trong tiêu đề (hai cửa sổ trùng tên
  * thì cách này có thể chọn nhầm). Exit 0 nháy, 2 không thấy, 3 đang ở foreground; +10 nếu handle đã học sai.
  */
-export function flashScript(workspaceName: string, hwnd?: string): string {
+export function flashScript(workspaceName: string, hwnd?: string, hasEditor = true): string {
   const name = workspaceName.replace(/'/g, "''");
   return nativeScript(`
 $ws = '${name}'.ToLowerInvariant() -replace ' \\(workspace\\)$', ''
-exit [NoIdleNative]::FlashWindow($ws, ${hwndArg(hwnd)})`);
+exit [NoIdleNative]::FlashWindow($ws, ${hwndArg(hwnd)}, ${hasEditor ? '$true' : '$false'})`);
 }
 
 /** Script PowerShell: in "hwnd<tab>tiêu đề" của cửa sổ đang ở foreground (handle dạng số thập phân). */
@@ -90,6 +93,8 @@ export interface FlashDeps {
   run?: (script: string) => Promise<number | RunResult>;
   /** flashWindow: handle cửa sổ đã học (learnForegroundWindow); có thì nháy thẳng, không cần tìm theo tên. */
   hwnd?: string;
+  /** flashWindow: cửa sổ đang mở tab nào không (tabGroups); false thì đoạn đầu tiêu đề là workspace. Mặc định có. */
+  hasEditor?: boolean;
 }
 
 function codeOf(r: number | RunResult): number {
@@ -109,7 +114,7 @@ export async function flashWindowEx(workspaceName: string, deps: FlashDeps = {})
   const run = deps.run ?? ((script) => runPowerShell(script, 'flash'));
   let code: number;
   try {
-    code = codeOf(await run(flashScript(workspaceName, deps.hwnd)));
+    code = codeOf(await run(flashScript(workspaceName, deps.hwnd, deps.hasEditor !== false)));
   } catch {
     return { result: 'error', staleHandle: false };
   }
@@ -128,10 +133,10 @@ export async function flashWindow(workspaceName: string, deps: FlashDeps = {}): 
  * để cửa sổ cũ ở foreground, nên tiêu đề đọc được phải mang tên workspace này (biết tên). Hai cửa sổ trùng tên thì
  * tên không phân biệt được, còn lại dựa vào focus: mất focus trong lúc đọc thì bỏ, học lại lần focus sau.
  */
-export function acceptLearnedWindow(w: ForegroundWindow, workspaceName: string, stillFocused: boolean): boolean {
+export function acceptLearnedWindow(w: ForegroundWindow, workspaceName: string, stillFocused: boolean, hasEditor = true): boolean {
   if (!stillFocused) return false;
   if (!workspaceName) return true;
-  return windowTitleMatches(w.title, workspaceName);
+  return windowTitleMatches(w.title, workspaceName, { hasEditor });
 }
 
 /**
@@ -202,6 +207,14 @@ export async function flashHostWindow(startPid: number, deps: FlashDeps & { edit
  * Có nên nháy không: cửa sổ đang focus thì không; hook gửi kèm giờ bắt đầu (startedAt) thì chỉ nháy khi cửa sổ
  * không được focus từ lúc đó tới giờ (lastBlurAt là lần mất focus gần nhất; đã xem rồi mới rời thì thôi).
  */
+/**
+ * Mốc mất focus mới: chỉ đổi khi focused chuyển true → false. onDidChangeWindowState còn bắn khi `active` đổi (người
+ * dùng không gõ gì một lúc) với focused vẫn false; lấy giờ lúc đó thì shouldFlash tưởng người dùng vừa xem cửa sổ.
+ */
+export function nextBlurAt(s: { prevFocused: boolean; focused: boolean; prevBlurAt: number; now: number }): number {
+  return s.prevFocused && !s.focused ? s.now : s.prevBlurAt;
+}
+
 export function shouldFlash(w: { focused: boolean; lastBlurAt: number; startedAt?: number }): boolean {
   if (w.focused) return false;
   if (w.startedAt && w.lastBlurAt >= w.startedAt) return false;

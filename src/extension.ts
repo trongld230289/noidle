@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { StatusBar, UsageBar } from './status';
-import { flashWindowEx, learnForegroundWindow, acceptLearnedWindow, blinkTitleBar, applyTint, removeTint, shellColorFor, normalizeHex, shouldFlash, TINT, type ColorMap } from './attention';
+import { flashWindowEx, learnForegroundWindow, acceptLearnedWindow, blinkTitleBar, applyTint, removeTint, shellColorFor, normalizeHex, shouldFlash, nextBlurAt, TINT, type ColorMap } from './attention';
 import { Recorder, SAMPLE_RATE, CHANNELS } from './recorder';
 import { Segmenter } from './segmenter';
 import { listenOnce } from './listen';
@@ -1158,7 +1158,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
   }
 
   async function onSignal(s: Signal): Promise<string | void> {
-    if (s.probe) {
+    if (s.event === 'probe') {
       // Hook hỏi mọi cửa sổ trước khi gửi: extension host này (Copilot Chat) hay một terminal của cửa sổ này
       // (Claude Code, Copilot CLI) nằm trong chuỗi pid thì mới là cửa sổ chứa agent. Chỉ trả lời, không xử lý.
       return (await agentInWindow(s.ancestors, process.pid, vscode.window.terminals)) ? 'owned' : 'no';
@@ -1175,8 +1175,14 @@ export function activate(ctx: vscode.ExtensionContext): void {
       return;
     }
     if (s.event === 'submitted') chatPending.promptSubmitted(s.session);
-    // Hook đã chọn cửa sổ bằng probe; tới đây là của mình.
-    if (s.event === 'attention') return onAttention(s.reason ?? 'done', s.startedAt);
+    if (s.event === 'attention') {
+      // Hook mới đã chọn cửa sổ bằng probe. Hook cũ (chưa reload) gửi cho mọi cửa sổ kèm chuỗi pid: vẫn tự kiểm tra.
+      if (s.ancestors?.length && !(await agentInWindow(s.ancestors, process.pid, vscode.window.terminals))) {
+        log(`attention ${s.reason ?? 'done'}: agent không ở cửa sổ này, bỏ qua`);
+        return;
+      }
+      return onAttention(s.reason ?? 'done', s.startedAt);
+    }
     if (s.event === 'ask') return askOnce(Math.max(3, s.timeoutSec ?? 15) * 1000, s.reason);
     if (s.event === 'resumed') {
       // Việc nền xong, Claude chạy tiếp: không còn "done". Mic đang mở thì để nguyên (câu đang nói vẫn vào hàng đợi).
@@ -1287,6 +1293,9 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   /** Lần cửa sổ mất focus gần nhất (ms); 0 nếu chưa từng focus từ khi extension chạy. */
   let lastBlurAt = 0;
+  let prevFocused = vscode.window.state.focused;
+  /** Cửa sổ đang mở tab nào không: không thì tiêu đề không có đoạn tên file, đoạn đầu là workspace. */
+  const hasEditor = () => vscode.window.tabGroups.all.some((g) => g.tabs.length > 0);
 
   async function onAttention(reason: AttentionReason, startedAt?: number): Promise<void> {
     const cfg = config();
@@ -1316,7 +1325,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       const name = wsName();
       if (!name && !myHwnd) return;
       const used = myHwnd;
-      const r = await flashWindowEx(name, { hwnd: myHwnd });
+      const r = await flashWindowEx(name, { hwnd: myHwnd, hasEditor: hasEditor() });
       log(`attention ${reason}: nháy taskbar ${used ? `hwnd ${used}` : `"${name}"`} → ${r.result}${r.staleHandle ? ' (handle không còn đúng, đã tìm theo tên; sẽ học lại)' : ''}`);
       if (r.staleHandle && myHwnd === used) myHwnd = undefined;
     }
@@ -1339,7 +1348,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       if (!vscode.window.state.focused) return;
       const w = await learnForegroundWindow();
       if (!w) log('attention: không đọc được handle cửa sổ, sẽ nháy theo tên workspace');
-      else if (!acceptLearnedWindow(w, wsName(), vscode.window.state.focused)) {
+      else if (!acceptLearnedWindow(w, wsName(), vscode.window.state.focused, hasEditor())) {
         log(`attention: cửa sổ foreground lúc đọc là "${w.title}", không phải cửa sổ này (hoặc đã mất focus); học lại lần focus sau`);
       } else {
         myHwnd = w.hwnd;
@@ -1352,10 +1361,13 @@ export function activate(ctx: vscode.ExtensionContext): void {
   void learnMyWindow();
   ctx.subscriptions.push(
     vscode.window.onDidChangeWindowState((st) => {
+      // Sự kiện bắn cả khi `active` đổi: chỉ ghi mốc mất focus khi focused chuyển true → false.
+      lastBlurAt = nextBlurAt({ prevFocused, focused: st.focused, prevBlurAt: lastBlurAt, now: Date.now() });
+      prevFocused = st.focused;
       if (st.focused) {
         clearAttention();
         void learnMyWindow();
-      } else lastBlurAt = Date.now();
+      }
     }),
   );
 

@@ -23,7 +23,8 @@ export interface WindowEntry {
  * chatPending: Copilot Chat sắp chạy một lệnh terminal mà setting auto-approve không tự duyệt; extension chờ bằng chứng
  * tool đã chạy (terminal Copilot mở, lệnh bắt đầu, chatDone) rồi mới đọc "cần approve". chatDone: PostToolUse của Chat.
  */
-export type SignalEvent = 'listen' | 'submitted' | 'ask' | 'attention' | 'resumed' | 'chatPending' | 'chatDone';
+/** probe: hook hỏi "cửa sổ này có chứa agent không" (trả 'owned' hay 'no'); là event riêng để extension cũ không xử lý nhầm. */
+export type SignalEvent = 'listen' | 'submitted' | 'ask' | 'attention' | 'resumed' | 'chatPending' | 'chatDone' | 'probe';
 /** attention: vì sao cửa sổ cần người dùng. */
 export type AttentionReason = 'done' | 'approve' | 'answer';
 export type SignalSource = 'claude' | 'copilot' | 'copilot-cli';
@@ -47,8 +48,6 @@ export interface Signal {
   text?: string;
   /** chatPending: ngôn ngữ của câu báo, để extension chọn giọng. */
   lang?: 'vi' | 'en';
-  /** Chỉ hỏi "cửa sổ này có chứa agent không" (trả 'owned' hay 'no'), không xử lý. */
-  probe?: boolean;
   /** attention: lúc hook bắt đầu (Date.now()); extension bỏ nháy nếu cửa sổ đã được focus sau đó. */
   startedAt?: number;
 }
@@ -99,7 +98,7 @@ export function pickWindow(entries: WindowEntry[], cwd: string, caseInsensitive 
 export function parseSignal(line: string): Signal | undefined {
   try {
     const o = JSON.parse(line.trim()) as Partial<Signal>;
-    const events: SignalEvent[] = ['listen', 'submitted', 'ask', 'attention', 'resumed', 'chatPending', 'chatDone'];
+    const events: SignalEvent[] = ['listen', 'submitted', 'ask', 'attention', 'resumed', 'chatPending', 'chatDone', 'probe'];
     const event = o.event as SignalEvent | undefined;
     if (!event || !events.includes(event) || typeof o.cwd !== 'string') return undefined;
     const out: Signal = { event, session: typeof o.session === 'string' ? o.session : '', cwd: o.cwd };
@@ -111,7 +110,6 @@ export function parseSignal(line: string): Signal | undefined {
     if (typeof o.command === 'string') out.command = o.command;
     if (typeof o.text === 'string') out.text = o.text;
     if (o.lang === 'vi' || o.lang === 'en') out.lang = o.lang;
-    if (o.probe === true) out.probe = true;
     if (typeof o.startedAt === 'number') out.startedAt = o.startedAt;
     return out;
   } catch {
@@ -427,7 +425,8 @@ export async function routeSignal(
   };
   if (signal.ancestors?.length) {
     if (entries.length) {
-      const probe: Signal = { ...signal, probe: true };
+      // Event riêng: extension cũ không biết nó thì đóng kết nối không trả lời → coi là 'no'.
+      const probe: Signal = { event: 'probe', session: signal.session, cwd: signal.cwd, ancestors: signal.ancestors };
       const replies = await Promise.all(entries.map(async (e) => ({ e, reply: await askSignal(e.pipe, probe, OWNER_REPLY_MS) })));
       const owner = replies.find((r) => r.reply === 'owned')?.e;
       if (owner) return deliver(owner, signal, 'owner');

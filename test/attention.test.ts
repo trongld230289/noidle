@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { windowTitleMatches, flashScript, flashWindow, flashHostScript, flashHostWindow, applyTint, removeTint, shellColorFor, tintForeground, normalizeHex, TINT, foregroundWindowScript, parseForegroundWindow, learnForegroundWindow, acceptLearnedWindow, flashWindowEx, shouldFlash } from '../src/attention';
+import { windowTitleMatches, flashScript, flashWindow, flashHostScript, flashHostWindow, applyTint, removeTint, shellColorFor, tintForeground, normalizeHex, TINT, foregroundWindowScript, parseForegroundWindow, learnForegroundWindow, acceptLearnedWindow, flashWindowEx, shouldFlash, nextBlurAt } from '../src/attention';
 import { NATIVE_SOURCE } from '../src/native';
 
 describe('attention: tìm cửa sổ VS Code theo tiêu đề', () => {
@@ -25,17 +25,25 @@ describe('attention: tìm cửa sổ VS Code theo tiêu đề', () => {
     expect(windowTitleMatches('Research - Visual Studio Code', 'Research')).toBe(true);
     expect(windowTitleMatches('a.ts - Research - Default - Visual Studio Code', 'Research')).toBe(true);
   });
+  it('cửa sổ không mở editor nào (extension biết qua tabGroups): đoạn đầu là workspace, kể cả khi có tên profile', () => {
+    // Profile "Work", không có tab nào: "vi-voice - Work - Visual Studio Code" có 3 đoạn mà đoạn đầu là workspace.
+    expect(windowTitleMatches('vi-voice - Work - Visual Studio Code', 'vi-voice', { hasEditor: false })).toBe(true);
+    expect(windowTitleMatches('vi-voice - Work - Visual Studio Code', 'vi-voice', { hasEditor: true })).toBe(false);
+    expect(windowTitleMatches('Research - vi-voice - Visual Studio Code', 'Research', { hasEditor: true })).toBe(false);
+    expect(acceptLearnedWindow({ hwnd: '1', title: 'vi-voice - Work - Visual Studio Code' }, 'vi-voice', true, false)).toBe(true);
+  });
 });
 
 describe('attention: script PowerShell nháy taskbar', () => {
-  it('gọi FlashWindow của helper (cờ FLASHW_ALL | FLASHW_TIMERNOFG) với tên workspace đã escape và hwnd', () => {
+  it('gọi FlashWindow của helper (cờ FLASHW_ALL | FLASHW_TIMERNOFG) với tên workspace đã escape, hwnd và cờ có editor', () => {
     const s = flashScript("it's - acme", '4242');
     expect(s).toContain('FlashWindowEx');
     expect(s).toContain('FLASH_FLAGS = 15');
     expect(s).toContain("'it''s - acme'");
-    expect(s).toContain('[NoIdleNative]::FlashWindow($ws, 4242)');
-    expect(flashScript('x')).toContain('FlashWindow($ws, 0)');
-    expect(flashScript('x', 'abc')).toContain('FlashWindow($ws, 0)');
+    expect(s).toContain('[NoIdleNative]::FlashWindow($ws, 4242, $true)');
+    expect(flashScript('x')).toContain('FlashWindow($ws, 0, $true)');
+    expect(flashScript('x', 'abc', false)).toContain('FlashWindow($ws, 0, $false)');
+    expect(NATIVE_SOURCE).toContain('TitleMatches(string title, string workspace, bool hasEditor)');
   });
 });
 
@@ -157,6 +165,17 @@ describe('attention: mã C# chọn cửa sổ chứa agent', () => {
   });
 });
 
+describe('attention: mốc mất focus chỉ đổi khi cửa sổ thật sự mất focus', () => {
+  it('nextBlurAt: focused true→false thì lấy giờ hiện tại; sự kiện khác (active đổi khi cửa sổ vẫn không focus) giữ mốc cũ', () => {
+    // VS Code bắn onDidChangeWindowState cả khi `active` đổi; cửa sổ đang không focus mà mốc nhảy lên thì shouldFlash
+    // tưởng người dùng vừa xem và bỏ nháy nhầm.
+    expect(nextBlurAt({ prevFocused: true, focused: false, prevBlurAt: 100, now: 500 })).toBe(500);
+    expect(nextBlurAt({ prevFocused: false, focused: false, prevBlurAt: 100, now: 500 })).toBe(100);
+    expect(nextBlurAt({ prevFocused: false, focused: true, prevBlurAt: 100, now: 500 })).toBe(100);
+    expect(nextBlurAt({ prevFocused: true, focused: true, prevBlurAt: 100, now: 500 })).toBe(100);
+  });
+});
+
 describe('attention: bỏ nháy khi người dùng đã xem', () => {
   it('shouldFlash: nháy khi cửa sổ không focus và chưa được focus lại từ lúc hook bắt đầu', () => {
     expect(shouldFlash({ focused: true, lastBlurAt: 0, startedAt: 1000 })).toBe(false);
@@ -195,16 +214,16 @@ describe('attention: nháy theo handle đã học thay vì theo tên (hai cửa 
   it('flashScript có hwnd thì kiểm tra IsWindow rồi nháy thẳng handle đó, chỉ tìm theo tên khi handle không còn', () => {
     const s = flashScript('vi-voice', '1234567');
     expect(s).toContain('IsWindow(');
-    expect(s).toContain('FlashWindow($ws, 1234567)');
-    expect(flashScript('vi-voice')).toContain('FlashWindow($ws, 0)');
+    expect(s).toContain('FlashWindow($ws, 1234567, $true)');
+    expect(flashScript('vi-voice')).toContain('FlashWindow($ws, 0, $true)');
   });
   it('flashWindow đưa hwnd vào script', async () => {
     let script = '';
     const run = async (s: string) => ((script = s), 0);
     expect(await flashWindow('vi-voice', { platform: 'win32', run, hwnd: '4242' })).toBe('flashed');
-    expect(script).toContain('FlashWindow($ws, 4242)');
+    expect(script).toContain('FlashWindow($ws, 4242, $true)');
     expect(await flashWindow('vi-voice', { platform: 'win32', run, hwnd: 'garbage' })).toBe('flashed');
-    expect(script).toContain('FlashWindow($ws, 0)');
+    expect(script).toContain('FlashWindow($ws, 0, $true)');
   });
 });
 
