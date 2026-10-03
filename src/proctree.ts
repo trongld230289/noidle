@@ -95,3 +95,59 @@ export interface ProcEntry {
   pid: number;
   exe: string;
 }
+
+/**
+ * Shell và console host bọc quanh hook: Claude Code chạy hook qua bash.exe -c (hai lớp), Copilot Chat qua powershell,
+ * Copilot CLI qua cmd. Pid của chúng đổi mỗi lần gọi nên không dùng làm neo để nhớ chuỗi theo phiên.
+ */
+const WRAPPER_EXES = new Set(['bash', 'sh', 'zsh', 'dash', 'fish', 'cmd', 'powershell', 'pwsh', 'conhost', 'openconsole']);
+
+export function isWrapperExe(exe: string): boolean {
+  return WRAPPER_EXES.has(exe.toLowerCase().replace(/\.exe$/, ''));
+}
+
+/** Vị trí của tiến trình agent (pid đầu tiên không phải vỏ bọc); -1 nếu toàn vỏ bọc. */
+export function anchorIndex(chain: ProcEntry[]): number {
+  return chain.findIndex((e) => !isWrapperExe(e.exe));
+}
+
+/** Chuỗi pid từ agent trở lên (bỏ vỏ bọc tạm ở đầu). Không tìm được neo thì trả cả chuỗi. */
+export function agentChainFrom(chain: ProcEntry[]): number[] {
+  const i = anchorIndex(chain);
+  return (i < 0 ? chain : chain.slice(i)).map((e) => e.pid);
+}
+
+/** Đọc bảng "pid ppid comm" (ps -eo pid=,ppid=,comm=); dòng không đúng dạng thì bỏ. */
+export function parseProcTable(text: string): Map<number, ProcEntry & { ppid: number }> {
+  const map = new Map<number, ProcEntry & { ppid: number }>();
+  for (const line of text.split(/\r?\n/)) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(\S.*?)\s*$/.exec(line);
+    if (m) map.set(Number(m[1]), { pid: Number(m[1]), ppid: Number(m[2]), exe: m[3].toLowerCase() });
+  }
+  return map;
+}
+
+/** Bảng tiến trình POSIX kèm tên lệnh. Windows dùng NoIdleNative.Chain (native.ts). Lỗi thì bảng rỗng. */
+export function procTable(): Promise<Map<number, ProcEntry & { ppid: number }>> {
+  return new Promise((resolve) => {
+    execFile('ps', ['-eo', 'pid=,ppid=,comm='], { timeout: 10_000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+      resolve(err ? new Map() : parseProcTable(String(stdout)));
+    });
+  });
+}
+
+/** pid rồi cha, ông... theo bảng; dừng khi hết bảng, gặp vòng, hay đủ maxDepth. */
+export function procChain(pid: number, table: Map<number, ProcEntry & { ppid: number }>, maxDepth = 14): ProcEntry[] {
+  const out: ProcEntry[] = [];
+  const seen = new Set<number>();
+  let cur: number | undefined = pid;
+  while (cur !== undefined && !seen.has(cur) && out.length < maxDepth) {
+    const e = table.get(cur);
+    // Cha không có trong bảng (đã chết) thì dừng: pid chết không khớp terminal nào. pid đầu luôn giữ.
+    if (!e && out.length) break;
+    out.push({ pid: cur, exe: e?.exe ?? '' });
+    seen.add(cur);
+    cur = e?.ppid;
+  }
+  return out;
+}

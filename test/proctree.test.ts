@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ancestorsOf, parentMap, parseParentTable, pickTerminal, terminalForAgent, agentInWindow } from '../src/proctree';
+import { ancestorsOf, parentMap, parseParentTable, pickTerminal, terminalForAgent, agentInWindow, anchorIndex, agentChainFrom, isWrapperExe, parseProcTable, procChain, type ProcEntry } from '../src/proctree';
 
 describe('parseParentTable', () => {
   it('đọc bảng "pid ppid" mỗi dòng, bỏ dòng rác và tiêu đề', () => {
@@ -100,5 +100,38 @@ describe('agentInWindow', () => {
   it('không có chuỗi tổ tiên thì không nhận', async () => {
     expect(await agentInWindow([], 4321, [term('a', 111)])).toBe(false);
     expect(await agentInWindow(undefined, 4321, [term('a', 111)])).toBe(false);
+  });
+});
+
+describe('neo của chuỗi pid: tiến trình agent, bỏ các shell bọc hook', () => {
+  // 3/10/2026: Claude Code chạy hook qua bash.exe -c → bash.exe → node; ppid của hook là bash tạm, mỗi lần một pid khác.
+  const chain: ProcEntry[] = [
+    { pid: 1, exe: 'bash.exe' }, { pid: 2, exe: 'bash.exe' }, { pid: 3, exe: 'claude.exe' },
+    { pid: 4, exe: 'powershell.exe' }, { pid: 5, exe: 'code.exe' }, { pid: 6, exe: 'code.exe' }, { pid: 7, exe: 'explorer.exe' },
+  ];
+  it('shell và conhost là vỏ bọc, kể cả tên không có .exe (macOS)', () => {
+    for (const e of ['bash.exe', 'sh', 'zsh', 'cmd.exe', 'powershell.exe', 'pwsh.exe', 'conhost.exe', 'BASH.EXE']) expect(isWrapperExe(e)).toBe(true);
+    for (const e of ['claude.exe', 'node.exe', 'code.exe', 'copilot', 'node']) expect(isWrapperExe(e)).toBe(false);
+  });
+  it('neo là pid đầu tiên không phải vỏ bọc; chuỗi từ neo trở lên là chuỗi của agent', () => {
+    expect(anchorIndex(chain)).toBe(2);
+    expect(agentChainFrom(chain)).toEqual([3, 4, 5, 6, 7]);
+  });
+  it('Copilot Chat: hook ← powershell ← extension host; neo là extension host', () => {
+    const chat: ProcEntry[] = [{ pid: 10, exe: 'powershell.exe' }, { pid: 11, exe: 'code.exe' }, { pid: 12, exe: 'code.exe' }];
+    expect(agentChainFrom(chat)).toEqual([11, 12]);
+  });
+  it('toàn vỏ bọc hay rỗng thì giữ nguyên chuỗi (không biết neo, còn hơn mất)', () => {
+    expect(agentChainFrom([{ pid: 1, exe: 'bash.exe' }])).toEqual([1]);
+    expect(agentChainFrom([])).toEqual([]);
+  });
+});
+
+describe('bảng tiến trình POSIX "pid ppid comm"', () => {
+  it('đọc ba cột, bỏ dòng rác; procChain trả pid rồi cha với tên lệnh', () => {
+    const t = parseProcTable(' 100 90 node\n90 80 sh\n80 1 zsh\nPID PPID COMM\n');
+    expect(t.get(100)).toEqual({ pid: 100, ppid: 90, exe: 'node' });
+    expect(procChain(100, t)).toEqual([{ pid: 100, exe: 'node' }, { pid: 90, exe: 'sh' }, { pid: 80, exe: 'zsh' }]);
+    expect(procChain(100, t, 2)).toHaveLength(2);
   });
 });
