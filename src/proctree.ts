@@ -89,3 +89,9 @@ export async function agentInWindow<T extends TerminalLike>(ancestors: number[] 
   if (ancestors.includes(hostPid)) return true;
   return (await pickTerminal(terminals, ancestors)) !== undefined;
 }
+
+/** Một mắt trong chuỗi tiến trình: pid và tên file thực thi (thường, có hoặc không có .exe). */
+export interface ProcEntry {
+  pid: number;
+  exe: string;
+}
