@@ -16,3 +16,4 @@ hub/**
 *.png
 !images/icon.png
 images/icon.svg
+.superpowers/**
