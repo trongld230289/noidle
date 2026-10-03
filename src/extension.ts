@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { StatusBar, UsageBar } from './status';
-import { flashWindowEx, learnForegroundWindow, acceptLearnedWindow, blinkTitleBar, applyTint, removeTint, shellColorFor, normalizeHex, TINT, type ColorMap } from './attention';
+import { flashWindowEx, learnForegroundWindow, acceptLearnedWindow, blinkTitleBar, applyTint, removeTint, shellColorFor, normalizeHex, shouldFlash, TINT, type ColorMap } from './attention';
 import { Recorder, SAMPLE_RATE, CHANNELS } from './recorder';
 import { Segmenter } from './segmenter';
 import { listenOnce } from './listen';
@@ -220,8 +220,10 @@ export function activate(ctx: vscode.ExtensionContext): void {
   // Ghi thêm ra file để xem lại được sau khi đóng VS Code.
   const logFile = path.join(ctx.globalStorageUri.fsPath, 'noidle.log');
   fs.promises.mkdir(ctx.globalStorageUri.fsPath, { recursive: true }).catch(() => undefined);
+  // Mọi cửa sổ ghi chung một file: gắn tên workspace để biết dòng nào của cửa sổ nào.
+  const windowTag = () => vscode.workspace.name ?? (path.basename(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '') || `pid ${process.pid}`);
   const log = (msg: string) => {
-    const line = `${new Date().toLocaleTimeString('vi-VN')} ${msg}`;
+    const line = `${new Date().toLocaleTimeString('vi-VN')} [${windowTag()}] ${msg}`;
     out.appendLine(line);
     fs.promises.appendFile(logFile, line + '\n').catch(() => undefined);
   };
@@ -1156,6 +1158,11 @@ export function activate(ctx: vscode.ExtensionContext): void {
   }
 
   async function onSignal(s: Signal): Promise<string | void> {
+    if (s.probe) {
+      // Hook hỏi mọi cửa sổ trước khi gửi: extension host này (Copilot Chat) hay một terminal của cửa sổ này
+      // (Claude Code, Copilot CLI) nằm trong chuỗi pid thì mới là cửa sổ chứa agent. Chỉ trả lời, không xử lý.
+      return (await agentInWindow(s.ancestors, process.pid, vscode.window.terminals)) ? 'owned' : 'no';
+    }
     log(`tín hiệu ${s.event} (session ${s.session || '-'})`);
     if (s.source) agentLabel = s.source === 'claude' ? 'Claude' : 'Copilot';
     if (s.event === 'chatPending') {
@@ -1168,19 +1175,8 @@ export function activate(ctx: vscode.ExtensionContext): void {
       return;
     }
     if (s.event === 'submitted') chatPending.promptSubmitted(s.session);
-    if (s.event === 'attention') {
-      // Hook hỏi mọi cửa sổ kèm chuỗi pid tổ tiên: extension host này (Copilot Chat) hay một terminal của cửa sổ này
-      // (Claude Code, Copilot CLI) nằm trong chuỗi thì mới là cửa sổ chứa agent. Trả 'owned' ngay, nháy sau.
-      if (s.ancestors?.length) {
-        if (!(await agentInWindow(s.ancestors, process.pid, vscode.window.terminals))) {
-          log(`attention ${s.reason ?? 'done'}: agent không ở cửa sổ này, bỏ qua`);
-          return;
-        }
-        void onAttention(s.reason ?? 'done').catch((err) => log(`attention lỗi: ${(err as Error).message}`));
-        return 'owned';
-      }
-      return onAttention(s.reason ?? 'done');
-    }
+    // Hook đã chọn cửa sổ bằng probe; tới đây là của mình.
+    if (s.event === 'attention') return onAttention(s.reason ?? 'done', s.startedAt);
     if (s.event === 'ask') return askOnce(Math.max(3, s.timeoutSec ?? 15) * 1000, s.reason);
     if (s.event === 'resumed') {
       // Việc nền xong, Claude chạy tiếp: không còn "done". Mic đang mở thì để nguyên (câu đang nói vẫn vào hàng đợi).
@@ -1289,14 +1285,18 @@ export function activate(ctx: vscode.ExtensionContext): void {
   void untintTitleBar();
   ctx.subscriptions.push({ dispose: () => void untintTitleBar() });
 
-  async function onAttention(reason: AttentionReason): Promise<void> {
+  /** Lần cửa sổ mất focus gần nhất (ms); 0 nếu chưa từng focus từ khi extension chạy. */
+  let lastBlurAt = 0;
+
+  async function onAttention(reason: AttentionReason, startedAt?: number): Promise<void> {
     const cfg = config();
-    if (vscode.window.state.focused) {
-      log(`attention ${reason}: cửa sổ đang focus, bỏ qua`);
+    // Tín hiệu tới muộn (hook chậm) mà người dùng đã quay lại xem cửa sổ sau lúc agent xong rồi đi: không nháy nữa.
+    if (!shouldFlash({ focused: vscode.window.state.focused, lastBlurAt, startedAt })) {
+      log(`attention ${reason}: ${vscode.window.state.focused ? 'cửa sổ đang focus' : 'người dùng đã xem cửa sổ sau khi agent xong'}, bỏ qua`);
       return;
     }
     if (cfg.attentionColor) {
-      status.attention(reason, langOf(cfg.language));
+      status.attention(reason, langOf(cfg.language), agentLabel);
       await tintTitleBar();
     }
     if (cfg.attentionFlash && process.platform === 'darwin') {
@@ -1355,7 +1355,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       if (st.focused) {
         clearAttention();
         void learnMyWindow();
-      }
+      } else lastBlurAt = Date.now();
     }),
   );
 
@@ -1364,7 +1364,8 @@ export function activate(ctx: vscode.ExtensionContext): void {
   const registerWindow = () => {
     const folders = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
     try {
-      writeRegistry({ pid: process.pid, pipe, folders });
+      // editorPid: tiến trình chính của VS Code (cha của extension host); hook coi cửa sổ của nó là editor dù tiêu đề là gì.
+      writeRegistry({ pid: process.pid, pipe, folders, editorPid: process.ppid });
       log(`đăng ký cửa sổ pid ${process.pid} cho hook: ${folders.join(', ') || '(không có folder)'}`);
     } catch (err) {
       log(`không ghi được đăng ký cửa sổ: ${(err as Error).message}`);

@@ -33,7 +33,8 @@ export class StatusBar implements vscode.Disposable {
   }
 
   /** Đổi màu status bar để tìm đúng cửa sổ trong nhiều cửa sổ; giữ tới khi clearAttention. */
-  attention(reason: AttentionReason, lang: Lang = this.lang): void {
+  attention(reason: AttentionReason, lang: Lang = this.lang, agent?: string): void {
+    if (agent) this.agent = agent;
     this.attentionReason = reason;
     this.lang = lang;
     if (this.state === 'idle') this.render();
