@@ -500,6 +500,19 @@ async function modeStart(): Promise<void> {
   process.stdout.write(JSON.stringify({ additionalContext: recapInstruction(cfg.recapPrompt, lang) }));
 }
 
+/**
+ * Prompt do Claude Code tự gửi, không phải người dùng gõ: việc nền xong (<task-notification>), subagent báo kết quả
+ * về (<agent-message>, 3/10/2026: bị coi là prompt tiếng Anh nên Claude đọc phần 🔊 bằng tiếng Anh), nhắc nhở hệ thống.
+ */
+function isSystemPrompt(text: string): boolean {
+  return /^\s*<(task-notification|agent-message|system-reminder)\b/.test(text);
+}
+
+function systemPromptKind(text: string): string {
+  const m = /^\s*<([\w-]+)/.exec(text);
+  return m?.[1] === 'task-notification' ? 'background task notification' : `tin nhắn hệ thống <${m?.[1] ?? '?'}>`;
+}
+
 async function modePrompt(): Promise<void> {
   let input: AgentHookInput = {};
   if (arg('source', 'claude') === 'copilot') {
@@ -518,10 +531,10 @@ async function modePrompt(): Promise<void> {
     return;
   }
   const promptText = typeof input.prompt === 'string' ? input.prompt : '';
-  if (promptText.trimStart().startsWith('<task-notification>')) {
+  if (isSystemPrompt(promptText)) {
     // Không phải người dùng nói: không đếm, không đổi ngôn ngữ, không tắt mic. Nhưng Claude sắp chạy tiếp,
     // cửa sổ không còn "done": bảo extension bỏ màu và chữ "Claude is done".
-    log(`prompt: background task notification, session ${input.session_id ?? '-'}, chỉ báo resumed`);
+    log(`prompt: ${systemPromptKind(promptText)}, session ${input.session_id ?? '-'}, chỉ báo resumed`);
     await routeSignal(
       { event: 'resumed', session: input.session_id ?? '', cwd: input.cwd || process.cwd(), source: sourceArg(), ancestors: cachedChain(input.session_id ?? '') },
       { cwdFallback: true }, undefined, log,

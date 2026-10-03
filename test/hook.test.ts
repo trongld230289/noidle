@@ -159,6 +159,24 @@ describe('claude-hook background task notifications', () => {
     expect(mark.lang).toBe('vi');
   });
 
+  it('a subagent hand-back message is system text too: no English instruction, no language switch, only resumed', async () => {
+    // 3/10/2026: "<agent-message ...>[Subagent hand-back] ..." bị coi là prompt tiếng Anh → Claude đọc phần 🔊 bằng tiếng Anh
+    // ngay sau một đoạn tiếng Việt.
+    const cfg = path.join(work, 'background-auto.json');
+    fs.writeFileSync(cfg, JSON.stringify({ language: 'auto' }));
+    const session = 'agent-message-context';
+    await run(['prompt', '--config', cfg], JSON.stringify({ session_id: session, cwd: work, prompt: 'Review giúp mình bước 13' }));
+    const before = readLog().length;
+    const message = '<agent-message from="af0e2c4c91ed3a19f">\n[Subagent hand-back] The text below is the final report of a subagent.\n  ## Review: done\n</agent-message>';
+    const result = await run(['prompt', '--config', cfg], JSON.stringify({ session_id: session, cwd: work, prompt: message }));
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(readLog().slice(before)).toContain('resumed');
+    const mark = JSON.parse(fs.readFileSync(path.join(work, 'tmp', 'noidle-tts', 'sessions', session), 'utf8'));
+    expect(mark.count).toBe(1);
+    expect(mark.lang).toBe('vi');
+  });
+
   it('a turn that ends with a prompt still queued (typed while Claude worked) is silent: Claude starts on it right away', async () => {
     const session = 'queued-speech';
     const cfg = path.join(work, 'queued-handsfree.json');
