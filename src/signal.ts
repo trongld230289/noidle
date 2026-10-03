@@ -14,6 +14,8 @@ export interface WindowEntry {
   pid: number;
   pipe: string;
   folders: string[];
+  /** pid tiến trình chính của editor (cha của extension host); hook coi cửa sổ của pid này là editor dù tiêu đề là gì. */
+  editorPid?: number;
 }
 
 /** resumed: việc nền xong, Claude chạy tiếp; extension bỏ trạng thái "done" (không đụng mic). */
@@ -45,6 +47,10 @@ export interface Signal {
   text?: string;
   /** chatPending: ngôn ngữ của câu báo, để extension chọn giọng. */
   lang?: 'vi' | 'en';
+  /** Chỉ hỏi "cửa sổ này có chứa agent không" (trả 'owned' hay 'no'), không xử lý. */
+  probe?: boolean;
+  /** attention: lúc hook bắt đầu (Date.now()); extension bỏ nháy nếu cửa sổ đã được focus sau đó. */
+  startedAt?: number;
 }
 
 /** Trả lời của server cho ask; các tín hiệu khác không có trả lời. */
@@ -105,6 +111,8 @@ export function parseSignal(line: string): Signal | undefined {
     if (typeof o.command === 'string') out.command = o.command;
     if (typeof o.text === 'string') out.text = o.text;
     if (o.lang === 'vi' || o.lang === 'en') out.lang = o.lang;
+    if (o.probe === true) out.probe = true;
+    if (typeof o.startedAt === 'number') out.startedAt = o.startedAt;
     return out;
   } catch {
     return undefined;
@@ -372,38 +380,66 @@ export function pruneRegistry(dir = WINDOWS_DIR, alive: (pid: number) => boolean
   return live;
 }
 
-/** Bao lâu chờ một cửa sổ trả lời có chứa agent hay không (chỉ so pid, không chờ nháy). */
+/** Bao lâu chờ một cửa sổ trả lời probe (chỉ so pid, không chờ nháy hay nghe). */
 const OWNER_REPLY_MS = 3000;
 
+export interface RouteOptions {
+  /** ask: chờ cửa sổ nghe và trả chữ về (timeoutSec + 20 giây cho Whisper). */
+  ask?: boolean;
+  /**
+   * Không cửa sổ nào chứa agent (hay không có chuỗi pid) thì có gửi cho cửa sổ theo cwd không. attention/listen/ask
+   * để false khi đã có chuỗi: agent ở terminal rời thì không nháy, không mở mic ở một cửa sổ VS Code không liên quan.
+   */
+  cwdFallback: boolean;
+}
+
+export interface RouteResult {
+  ok: boolean;
+  pid?: number;
+  via?: 'owner' | 'cwd';
+  heard?: string;
+}
+
 /**
- * Gửi tín hiệu tới cửa sổ đang chứa agent. Có chuỗi pid tổ tiên thì hỏi mọi cửa sổ còn sống; cửa sổ nào thấy pid
- * extension host của mình hay shell pid của một terminal của mình trong chuỗi thì xử lý và trả 'owned'. Không ai
- * nhận (agent ở terminal ngoài VS Code, hay hook không tra được cây tiến trình) thì lùi về cửa sổ theo cwd như cũ,
- * gửi tín hiệu không kèm chuỗi pid để cửa sổ đó xử lý không cần kiểm tra.
+ * Gửi tín hiệu tới cửa sổ đang chứa agent. Có chuỗi pid: hỏi mọi cửa sổ còn sống bằng probe; cửa sổ thấy pid extension
+ * host của mình hay shell pid của một terminal của mình trong chuỗi trả 'owned', rồi chỉ cửa sổ đó nhận tín hiệu thật.
+ * Không ai nhận (hoặc không có chuỗi) và cwdFallback: gửi cho cửa sổ theo cwd, bỏ chuỗi để nó xử lý như trước.
  */
-export async function signalAgentWindow(
+export async function routeSignal(
   signal: Signal,
+  opts: RouteOptions,
   dir = WINDOWS_DIR,
   log?: (m: string) => void,
   alive: (pid: number) => boolean = pidAlive,
-): Promise<boolean> {
+): Promise<RouteResult> {
   const entries = pruneRegistry(dir, alive);
-  if (signal.ancestors?.length && entries.length) {
-    const replies = await Promise.all(entries.map(async (e) => ({ e, reply: await askSignal(e.pipe, signal, OWNER_REPLY_MS) })));
-    const owner = replies.find((r) => r.reply === 'owned');
-    if (owner) {
-      log?.(`signal ${signal.event} → cửa sổ pid ${owner.e.pid} (đang chứa agent)`);
-      return true;
+  const askMs = ((signal.timeoutSec ?? 15) + 20) * 1000;
+  const deliver = async (entry: WindowEntry, s: Signal, via: 'owner' | 'cwd'): Promise<RouteResult> => {
+    const who = via === 'owner' ? '(đang chứa agent)' : '(theo cwd)';
+    if (opts.ask) {
+      const heard = await askSignal(entry.pipe, s, askMs);
+      log?.(heard === undefined ? `ask: cửa sổ pid ${entry.pid} ${who} không trả lời` : `ask → cửa sổ pid ${entry.pid} ${who}: ${JSON.stringify(heard)}`);
+      return heard === undefined ? { ok: false, pid: entry.pid, via } : { ok: true, pid: entry.pid, via, heard };
     }
-    log?.(`signal ${signal.event}: không cửa sổ nào chứa agent (đã hỏi ${entries.length}), chọn theo cwd`);
+    const ok = await sendSignal(entry.pipe, s);
+    log?.(ok ? `signal ${s.event} → cửa sổ pid ${entry.pid} ${who}` : `signal ${s.event}: cửa sổ pid ${entry.pid} không trả lời`);
+    return { ok, pid: entry.pid, via };
+  };
+  if (signal.ancestors?.length) {
+    if (entries.length) {
+      const probe: Signal = { ...signal, probe: true };
+      const replies = await Promise.all(entries.map(async (e) => ({ e, reply: await askSignal(e.pipe, probe, OWNER_REPLY_MS) })));
+      const owner = replies.find((r) => r.reply === 'owned')?.e;
+      if (owner) return deliver(owner, signal, 'owner');
+      log?.(`signal ${signal.event}: không cửa sổ nào chứa agent (đã hỏi ${entries.length})${opts.cwdFallback ? ', chọn theo cwd' : ', không gửi'}`);
+    } else log?.(`signal ${signal.event}: không có cửa sổ VS Code nào`);
+    if (!opts.cwdFallback) return { ok: false };
   }
   const { ancestors: _ancestors, ...plain } = signal;
   const entry = pickWindow(entries, plain.cwd);
   if (!entry) {
     log?.(`signal ${plain.event}: không có cửa sổ nào cho ${plain.cwd}`);
-    return false;
+    return { ok: false };
   }
-  const ok = await sendSignal(entry.pipe, plain);
-  log?.(ok ? `signal ${plain.event} → cửa sổ pid ${entry.pid} (theo cwd)` : `signal ${plain.event}: cửa sổ pid ${entry.pid} không trả lời`);
-  return ok;
+  return deliver(entry, plain, 'cwd');
 }

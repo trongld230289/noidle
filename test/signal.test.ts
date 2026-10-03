@@ -18,7 +18,7 @@ import {
   WindowEntry,
   Signal,
   pruneRegistry,
-  signalAgentWindow,
+  routeSignal,
 } from '../src/signal';
 
 const w = (pid: number, ...folders: string[]): WindowEntry => ({ pid, pipe: `p${pid}`, folders });
@@ -193,64 +193,86 @@ describe('pruneRegistry', () => {
   });
 });
 
-describe('signalAgentWindow: chọn cửa sổ theo chuỗi pid của agent', () => {
-  /** Server giả của một cửa sổ: nhận 'owned' khi pid của nó nằm trong chuỗi tổ tiên của tín hiệu. */
-  const win = async (pid: number, got: Signal[]) => {
+describe('routeSignal: hỏi cửa sổ nào chứa agent (probe) rồi mới gửi', () => {
+  /** Server giả của một cửa sổ: probe trả 'owned' khi pid của nó nằm trong chuỗi, 'no' nếu không; tín hiệu thật được ghi lại. */
+  const win = async (pid: number, got: Signal[], heard = 'yes') => {
     const pipe = testPipe();
     const server = startServer(pipe, (s) => {
+      if (s.probe) return s.ancestors?.includes(pid) ? 'owned' : 'no';
       got.push(s);
-      return s.ancestors?.includes(pid) ? 'owned' : undefined;
+      return s.event === 'ask' ? heard : undefined;
     });
     await new Promise((r) => server.once('listening', r));
     return { pipe, server };
   };
-  const attention = (cwd: string, ancestors?: number[]): Signal => ({ event: 'attention', session: '', cwd, reason: 'done', ...(ancestors ? { ancestors } : {}) });
+  const sig = (event: Signal['event'], cwd: string, ancestors?: number[]): Signal =>
+    ({ event, session: 's', cwd, ...(event === 'attention' ? { reason: 'done' as const } : {}), ...(ancestors ? { ancestors } : {}) });
 
-  it('cửa sổ nào có pid trong chuỗi thì nhận, dù cwd khớp cửa sổ khác (workspace cha và project con)', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'noidle-agent-'));
-    const gotParent: Signal[] = [];
-    const gotChild: Signal[] = [];
-    const parent = await win(1001, gotParent);
-    const child = await win(1002, gotChild);
-    writeRegistry({ pid: 1001, pipe: parent.pipe, folders: ['D:/parent/child', 'D:/parent/other'] }, dir);
+  it('cửa sổ có pid trong chuỗi nhận tín hiệu, dù cwd khớp cửa sổ khác dài hơn (workspace cha và project con)', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'noidle-route-'));
+    const gotParent: Signal[] = []; const gotChild: Signal[] = [];
+    const parent = await win(1001, gotParent); const child = await win(1002, gotChild);
+    writeRegistry({ pid: 1001, pipe: parent.pipe, folders: ['D:/parent'] }, dir);
     writeRegistry({ pid: 1002, pipe: child.pipe, folders: ['D:/parent/child'] }, dir);
-    const alive = () => true;
-    expect(await signalAgentWindow(attention('D:/parent/child', [500, 400, 1001, 10]), dir, undefined, alive)).toBe(true);
+    const r = await routeSignal(sig('listen', 'D:/parent/child', [500, 400, 1001, 10]), { cwdFallback: false }, dir, undefined, () => true);
+    expect(r).toEqual({ ok: true, pid: 1001, via: 'owner' });
     await new Promise((r) => setTimeout(r, 50));
-    // Cả hai được hỏi kèm chuỗi pid; chỉ cửa sổ cha nhận. Không gửi thêm tín hiệu dự phòng (không có ancestors) cho ai.
-    expect(gotParent.map((s) => s.ancestors)).toEqual([[500, 400, 1001, 10]]);
-    expect(gotChild.map((s) => s.ancestors)).toEqual([[500, 400, 1001, 10]]);
-    parent.server.close();
-    child.server.close();
+    expect(gotParent.map((s) => [s.event, s.probe, s.ancestors])).toEqual([['listen', undefined, [500, 400, 1001, 10]]]);
+    expect(gotChild).toEqual([]);
+    parent.server.close(); child.server.close();
   });
 
-  it('không cửa sổ nào nhận (agent ở terminal ngoài VS Code) thì lùi về cửa sổ theo cwd, gửi tín hiệu không kèm chuỗi pid', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'noidle-agent-'));
-    const gotA: Signal[] = [];
-    const gotB: Signal[] = [];
-    const a = await win(1001, gotA);
-    const b = await win(1002, gotB);
+  it('ask: probe trước, rồi chỉ cửa sổ chủ nghe và trả chữ', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'noidle-route-'));
+    const gotA: Signal[] = []; const gotB: Signal[] = [];
+    const a = await win(1001, gotA, 'allow'); const b = await win(1002, gotB, 'deny');
     writeRegistry({ pid: 1001, pipe: a.pipe, folders: ['D:/a'] }, dir);
-    writeRegistry({ pid: 1002, pipe: b.pipe, folders: ['D:/b'] }, dir);
-    expect(await signalAgentWindow(attention('D:/b/sub', [500, 400, 9999]), dir, undefined, () => true)).toBe(true);
-    await new Promise((r) => setTimeout(r, 50));
-    expect(gotA.map((s) => s.ancestors)).toEqual([[500, 400, 9999]]);
-    expect(gotB.map((s) => s.ancestors)).toEqual([[500, 400, 9999], undefined]);
-    a.server.close();
-    b.server.close();
+    writeRegistry({ pid: 1002, pipe: b.pipe, folders: ['D:/a'] }, dir);
+    const r = await routeSignal({ ...sig('ask', 'D:/a', [7, 1002]), timeoutSec: 1 }, { ask: true, cwdFallback: false }, dir, undefined, () => true);
+    expect(r).toEqual({ ok: true, pid: 1002, via: 'owner', heard: 'deny' });
+    expect(gotA).toEqual([]);
+    expect(gotB.map((s) => s.event)).toEqual(['ask']);
+    a.server.close(); b.server.close();
   });
 
-  it('không có chuỗi pid thì gửi thẳng cho cửa sổ theo cwd; cửa sổ chết bị dọn trước khi hỏi', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'noidle-agent-'));
+  it('chuỗi hợp lệ mà không cửa sổ nào chứa agent: cwdFallback false thì không gửi cho ai (agent ở terminal rời)', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'noidle-route-'));
+    const gotA: Signal[] = [];
+    const a = await win(1001, gotA);
+    writeRegistry({ pid: 1001, pipe: a.pipe, folders: ['D:/a'] }, dir);
+    expect(await routeSignal(sig('attention', 'D:/a', [500, 9999]), { cwdFallback: false }, dir, undefined, () => true)).toEqual({ ok: false });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(gotA).toEqual([]);
+    a.server.close();
+  });
+
+  it('cwdFallback true: không ai nhận thì gửi cho cửa sổ theo cwd, bỏ chuỗi pid; không có chuỗi thì gửi thẳng theo cwd', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'noidle-route-'));
     const gotA: Signal[] = [];
     const a = await win(1001, gotA);
     writeRegistry({ pid: 1001, pipe: a.pipe, folders: ['D:/a'] }, dir);
     writeRegistry({ pid: 1002, pipe: testPipe(), folders: ['D:/a'] }, dir);
-    expect(await signalAgentWindow(attention('D:/a'), dir, undefined, (pid) => pid === 1001)).toBe(true);
+    expect(await routeSignal(sig('submitted', 'D:/a/sub', [500, 9999]), { cwdFallback: true }, dir, undefined, (pid) => pid === 1001)).toEqual({ ok: true, pid: 1001, via: 'cwd' });
+    expect(await routeSignal(sig('submitted', 'D:/a'), { cwdFallback: true }, dir, undefined, (pid) => pid === 1001)).toEqual({ ok: true, pid: 1001, via: 'cwd' });
     await new Promise((r) => setTimeout(r, 50));
-    expect(gotA.length).toBe(1);
+    expect(gotA.map((s) => s.ancestors)).toEqual([undefined, undefined]);
     expect(readRegistry(dir).map((e) => e.pid)).toEqual([1001]);
-    expect(await signalAgentWindow(attention('D:/none'), dir, undefined, () => true)).toBe(false);
+    expect(await routeSignal(sig('submitted', 'D:/none'), { cwdFallback: true }, dir, undefined, () => true)).toEqual({ ok: false });
     a.server.close();
+  });
+});
+
+describe('registry và parseSignal mang thêm pid editor, probe, startedAt', () => {
+  it('editorPid được ghi và đọc lại; thiếu thì undefined', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'noidle-reg-'));
+    writeRegistry({ pid: 1, pipe: 'p', folders: ['D:/a'], editorPid: 11384 }, dir);
+    writeRegistry({ pid: 2, pipe: 'q', folders: ['D:/b'] }, dir);
+    const byPid = Object.fromEntries(readRegistry(dir).map((e) => [e.pid, e.editorPid]));
+    expect(byPid).toEqual({ 1: 11384, 2: undefined });
+  });
+  it('parseSignal giữ probe, startedAt và source của attention', () => {
+    const s = parseSignal(JSON.stringify({ event: 'attention', cwd: 'D:/a', reason: 'done', probe: true, startedAt: 1700000000000, source: 'copilot' }));
+    expect(s).toMatchObject({ probe: true, startedAt: 1700000000000, source: 'copilot' });
+    expect(parseSignal(JSON.stringify({ event: 'listen', cwd: 'D:/a', probe: 'yes', startedAt: 'x' }))).toEqual({ event: 'listen', session: '', cwd: 'D:/a' });
   });
 });
