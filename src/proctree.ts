@@ -1,54 +1,11 @@
 /**
- * Cây tiến trình: hook chạy dưới Claude Code, Claude Code chạy dưới shell của một terminal VS Code.
- * Hook gửi chuỗi pid tổ tiên của Claude kèm tín hiệu; extension so với processId (pid shell) của từng terminal
- * để chọn đúng terminal đang chạy Claude thay vì terminal đang focus.
+ * Cây tiến trình: hook chạy dưới Claude Code (hay Copilot), agent chạy dưới shell của một terminal VS Code.
+ * Hook gửi chuỗi pid từ agent lên kèm tín hiệu; extension so với processId (pid shell) của từng terminal, hay pid
+ * của chính extension host, để biết cửa sổ nào chứa agent thay vì lấy cửa sổ đang focus. Windows tra chuỗi bằng
+ * Toolhelp32 trong helper native (native.ts); POSIX bằng ps (procTable).
  */
 import { execFile } from 'child_process';
 import type { SignalSource } from './signal';
-
-/** Đọc bảng "pid ppid" mỗi dòng (PowerShell hoặc ps); dòng không phải hai số thì bỏ. */
-export function parseParentTable(text: string): Map<number, number> {
-  const map = new Map<number, number>();
-  for (const line of text.split(/\r?\n/)) {
-    const m = /^\s*(\d+)\s+(\d+)\s*$/.exec(line);
-    if (m) map.set(Number(m[1]), Number(m[2]));
-  }
-  return map;
-}
-
-/** Bảng pid → ppid của cả máy. Lỗi thì bảng rỗng, extension sẽ fallback về terminal đang focus. */
-export function parentMap(): Promise<Map<number, number>> {
-  const [cmd, args] =
-    process.platform === 'win32'
-      ? [
-          'powershell.exe',
-          [
-            '-NoProfile',
-            '-NonInteractive',
-            '-Command',
-            'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId)" }',
-          ],
-        ]
-      : ['ps', ['-eo', 'pid=,ppid=']];
-  return new Promise((resolve) => {
-    execFile(cmd, args, { windowsHide: true, timeout: 10_000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
-      resolve(err ? new Map() : parseParentTable(String(stdout)));
-    });
-  });
-}
-
-/** pid rồi cha, ông... theo bảng; dừng khi hết bảng, gặp vòng, hay đủ maxDepth. */
-export function ancestorsOf(pid: number, map: Map<number, number>, maxDepth = 12): number[] {
-  const out: number[] = [];
-  const seen = new Set<number>();
-  let cur: number | undefined = pid;
-  while (cur !== undefined && !seen.has(cur) && out.length < maxDepth) {
-    out.push(cur);
-    seen.add(cur);
-    cur = map.get(cur);
-  }
-  return out;
-}
 
 export interface TerminalLike {
   name: string;
