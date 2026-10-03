@@ -354,9 +354,10 @@ describe('claude-hook workspace prefix', () => {
 
   it('auto: nói tên workspace khi có hơn một cửa sổ VS Code, im khi chỉ có một', async () => {
     fs.rmSync(windowsDir, { recursive: true, force: true });
-    registerWindow(11, work);
+    // pid phải còn sống: hook dọn đăng ký của cửa sổ chết trước khi đếm.
+    registerWindow(process.pid, work);
     expect(await spoken(cfgNormal)).toBe('Xong việc.');
-    registerWindow(12, path.join(work, '..', 'other-project'));
+    registerWindow(process.ppid, path.join(work, '..', 'other-project'));
     expect(await spoken(cfgNormal)).toBe(prefixed());
   });
 
@@ -591,8 +592,9 @@ describe('claude-hook attention chọn cửa sổ theo chuỗi pid của agent',
     const got: Signal[] = [];
     const pipe = pipeName(process.pid * 1000 + 7);
     const server = startServer(pipe, (s) => {
+      if (s.probe) return s.ancestors?.includes(process.pid) ? 'owned' : 'no';
       got.push(s);
-      return s.ancestors?.includes(process.pid) ? 'owned' : undefined;
+      return undefined;
     });
     await new Promise((r) => server.once('listening', r));
     writeRegistry({ pid: process.pid, pipe, folders: [path.join(work, 'elsewhere')] }, regDir);

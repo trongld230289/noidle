@@ -8,11 +8,11 @@
  *                             Stop: đọc transcript, chọn câu cần đọc, rồi tách tiến trình `play` và thoát ngay.
  *                             Hands-free: play xong thì báo extension mở mic (tín hiệu listen), hook không tự nghe.
  *                             Config voiceResponse false thì speak và notify chỉ báo cửa sổ, không đọc; đổi cờ có hiệu lực ngay.
- *   play <textfile> --kind speak|notify --session <id> [--listen <cwd> --claude-pid <pid>]
+ *   play <textfile> --kind speak|notify --session <id> [--listen <cwd> --ancestors <pid,pid,...>]
  *                             Tổng hợp giọng bằng Edge TTS (hoặc ElevenLabs theo file --config), phát bằng ffplay. Xếp hàng theo thứ tự đến;
  *                             câu trả lời mới của cùng một phiên thì cắt câu trả lời cũ của phiên đó.
- *                             Có --listen thì phát xong gửi tín hiệu listen cho cửa sổ VS Code của cwd đó, kèm chuỗi
- *                             pid tổ tiên của Claude (--claude-pid) để extension chọn đúng terminal đang chạy Claude.
+ *                             Có --listen thì phát xong gửi tín hiệu listen cho cửa sổ VS Code đang chứa agent, kèm chuỗi
+ *                             pid của agent (--ancestors, hay chuỗi đã lưu theo phiên) để extension chọn đúng terminal.
  *   skip                      Bỏ qua bản đang đọc (tắt player của vé đầu hàng); extension gọi từ lệnh/phím tắt.
  *   notify [--voice] ...      Notification / PermissionRequest / PreToolUse(AskUserQuestion): đọc một câu ngắn
  *                             "Workspace X cần approve" hoặc "cần bạn xác nhận câu trả lời", xếp sau lượt đang đọc.
@@ -29,10 +29,11 @@ import { lastAssistantText, pickSpeech, hasSpeakSection, pendingBackgroundTasks,
 import { recapInstruction, type RecapPrompts } from './recapPrompt';
 import { langOf, isAuto, detectLang, effectiveVoice, usesVietPronunciation, DEFAULT_VOICE, type Lang } from './lang';
 import { parseApproval, isDangerous, voiceApprovable, parseChoice, isChoiceCancellation, isAmbiguousChoice, permissionRequestOutput } from './decision';
-import { signalWindow, signalAgentWindow, askWindow, readRegistry, micHolder, MIC_LOCK_MAX_AGE_MS, type Signal, type SignalSource, type AttentionReason } from './signal';
-import { ancestorsOf, parentMap } from './proctree';
+import { routeSignal, readRegistry, micHolder, MIC_LOCK_MAX_AGE_MS, type Signal, type SignalSource, type AttentionReason } from './signal';
+import { agentChainFrom, procTable, procChain, type ProcEntry } from './proctree';
 import { resolvePlayer } from './findTool';
 import { flashHostWindow } from './attention';
+import { nativeScript, runPowerShell, parseChain } from './native';
 import { hedged } from './hedge';
 import { pronounce } from './pronounce';
 import { prefetchInOrder } from './prefetch';
@@ -150,22 +151,58 @@ function sessionLang(cfg: HookConfig, session: string | undefined): Lang {
   return (session && readMark(session).lang) || 'vi';
 }
 
+/** Lúc hook bắt đầu: gửi kèm attention để extension bỏ nháy nếu người dùng đã xem cửa sổ sau đó. */
+const HOOK_STARTED_AT = Date.now();
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/** Chuỗi tiến trình từ cha của hook lên (Windows: Toolhelp32 trong helper native; nơi khác: ps). */
+async function rawChain(): Promise<ProcEntry[]> {
+  if (!process.ppid) return [];
+  if (process.platform === 'win32') {
+    const r = await runPowerShell(nativeScript(`
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[NoIdleNative]::Chain(${process.ppid}, 14) | ForEach-Object { [Console]::Out.WriteLine("chain\`t" + $_) }
+exit 0`), 'chain');
+    return r.code === 0 ? parseChain(r.out) : [];
+  }
+  return procChain(process.ppid, await procTable());
+}
+
 /**
- * Chuỗi pid từ Claude Code (cha của hook) đi lên: qua wrapper claude.cmd tới shell của terminal VS Code.
- * Extension so với processId của từng terminal để gõ vào đúng terminal đang chạy Claude. Lỗi thì rỗng, extension fallback.
+ * Chuỗi pid từ agent (Claude Code, Copilot CLI, extension host của Copilot Chat) lên tới shell của terminal và editor.
+ * Extension so với processId của từng terminal (hay pid của chính nó) để biết cửa sổ nào chứa agent. Hook bị
+ * bash/cmd/powershell bọc nên ppid đổi mỗi lần; neo là tiến trình đầu tiên không phải vỏ bọc, còn sống thì dùng lại
+ * chuỗi đã lưu theo phiên. fresh: chuỗi mà script nháy vừa in ra, khỏi tra lần nữa. Lỗi thì rỗng, extension fallback.
  */
-async function claudeAncestors(claudePid: number, session: string): Promise<number[]> {
-  if (!claudePid) return [];
-  // Tra cây tiến trình (PowerShell CIM) mất hơn một giây; pid Claude không đổi trong phiên nên lưu lại theo phiên.
+/**
+ * Chuỗi đã lưu của phiên nếu neo còn sống, không thì rỗng; không tra. Cho các hook chạy ngay lúc người dùng gửi prompt
+ * (submitted, resumed, chatPending, chatDone): không được chậm thêm cả giây; speak/notify của lượt trước đã lưu chuỗi,
+ * chưa có thì chọn cửa sổ theo cwd như cũ.
+ */
+function cachedChain(session: string): number[] {
   const mark = session ? readMark(session) : undefined;
-  if (mark?.proc?.pid === claudePid && mark.proc.chain.length) {
+  return mark?.proc && mark.proc.chain.length && pidAlive(mark.proc.anchor) ? mark.proc.chain : [];
+}
+
+async function agentChain(session: string, fresh?: ProcEntry[]): Promise<number[]> {
+  const mark = session ? readMark(session) : undefined;
+  if (!fresh && mark?.proc && mark.proc.chain.length && pidAlive(mark.proc.anchor)) {
     log(`proctree: dùng lại chuỗi đã lưu của phiên (${mark.proc.chain.join(' ← ')})`);
     return mark.proc.chain;
   }
   const t0 = Date.now();
-  const chain = ancestorsOf(claudePid, await parentMap());
-  log(`proctree: ${chain.join(' ← ') || 'rỗng'} (${Date.now() - t0}ms)`);
-  if (session && chain.length > 1) writeMark(session, { ...readMark(session), proc: { pid: claudePid, chain } });
+  const entries = fresh ?? (await rawChain());
+  const chain = agentChainFrom(entries);
+  log(`proctree: ${entries.map((e) => `${e.pid} ${e.exe}`).join(' ← ') || 'rỗng'} → agent ${chain.join(' ← ') || 'rỗng'} (${Date.now() - t0}ms)`);
+  if (session && chain.length > 1) writeMark(session, { ...readMark(session), proc: { anchor: chain[0], chain } });
   return chain;
 }
 
@@ -182,12 +219,13 @@ async function requestMicrophone(signal: Signal & { event: 'listen' | 'ask' }): 
   const promptCount = readMark(signal.session).count;
   const ticket = takeTicket('notify', signal.session);
   try {
-    const ancestors = sourceArg() === 'copilot' ? [] : await claudeAncestors(process.ppid, signal.session);
+    // Copilot Chat cũng có chuỗi (extension host nằm trong đó): hai cửa sổ cùng folder vẫn mở đúng ô chat.
+    const ancestors = await agentChain(signal.session);
     await waitTurn(ticket);
     if (listTickets()[0]?.file !== ticket || !loadConfig().handsFree || readMark(signal.session).count !== promptCount) return;
     const request = { ...signal, ancestors, source: sourceArg() };
-    if (signal.event === 'ask') return await askWindow(request, undefined, log);
-    await signalWindow(request, undefined, log);
+    const r = await routeSignal(request, { ask: signal.event === 'ask', cwdFallback: ancestors.length === 0 }, undefined, log);
+    return signal.event === 'ask' ? r.heard : undefined;
   } finally {
     fs.rmSync(ticketPath(ticket), { force: true });
   }
@@ -356,8 +394,8 @@ interface SessionMark {
   lang?: Lang;
   /** voiceStyle đã áp cho prompt trước của phiên; thiếu (dấu cũ) coi như recap. Đổi giữa phiên thì chèn câu chuyển. */
   style?: 'recap' | 'announce';
-  /** Chuỗi pid tổ tiên của Claude Code (pid không đổi trong một phiên), để khỏi tra cây tiến trình mỗi lượt. */
-  proc?: { pid: number; chain: number[] };
+  /** Chuỗi pid từ agent lên, neo = pid agent (bỏ shell bọc hook); dùng lại khi neo còn sống, khỏi tra cây tiến trình mỗi lượt. */
+  proc?: { anchor: number; chain: number[] };
 }
 
 function markPath(session: string): string {
@@ -375,11 +413,12 @@ function readMark(session: string): SessionMark {
   const n = Number(raw);
   if (!Number.isNaN(n)) return { count: n };
   try {
-    const o = JSON.parse(raw) as { count?: unknown; lang?: unknown; style?: unknown; proc?: { pid?: unknown; chain?: unknown } };
+    const o = JSON.parse(raw) as { count?: unknown; lang?: unknown; style?: unknown; proc?: { anchor?: unknown; chain?: unknown } };
     const mark: SessionMark = { count: Number(o.count) || 0, lang: o.lang === 'en' ? 'en' : o.lang === 'vi' ? 'vi' : undefined };
     if (o.style === 'announce' || o.style === 'recap') mark.style = o.style;
-    if (o.proc && typeof o.proc.pid === 'number' && Array.isArray(o.proc.chain)) {
-      mark.proc = { pid: o.proc.pid, chain: o.proc.chain.filter((n): n is number => typeof n === 'number') };
+    // Dấu cũ (proc.pid) không có anchor: bỏ, tra lại.
+    if (o.proc && typeof o.proc.anchor === 'number' && Array.isArray(o.proc.chain)) {
+      mark.proc = { anchor: o.proc.anchor, chain: o.proc.chain.filter((n): n is number => typeof n === 'number') };
     }
     return mark;
   } catch {
@@ -481,7 +520,10 @@ async function modePrompt(): Promise<void> {
     // Không phải người dùng nói: không đếm, không đổi ngôn ngữ, không tắt mic. Nhưng Claude sắp chạy tiếp,
     // cửa sổ không còn "done": bảo extension bỏ màu và chữ "Claude is done".
     log(`prompt: background task notification, session ${input.session_id ?? '-'}, chỉ báo resumed`);
-    await signalWindow({ event: 'resumed', session: input.session_id ?? '', cwd: input.cwd || process.cwd(), source: sourceArg() }, undefined, log);
+    await routeSignal(
+      { event: 'resumed', session: input.session_id ?? '', cwd: input.cwd || process.cwd(), source: sourceArg(), ancestors: cachedChain(input.session_id ?? '') },
+      { cwdFallback: true }, undefined, log,
+    );
     return;
   }
   // Tắt đọc thì không dặn Claude viết phần 🔊, nhưng vẫn báo submitted để tắt mic nếu đang mở.
@@ -506,7 +548,10 @@ async function modePrompt(): Promise<void> {
   }
   // Người dùng vừa gửi prompt: bảo extension tắt mic hands-free nếu đang mở. Không có cửa sổ thì thôi.
   const cwd = input.cwd || process.cwd();
-  await signalWindow({ event: 'submitted', session: input.session_id ?? '', cwd, source: sourceArg() }, undefined, log);
+  await routeSignal(
+    { event: 'submitted', session: input.session_id ?? '', cwd, source: sourceArg(), ancestors: cachedChain(input.session_id ?? '') },
+    { cwdFallback: true }, undefined, log,
+  );
 }
 
 async function modeSpeak(): Promise<void> {
@@ -567,7 +612,7 @@ async function modeSpeak(): Promise<void> {
   const listenCwd = cfg.handsFree && !waiting ? cwd : undefined;
   if (text) {
     // Shell chạy hook CLI thoát ngay sau hook; lấy chuỗi pid trước khi tách play.
-    const ancestors = listenCwd && sourceArg() === 'copilot-cli' ? await claudeAncestors(process.ppid, session) : undefined;
+    const ancestors = listenCwd ? await agentChain(session) : undefined;
     spawnPlay(text, 'speak', session, lang, listenCwd, ancestors);
   }
   else if (listenCwd) {
@@ -616,9 +661,9 @@ function spawnPlay(raw: string, kind: Ticket['kind'], session: string, lang: Lan
   if (permissionPlayback) args.push('--permission-transcript', permissionPlayback.transcript, '--permission-request', permissionPlayback.requestId);
   // play đọc file cấu hình để biết giọng ElevenLabs (key không đi qua dòng lệnh).
   if (arg('config', '')) args.push('--config', arg('config', ''));
-  // Tiến trình play tách rời nên không còn biết cha; đưa pid của Claude Code (cha của hook) để nó tra cây tiến trình.
+  // Tiến trình play tách rời nên không còn biết cha; đưa chuỗi pid đã tra (không có thì nó dùng chuỗi đã lưu theo phiên).
   if (listenCwd) {
-    args.push('--listen', listenCwd, '--source', sourceArg(), '--claude-pid', String(process.ppid));
+    args.push('--listen', listenCwd, '--source', sourceArg());
     if (ancestors?.length) args.push('--ancestors', ancestors.join(','));
     // Số prompt của phiên lúc này; play so lại trước khi mở mic để câu cũ không bật mic khi đã có prompt mới.
     if (session) args.push('--prompt-count', String(readMark(session).count));
@@ -649,18 +694,27 @@ function voiceFor(lang: Lang): string {
 async function attention(reason: AttentionReason, session: string, cwd: string, cfg: HookConfig = {}): Promise<boolean> {
   // Chuỗi pid tổ tiên của hook: qua Claude Code/Copilot CLI tới shell của terminal, hay qua powershell tới extension
   // host của cửa sổ Copilot Chat. Dùng để nháy terminal rời và để cửa sổ VS Code nào chứa agent tự nhận tín hiệu.
-  const ancestors = await claudeAncestors(process.ppid, session);
-  if (cfg.attentionFlash === false) log(`attention ${reason}: attentionFlash tắt, không nháy cửa sổ chứa agent`);
-  else if (process.env.VI_VOICE_HOST_FLASH !== '0' && process.platform === 'win32') {
+  let ancestors: number[];
+  if (cfg.attentionFlash !== false && process.env.VI_VOICE_HOST_FLASH !== '0' && process.platform === 'win32') {
+    // Một lần PowerShell: tra chuỗi pid, nháy terminal rời nếu agent ở đó; cửa sổ editor thì để extension nháy.
     const t0 = Date.now();
-    const host = await flashHostWindow(ancestors);
+    const editorPids = readRegistry().map((e) => e.editorPid).filter((p): p is number => typeof p === 'number');
+    const host = await flashHostWindow(process.ppid, { editorPids });
     log(`attention ${reason}: nháy cửa sổ chứa agent → ${host.result}${host.window ? ` (${host.window})` : ''} (${Date.now() - t0}ms)`);
+    ancestors = await agentChain(session, host.chain.length ? host.chain : undefined);
     if (host.result === 'flashed' || host.result === 'foreground') return true;
+  } else {
+    if (cfg.attentionFlash === false) log(`attention ${reason}: attentionFlash tắt, không nháy cửa sổ chứa agent`);
+    ancestors = await agentChain(session);
   }
-  return signalAgentWindow({ event: 'attention', session, cwd, reason, ancestors }, undefined, log).catch((err) => {
-    log(`signal attention lỗi: ${(err as Error).message}`);
-    return false;
-  });
+  const signal: Signal = { event: 'attention', session, cwd, reason, ancestors, source: sourceArg(), startedAt: HOOK_STARTED_AT };
+  // Có chuỗi mà không cửa sổ nào chứa agent (agent ở terminal rời không nháy được): không nháy cửa sổ VS Code theo cwd.
+  return routeSignal(signal, { cwdFallback: ancestors.length === 0 }, undefined, log)
+    .then((r) => r.ok)
+    .catch((err: Error) => {
+      log(`signal attention lỗi: ${err.message}`);
+      return false;
+    });
 }
 
 async function modeNotify(): Promise<void> {
@@ -672,7 +726,7 @@ async function modeNotify(): Promise<void> {
   if (chat && input.hook_event_name === 'PostToolUse') {
     // Bằng chứng tool đã chạy: extension bỏ lượt chờ "cần approve" của lệnh này (xem chatPending.ts).
     if (input.chat_voice_tool === 'approval' && input.tool_name === 'Bash') {
-      await signalWindow({ event: 'chatDone', ...chatToolRef(input) }, undefined, log, false)
+      await routeSignal({ event: 'chatDone', ...chatToolRef(input), ancestors: cachedChain(input.session_id ?? '') }, { cwdFallback: true }, undefined, log)
         .catch((err) => log(`signal chatDone lỗi: ${(err as Error).message}`));
     }
     return;
@@ -721,8 +775,12 @@ async function modeNotify(): Promise<void> {
       log(`approve: ${input.tool_name} ${dangerous ? 'nguy hiểm' : 'không trong danh sách an toàn'}, không nghe`);
       reason = dangerous ? say.dangerous(text) : say.notSafe(text);
     }
-    const sent = await signalWindow({ event: 'chatPending', ...chatToolRef(input), text: reason, lang, source: 'copilot' }, undefined, log, false)
-      .catch((err) => { log(`signal chatPending lỗi: ${(err as Error).message}`); return false; });
+    const sent = await routeSignal(
+      { event: 'chatPending', ...chatToolRef(input), text: reason, lang, source: 'copilot', ancestors: cachedChain(input.session_id ?? '') },
+      { cwdFallback: true }, undefined, log,
+    )
+      .then((r) => r.ok)
+      .catch((err: Error) => { log(`signal chatPending lỗi: ${err.message}`); return false; });
     if (sent) {
       log(`notify: Chat có thể hỏi duyệt ${briefTool(input.tool_name, input.tool_input)}, extension chờ bằng chứng tool chạy`);
       return;
@@ -1105,7 +1163,7 @@ async function modePlay(): Promise<void> {
   const savedAncestors = arg('ancestors', '').split(',').map(Number).filter((pid) => Number.isSafeInteger(pid) && pid > 0);
   const ancestors = savedAncestors.length
     ? Promise.resolve(savedAncestors)
-    : listenCwd ? claudeAncestors(Number(arg('claude-pid', '0')), session === '-' ? '' : session) : Promise.resolve([]);
+    : listenCwd ? agentChain(session === '-' ? '' : session) : Promise.resolve([]);
   await waitTurn(ticket);
   // --voice ở đây đã được spawnPlay chọn theo ngôn ngữ.
   if (!arg('kind', '') || speechEnabled(kind)) await playText(text, ticket, arg('voice', DEFAULT_VOICE));
@@ -1127,8 +1185,10 @@ async function modePlay(): Promise<void> {
       await usage;
       return;
     }
-    await signalWindow(
-      { event: 'listen', session: session === '-' ? '' : session, cwd: listenCwd, source: sourceArg(), ancestors: await ancestors },
+    const chain = await ancestors;
+    await routeSignal(
+      { event: 'listen', session: session === '-' ? '' : session, cwd: listenCwd, source: sourceArg(), ancestors: chain },
+      { cwdFallback: chain.length === 0 },
       undefined,
       log,
     );

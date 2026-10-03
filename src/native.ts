@@ -209,8 +209,9 @@ public static class NoIdleNative {
 
 const HASH = crypto.createHash('sha1').update(NATIVE_SOURCE).digest('hex').slice(0, 10);
 
+/** Thư mục chứa DLL đã biên dịch. NOIDLE_NATIVE_DIR để test (TEMP riêng mỗi file test) dùng chung một DLL, khỏi biên dịch lại. */
 export function nativeDir(): string {
-  return path.join(os.tmpdir(), 'noidle-tts', 'native');
+  return process.env.NOIDLE_NATIVE_DIR || path.join(os.tmpdir(), 'noidle-tts', 'native');
 }
 
 export function nativeDllPath(dir = nativeDir()): string {

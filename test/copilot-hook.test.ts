@@ -102,12 +102,10 @@ beforeAll(async () => {
     ? `\\\\.\\pipe\\noidle-cli-${process.pid}-${Date.now()}`
     : path.join(work, 'cli.sock');
   server = startServer(pipe, (signal) => {
+    // Như extension thật: hook là con của tiến trình test, nên pid test nằm trong chuỗi tổ tiên → cửa sổ này chứa agent.
+    if (signal.probe) return signal.ancestors?.includes(process.pid) ? 'owned' : 'no';
     signals.push(signal);
-    if (signal.event === 'attention') {
-      onAttention?.();
-      // Như extension thật: hook là con của tiến trình test, nên pid test nằm trong chuỗi tổ tiên → cửa sổ này chứa agent.
-      if (signal.ancestors?.includes(process.pid)) return 'owned';
-    }
+    if (signal.event === 'attention') onAttention?.();
     if (signal.event === 'ask') return typeof heard === 'string' ? heard : heard.shift() ?? '';
   });
   await new Promise<void>((resolve) => server.once('listening', resolve));

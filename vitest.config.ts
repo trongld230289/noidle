@@ -1,3 +1,11 @@
 import { defineConfig } from 'vitest/config';
+import * as os from 'os';
+import * as path from 'path';
 // VI_VOICE_HOST_FLASH=0: test chạy hook như tiến trình con dưới terminal thật; hook không được nháy terminal đó.
-export default defineConfig({ test: { include: ['test/**/*.test.ts'], env: { VI_VOICE_HOST_FLASH: '0' } } });
+// NOIDLE_NATIVE_DIR: mỗi file test đổi TEMP riêng, nên trỏ DLL native về một chỗ chung để chỉ biên dịch C# một lần.
+export default defineConfig({
+  test: {
+    include: ['test/**/*.test.ts'],
+    env: { VI_VOICE_HOST_FLASH: '0', NOIDLE_NATIVE_DIR: path.join(os.tmpdir(), 'noidle-tts', 'native') },
+  },
+});

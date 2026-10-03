@@ -105,6 +105,22 @@ beforeAll(async () => {
 
 afterAll(() => server.close());
 
+/** Chạy hook qua một shell trung gian như Claude Code thật (bash -c / cmd /c): ppid của hook là shell tạm, không phải tiến trình test. */
+function runWrapped(args: string[], stdin: string): Promise<number | null> {
+  const cmd = [process.execPath, bundle, ...args, '--player', path.join(work, 'no-such-player.exe')].map((a) => `"${a}"`).join(' ');
+  const [sh, shArgs] = process.platform === 'win32' ? ['cmd.exe', ['/d', '/s', '/c', `"${cmd}"`]] : ['sh', ['-c', cmd]];
+  return new Promise((resolve, reject) => {
+    const child = spawn(sh, shArgs, {
+      env: { ...process.env, TEMP: tmp, TMP: tmp, TMPDIR: tmp },
+      stdio: ['pipe', 'ignore', 'ignore'],
+      windowsVerbatimArguments: process.platform === 'win32',
+    });
+    child.on('error', reject);
+    child.on('exit', (code) => resolve(code));
+    child.stdin.end(stdin);
+  });
+}
+
 describe('listen signal carries the Claude process ancestry', () => {
   it('speak with nothing to read sends listen with ancestors containing the parent of the hook', async () => {
     const transcript = path.join(work, 'empty.jsonl');
@@ -116,19 +132,25 @@ describe('listen signal carries the Claude process ancestry', () => {
     expect(listen?.ancestors).toContain(process.pid);
   }, 20_000);
 
-  it('reuses the chain saved for the session on the next turn instead of querying the process table again', async () => {
+  it('reuses the chain saved for the session on the next turn, even though each hook runs under a fresh wrapper shell', async () => {
+    // 3/10/2026: Claude Code chạy hook qua bash -c → bash → node, ppid của hook là shell tạm nên cache khoá theo ppid
+    // không bao giờ trúng (0/827 lần trong log thật). Neo phải là tiến trình agent (ở đây: tiến trình test).
     const logFile = path.join(tmp, 'noidle-tts', 'hook.log');
     const transcript = path.join(work, 'empty.jsonl');
+    fs.writeFileSync(transcript, JSON.stringify({ type: 'assistant', message: { content: '' } }));
+    got.length = 0;
+    expect(await runWrapped(['speak', '--config', cfg], JSON.stringify({ session_id: 'term2', cwd: work, transcript_path: transcript }))).toBe(0);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(got.find((s) => s.event === 'listen')?.ancestors?.[0]).toBe(process.pid);
     // Một prompt xen giữa như thật: dấu phiên được ghi lại nhưng chuỗi pid đã lưu phải còn.
-    await run(['prompt', '--config', cfg], JSON.stringify({ session_id: 'term1', cwd: work, prompt: 'làm tiếp đi' }));
+    await run(['prompt', '--config', cfg], JSON.stringify({ session_id: 'term2', cwd: work, prompt: 'làm tiếp đi' }));
     got.length = 0;
     const before = fs.readFileSync(logFile, 'utf8').length;
-    expect(await run(['speak', '--config', cfg], JSON.stringify({ session_id: 'term1', cwd: work, transcript_path: transcript }))).toBe(0);
+    expect(await runWrapped(['speak', '--config', cfg], JSON.stringify({ session_id: 'term2', cwd: work, transcript_path: transcript }))).toBe(0);
     await new Promise((r) => setTimeout(r, 100));
-    const added = fs.readFileSync(logFile, 'utf8').slice(before);
-    expect(added).toContain('proctree: dùng lại');
-    expect(got.find((s) => s.event === 'listen')?.ancestors).toContain(process.pid);
-  }, 20_000);
+    expect(fs.readFileSync(logFile, 'utf8').slice(before)).toContain('proctree: dùng lại');
+    expect(got.find((s) => s.event === 'listen')?.ancestors?.[0]).toBe(process.pid);
+  }, 40_000);
 });
 
 /**
