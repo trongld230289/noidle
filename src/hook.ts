@@ -44,6 +44,8 @@ import { chatWouldAutoApprove, type ChatAutoApprove } from './chatAutoApprove';
 let inputSource: SignalSource | undefined;
 let permissionPlayback: { transcript: string; requestId: string } | undefined;
 let permissionReadWarning = false;
+const PERMISSION_REMINDER_GRACE_MS = 1500;
+const PERMISSION_POLL_MS = 200;
 
 function trackPermissionNotification(input: AgentHookInput): void {
   if (sourceArg() !== 'copilot-cli' || input.hook_event_name !== 'Notification' ||
@@ -854,6 +856,14 @@ async function modeNotify(): Promise<void> {
     await voiceChoose(text, input, cfg, lang);
     return;
   }
+  if (permissionPlayback && speechEnabled('notify')) {
+    const deadline = Date.now() + PERMISSION_REMINDER_GRACE_MS;
+    log(`notify: waiting ${PERMISSION_REMINDER_GRACE_MS}ms before permission reminder`);
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, Math.min(PERMISSION_POLL_MS, deadline - Date.now())));
+      if (permissionCompleted()) return;
+    }
+  }
   spawnPlay(text, 'notify', input.session_id ?? '', lang);
 }
 
@@ -1296,38 +1306,47 @@ async function playText(text: string, ticket: string, voice: string): Promise<vo
       resolve();
     });
   });
+  const cancelCompletedPermission = () => {
+    if (!stopped && permissionCompleted()) {
+      cancelled = true;
+      stopped = true;
+      player.kill();
+    }
+  };
+  // ffplay can still be speaking buffered audio after the last chunk was written.
+  const permissionMonitor = permissionPlayback ? setInterval(cancelCompletedPermission, PERMISSION_POLL_MS) : undefined;
 
   // Đường ống: luôn có SYNTH_AHEAD khối đang tổng hợp (khối đang chờ phát và các khối sau), đưa vào ffplay theo
   // thứ tự. Edge có lúc mất 5-8 giây một khối trong khi khối đầu chỉ phát ~5 giây, tổng hợp một khối phía trước
   // là không đủ, loa im giữa chừng. Mỗi khối tối đa hai kết nối song song khi Edge chậm (xem synth).
-  const sentences = splitSentences(text);
-  await prefetchInOrder(sentences, {
-    ahead: SYNTH_AHEAD,
-    produce: (s) => synth(voice, rate, s),
-    stopped: () => stopped,
-    consume: async (audio, i, next) => {
-      if (i === 0) {
-        log(`câu đầu sẵn sàng sau ${Date.now() - t0}ms (${sentences.length} câu)`);
-        // Khối đầu chỉ vài giây; nếu khối hai chưa xong thì loa sẽ im giữa câu. Chờ khối hai một chút
-        // để im lặng dồn về đầu (nghe như đang nghĩ) thay vì kẹt giữa chừng. Không chờ quá FIRST_HOLD_MS.
-        if (next) {
-          const held = Date.now();
-          await Promise.race([next.catch(() => undefined), new Promise((r) => setTimeout(r, FIRST_HOLD_MS))]);
-          const ms = Date.now() - held;
-          if (ms > 100) log(`giữ câu đầu ${ms}ms chờ câu hai`);
+  try {
+    const sentences = splitSentences(text);
+    await prefetchInOrder(sentences, {
+      ahead: SYNTH_AHEAD,
+      produce: (s) => synth(voice, rate, s),
+      stopped: () => stopped,
+      consume: async (audio, i, next) => {
+        if (i === 0) {
+          log(`câu đầu sẵn sàng sau ${Date.now() - t0}ms (${sentences.length} câu)`);
+          // Khối đầu chỉ vài giây; nếu khối hai chưa xong thì loa sẽ im giữa câu. Chờ khối hai một chút
+          // để im lặng dồn về đầu (nghe như đang nghĩ) thay vì kẹt giữa chừng. Không chờ quá FIRST_HOLD_MS.
+          if (next) {
+            const held = Date.now();
+            await Promise.race([next.catch(() => undefined), new Promise((r) => setTimeout(r, FIRST_HOLD_MS))]);
+            const ms = Date.now() - held;
+            if (ms > 100) log(`giữ câu đầu ${ms}ms chờ câu hai`);
+          }
         }
-      }
-      if (!stopped && permissionCompleted()) {
-        cancelled = true;
-        stopped = true;
-        player.kill();
-      }
-      if (!stopped) player.stdin.write(audio);
-    },
-    onError: (err, i) => log(`bỏ câu ${i + 1}: ${err.message}`),
-  });
-  player.stdin.end();
-  await finished;
+        cancelCompletedPermission();
+        if (!stopped) player.stdin.write(audio);
+      },
+      onError: (err, i) => log(`bỏ câu ${i + 1}: ${err.message}`),
+    });
+    player.stdin.end();
+    await finished;
+  } finally {
+    clearInterval(permissionMonitor);
+  }
   if (!failed && !cancelled) log(`phát xong sau ${Date.now() - t0}ms`);
 }
 
