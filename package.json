@@ -133,6 +133,11 @@
             "scope": "application",
             "markdownDescription": "Có đọc \"Workspace X:\" ở đầu câu trả lời (kiểu `recap`) để biết cửa sổ nào vừa xong không. `auto`: chỉ khi đang mở hơn một cửa sổ VS Code.",
             "order": 4
+          },
+          "noIdle.explainOnSelect": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Shift + quét chữ trong terminal là giải nghĩa luôn (Haiku qua Claude Code CLI), không cần bấm Ctrl+Alt+D. Bật `terminal.integrated.copyOnSelection` (quét là copy) và canh clipboard khi cửa sổ đang focus; chỉ tự giải nghĩa chữ ngắn một dòng (tối đa 6 từ)."
           }
         }
       },

@@ -75,7 +75,7 @@ Khi approve hoặc chọn đáp án, im lặng hoặc nói không rõ thì chuy�
 |---|---|
 | **F6** | Bắt đầu / dừng nghe. Mic đang tự mở thì F6 tắt mic. |
 | **F7** | Bỏ qua câu đang đọc, câu kế tiếp phát tiếp. |
-| **Ctrl+Alt+D** | Quét chữ trong terminal hay editor rồi bấm: Haiku (qua Claude Code CLI) giải nghĩa bằng tiếng Việt. Cũng có trong menu chuột phải. |
+| **Ctrl+Alt+D** | Quét chữ trong terminal hay editor rồi bấm: Haiku (qua Claude Code CLI) giải nghĩa bằng tiếng Việt. Cũng có trong menu chuột phải. Bật `noIdle.explainOnSelect` thì Shift + quét chữ ngắn trong terminal là giải nghĩa luôn. |
 
 ## An toàn khi approve bằng giọng
 

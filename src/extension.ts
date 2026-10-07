@@ -22,7 +22,7 @@ import { installPlan, installLabel, manualHint, afterInstallNote, type Tool } fr
 import { findExecutable } from './findTool';
 import { needsTranslation, recapPromptsFor, translateRecap, type RecapTranslator } from './recapPrompt';
 import { claudeCliTranslator } from './translate';
-import { explainSelection } from './explain';
+import { explainSelection, autoExplainText } from './explain';
 import { chatAutoApproveFrom } from './chatAutoApprove';
 import { ChatPendingTracker, isAgentTerminal, type PendingChatTool } from './chatPending';
 import { createHash } from 'crypto';
@@ -696,11 +696,18 @@ export function activate(ctx: vscode.ExtensionContext): void {
     } else if (source === 'clipboard') {
       text = await vscode.env.clipboard.readText();
     } else {
-      const saved = await vscode.env.clipboard.readText();
-      await vscode.env.clipboard.writeText('');
-      await vscode.commands.executeCommand('workbench.action.terminal.copySelection');
-      text = await vscode.env.clipboard.readText();
-      await vscode.env.clipboard.writeText(saved);
+      // Vòng canh clipboard nghỉ trong lúc mượn clipboard, không thì nó bắt luôn chữ tạm này.
+      clipboardBorrowed = true;
+      try {
+        const saved = await vscode.env.clipboard.readText();
+        await vscode.env.clipboard.writeText('');
+        await vscode.commands.executeCommand('workbench.action.terminal.copySelection');
+        text = await vscode.env.clipboard.readText();
+        await vscode.env.clipboard.writeText(saved);
+        lastClipboard = saved;
+      } finally {
+        clipboardBorrowed = false;
+      }
     }
     if (!text.trim()) {
       vscode.window.setStatusBarMessage(source === 'clipboard'
@@ -708,6 +715,22 @@ export function activate(ctx: vscode.ExtensionContext): void {
         : 'NoIdle: chưa quét chữ nào để giải nghĩa', 3000);
       return;
     }
+    await explainAndShow(text);
+  }
+
+  /** Giải nghĩa rồi hiện thông báo góc màn hình (nút Copy). Dùng chung cho Ctrl+Alt+D và Shift + quét. */
+  const explaining = new Set<string>();
+  async function explainAndShow(text: string): Promise<void> {
+    if (explaining.has(text)) return;
+    explaining.add(text);
+    try {
+      await showExplanation(text);
+    } finally {
+      explaining.delete(text);
+    }
+  }
+
+  async function showExplanation(text: string): Promise<void> {
     const short = text.trim().replace(/\s+/g, ' ');
     const label = short.length > 40 ? `${short.slice(0, 40)}…` : short;
     const r = await vscode.window.withProgress(
@@ -722,8 +745,63 @@ export function activate(ctx: vscode.ExtensionContext): void {
       return;
     }
     const pick = await vscode.window.showInformationMessage(`${label}: ${r.text}`, 'Copy');
-    if (pick === 'Copy') await vscode.env.clipboard.writeText(r.text);
+    if (pick === 'Copy') {
+      ownClipboardWrites.add(r.text);
+      await vscode.env.clipboard.writeText(r.text);
+    }
   }
+
+  /**
+   * noIdle.explainOnSelect: Shift + quét trong terminal là giải nghĩa luôn. VS Code không báo khi quét chữ trong terminal,
+   * nên bật terminal.integrated.copyOnSelection (quét là copy) rồi canh clipboard, chỉ khi cửa sổ này đang focus.
+   */
+  let lastClipboard = '';
+  let clipboardBorrowed = false;
+  const ownClipboardWrites = new Set<string>();
+  let clipboardTimer: NodeJS.Timeout | undefined;
+  async function pollClipboard(): Promise<void> {
+    if (clipboardBorrowed || !vscode.window.state.focused) return;
+    const clip = await Promise.resolve(vscode.env.clipboard.readText()).catch(() => lastClipboard);
+    if (clipboardBorrowed) return;
+    const editor = vscode.window.activeTextEditor;
+    const text = autoExplainText(clip, {
+      last: lastClipboard,
+      editorSelection: editor && !editor.selection.isEmpty ? editor.document.getText(editor.selection) : '',
+      ownWrites: ownClipboardWrites,
+    });
+    lastClipboard = clip;
+    ownClipboardWrites.clear();
+    if (text) await explainAndShow(text);
+  }
+  async function applyExplainOnSelect(): Promise<void> {
+    const on = vscode.workspace.getConfiguration('noIdle').get<boolean>('explainOnSelect', false);
+    const term = vscode.workspace.getConfiguration('terminal.integrated');
+    if (on && !clipboardTimer) {
+      if (!term.get<boolean>('copyOnSelection', false)) {
+        await term.update('copyOnSelection', true, vscode.ConfigurationTarget.Global);
+        await ctx.globalState.update('noIdle.setCopyOnSelection', true);
+        log('explainOnSelect: bật terminal.integrated.copyOnSelection');
+      }
+      lastClipboard = await Promise.resolve(vscode.env.clipboard.readText()).catch(() => '');
+      clipboardTimer = setInterval(() => void pollClipboard().catch((err) => log(`canh clipboard lỗi: ${(err as Error).message}`)), 500);
+    } else if (!on && clipboardTimer) {
+      clearInterval(clipboardTimer);
+      clipboardTimer = undefined;
+    }
+    // Tắt thì trả copyOnSelection như cũ, chỉ khi chính NoIdle đã bật nó.
+    if (!on && ctx.globalState.get<boolean>('noIdle.setCopyOnSelection')) {
+      await term.update('copyOnSelection', undefined, vscode.ConfigurationTarget.Global);
+      await ctx.globalState.update('noIdle.setCopyOnSelection', undefined);
+      log('explainOnSelect: trả terminal.integrated.copyOnSelection về mặc định');
+    }
+  }
+  void applyExplainOnSelect().catch((err) => log(`explainOnSelect lỗi: ${(err as Error).message}`));
+  ctx.subscriptions.push(
+    { dispose: () => clipboardTimer && clearInterval(clipboardTimer) },
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('noIdle.explainOnSelect')) void applyExplainOnSelect().catch((err) => log(`explainOnSelect lỗi: ${(err as Error).message}`));
+    }),
+  );
 
   /** Lỗi sửa câu: ghi log mỗi lần, và cảnh báo một lần khi model không tồn tại (Groq gỡ model mà không ai biết, chữ thô cứ thế hiện ra). */
   let warnedRefineModel = false;

@@ -36,3 +36,30 @@ export async function explainSelection(selection: string, deps: CliDeps = {}): P
     return { ok: false, reason: (err as Error).message };
   }
 }
+
+/**
+ * Shift + quét trong terminal (noIdle.explainOnSelect bật copyOnSelection): extension canh clipboard, đổi thì tự giải
+ * nghĩa. Không biết chữ được copy từ đâu, nên chỉ nhận chữ ngắn một dòng (tra từ / cụm từ) để copy thường ít gọi nhầm;
+ * đoạn dài vẫn dùng Ctrl+Alt+D.
+ */
+export const AUTO_EXPLAIN_MAX_CHARS = 80;
+export const AUTO_EXPLAIN_MAX_WORDS = 6;
+
+export interface AutoExplainState {
+  /** Clipboard lần đọc trước. */
+  last: string;
+  /** Vùng chọn của editor đang mở: trùng thì là Ctrl+C trong editor, không phải quét terminal. */
+  editorSelection: string;
+  /** Chữ NoIdle tự ghi vào clipboard (nút Copy, trả clipboard sau Ctrl+Alt+D). */
+  ownWrites: Set<string>;
+}
+
+/** Chữ cần tự giải nghĩa, hoặc undefined nếu bỏ qua. */
+export function autoExplainText(clip: string, s: AutoExplainState): string | undefined {
+  if (clip === s.last || s.ownWrites.has(clip)) return undefined;
+  const text = clip.trim();
+  if (!text || /[\r\n]/.test(text) || text.length > AUTO_EXPLAIN_MAX_CHARS) return undefined;
+  if (text.split(/\s+/).length > AUTO_EXPLAIN_MAX_WORDS) return undefined;
+  if (s.editorSelection.trim() === text) return undefined;
+  return text;
+}

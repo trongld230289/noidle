@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { explainPrompt, explainSelection, EXPLAIN_CLI_ARGS, EXPLAIN_MAX_CHARS } from '../src/explain';
+import { explainPrompt, explainSelection, autoExplainText, EXPLAIN_CLI_ARGS, EXPLAIN_MAX_CHARS, AUTO_EXPLAIN_MAX_CHARS } from '../src/explain';
 
 /** Quét chữ rồi bấm phím tắt: Haiku qua Claude Code CLI có sẵn giải nghĩa đoạn đó. */
 describe('explainSelection', () => {
@@ -35,5 +35,28 @@ describe('explainSelection', () => {
     expect(prompt).toContain('lập trình');
     expect(prompt).toContain('tiếng Anh');
     expect(prompt).toContain('canary');
+  });
+});
+
+/** Shift + quét trong terminal (copyOnSelection bật): clipboard đổi thì tự giải nghĩa, chỉ với chữ ngắn. */
+describe('autoExplainText', () => {
+  const base = { last: 'old', editorSelection: '', ownWrites: new Set<string>() };
+
+  it('explains a short new clipboard text', () => {
+    expect(autoExplainText('  canary ', base)).toBe('canary');
+    expect(autoExplainText('stack canary value', base)).toBe('stack canary value');
+  });
+
+  it('ignores unchanged, empty, long or multi-line text', () => {
+    expect(autoExplainText('old', base)).toBeUndefined();
+    expect(autoExplainText('   ', base)).toBeUndefined();
+    expect(autoExplainText('one two three four five six seven', base)).toBeUndefined();
+    expect(autoExplainText('x'.repeat(AUTO_EXPLAIN_MAX_CHARS + 1), base)).toBeUndefined();
+    expect(autoExplainText('line one\nline two', base)).toBeUndefined();
+  });
+
+  it('ignores a copy from the editor selection and text NoIdle wrote itself (Copy button, restored clipboard)', () => {
+    expect(autoExplainText('canary', { ...base, editorSelection: 'canary' })).toBeUndefined();
+    expect(autoExplainText('canary', { ...base, ownWrites: new Set(['canary']) })).toBeUndefined();
   });
 });
