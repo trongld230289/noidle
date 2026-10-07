@@ -14,6 +14,8 @@ const logFile = path.join(tmp, 'noidle-tts', 'hook.log');
 const audioTexts = path.join(work, 'audio-texts.jsonl');
 const playedAudio = path.join(work, 'played-audio.txt');
 const synthesisGate = path.join(work, 'synthesis.gate');
+const playbackGate = path.join(work, 'playback.gate');
+const playerEvents = path.join(work, 'player-events.jsonl');
 const signals: Signal[] = [];
 let heard: string | string[] = '';
 let onAttention: (() => void) | undefined;
@@ -86,9 +88,17 @@ beforeAll(async () => {
               ...childProcess,
               spawn(command, args, options) {
                 if (command === process.execPath && args[0] === '-nodisp') {
-                  return childProcess.spawn(command, ['-e', ${JSON.stringify(`
+                  const player = childProcess.spawn(command, ['-e', ${JSON.stringify(`
                     process.stdin.on('data', chunk => require('fs').appendFileSync(${JSON.stringify(playedAudio)}, chunk));
+                    if (require('fs').existsSync(${JSON.stringify(playbackGate)})) {
+                      const timer = setInterval(() => {
+                        if (!require('fs').existsSync(${JSON.stringify(playbackGate)})) clearInterval(timer);
+                      }, 20);
+                    }
                   `)}], options);
+                  player.once('close', () => require('fs').appendFileSync(
+                    ${JSON.stringify(playerEvents)}, JSON.stringify({ pid: player.pid, event: 'close', at: Date.now() }) + '\\n'));
+                  return player;
                 }
                 return childProcess.spawn(command, args, options);
               },
@@ -120,6 +130,7 @@ beforeEach(() => {
   onAttention = undefined;
   fs.writeFileSync(audioTexts, '');
   fs.writeFileSync(playedAudio, '');
+  fs.writeFileSync(playerEvents, '');
   configure();
 });
 
@@ -358,8 +369,8 @@ describe('Copilot CLI voice permissions', () => {
     fs.writeFileSync(transcriptPath, events.map((e) => JSON.stringify(e)).join('\n') + '\n');
     return {
       input,
-      complete: () => fs.appendFileSync(transcriptPath, JSON.stringify({
-        type: 'permission.completed', data: { requestId: session, result: { kind: 'approved' } },
+      complete: (kind: 'approved' | 'denied' = 'approved') => fs.appendFileSync(transcriptPath, JSON.stringify({
+        type: 'permission.completed', data: { requestId: session, result: { kind } },
       }) + '\n'),
     };
   }
@@ -427,6 +438,78 @@ describe('Copilot CLI voice permissions', () => {
     await playbackFinished();
     expect(signals.some((s) => s.event === 'attention' && s.reason === 'approve')).toBe(true);
     expect(fs.readFileSync(playedAudio, 'utf8')).not.toBe('');
+  });
+
+  it('waits at least 1500ms after attention before queuing a pending permission reminder', async () => {
+    configure({ handsFree: false });
+    const fixture = permissionFixture('cli-permission-grace-pending', true);
+    let attentionAt = 0;
+    onAttention = () => { attentionAt = Date.now(); };
+    const before = log().length;
+    await run('notify', fixture.input, ['--event', 'Notification']);
+    const queued = log().slice(before).split('\n').find((line) => line.includes('notify → play pid'));
+    expect(queued).toBeDefined();
+    expect(attentionAt).toBeGreaterThan(0);
+    expect(Date.parse(queued!.slice(0, 24)) - attentionAt).toBeGreaterThanOrEqual(1500);
+    await vi.waitFor(() => expect(fs.readFileSync(playedAudio, 'utf8')).not.toBe(''));
+    await playbackFinished();
+  });
+
+  it.each(['approved', 'denied'] as const)('does not queue speech when manually %s during the grace period', async (kind) => {
+    configure({ handsFree: false });
+    const fixture = permissionFixture(`cli-permission-grace-${kind}`, true);
+    let completion: NodeJS.Timeout | undefined;
+    onAttention = () => { completion = setTimeout(() => fixture.complete(kind), 300); };
+    const before = log().length;
+    try {
+      await run('notify', fixture.input, ['--event', 'Notification']);
+      await playbackFinished();
+      expect(log().slice(before)).not.toContain('notify → play pid');
+      expect(fs.readFileSync(playedAudio, 'utf8')).toBe('');
+    } finally {
+      clearTimeout(completion);
+    }
+  });
+
+  it.each(['approved', 'denied'] as const)('stops buffered permission audio when manually %s', async (kind) => {
+    configure({ handsFree: false });
+    const fixture = permissionFixture(`cli-permission-playing-${kind}`, true);
+    fs.writeFileSync(playbackGate, '');
+    const before = log().length;
+    try {
+      await run('notify', fixture.input, ['--event', 'Notification']);
+      await vi.waitFor(() => expect(fs.readFileSync(playedAudio, 'utf8')).not.toBe(''));
+      fixture.complete(kind);
+      await vi.waitFor(() => expect(fs.readFileSync(playerEvents, 'utf8')).toContain('"event":"close"'), { timeout: 1000 });
+      expect(log().slice(before)).not.toContain('player exited with code');
+    } finally {
+      fs.rmSync(playbackGate, { force: true });
+      await playbackFinished();
+    }
+  });
+
+  it.each(['question', 'answer'])('does not stop another session playing a %s ahead of a completed permission', async (kind) => {
+    configure({ handsFree: false });
+    fs.writeFileSync(playbackGate, '');
+    try {
+      if (kind === 'question') {
+        await run('notify', cli('other-playing-session', { notificationType: 'elicitation_dialog' }), ['--event', 'Notification']);
+      } else {
+        const transcriptPath = path.join(work, 'other-answer.jsonl');
+        fs.writeFileSync(transcriptPath, JSON.stringify({ type: 'assistant.message', data: { content: '🔊 Finished.' } }));
+        await run('speak', cli('other-playing-session', { transcriptPath }));
+      }
+      await vi.waitFor(() => expect(fs.readFileSync(playedAudio, 'utf8')).not.toBe(''));
+      const fixture = permissionFixture('cli-permission-other-playing', true);
+      await run('notify', fixture.input, ['--event', 'Notification']);
+      fixture.complete();
+      await new Promise((r) => setTimeout(r, 600));
+      expect(fs.readFileSync(playerEvents, 'utf8')).toBe('');
+    } finally {
+      fs.rmSync(playbackGate, { force: true });
+      await playbackFinished();
+    }
+    expect(fs.readFileSync(playedAudio, 'utf8')).toBe('audio');
   });
 
   it('announces only one dialog after six concurrent permission checks', async () => {
