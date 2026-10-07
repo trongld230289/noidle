@@ -669,9 +669,10 @@ async function modeNotify(): Promise<void> {
   if (permissionCompleted()) return;
   const cfg = loadConfig();
   const chat = sourceArg() === 'copilot';
-  if (chat && input.hook_event_name === 'PostToolUse') {
-    // Bằng chứng tool đã chạy: extension bỏ lượt chờ "cần approve" của lệnh này (xem chatPending.ts).
-    if (input.chat_voice_tool === 'approval' && input.tool_name === 'Bash') {
+  if (input.hook_event_name === 'PostToolUse') {
+    // Chat: bằng chứng tool đã chạy, extension bỏ lượt chờ "cần approve" của lệnh này (xem chatPending.ts).
+    // Copilot CLI cũng bắn PostToolUse sau mỗi tool nhưng không dùng cơ chế chatPending, nên chỉ thoát im lặng.
+    if (chat && input.chat_voice_tool === 'approval' && input.tool_name === 'Bash') {
       await signalWindow({ event: 'chatDone', ...chatToolRef(input) }, undefined, log, false)
         .catch((err) => log(`signal chatDone lỗi: ${(err as Error).message}`));
     }
