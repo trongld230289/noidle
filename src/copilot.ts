@@ -29,7 +29,8 @@ export interface AgentHookInput extends HookInput {
 
 const EVENTS = new Map([
   ['sessionStart', 'SessionStart'], ['userPromptSubmitted', 'UserPromptSubmit'], ['agentStop', 'Stop'],
-  ['permissionRequest', 'PermissionRequest'], ['preToolUse', 'PreToolUse'], ['notification', 'Notification'],
+  ['permissionRequest', 'PermissionRequest'], ['preToolUse', 'PreToolUse'], ['postToolUse', 'PostToolUse'],
+  ['notification', 'Notification'],
 ]);
 const TOOLS = new Map([
   ['powershell', 'Bash'], ['bash', 'Bash'], ['view', 'Read'], ['edit', 'Edit'],
@@ -48,24 +49,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return prototype === Object.prototype || prototype === null;
 }
 
-/** CLI records permission.requested immediately before its notification hook; the hook itself has no request ID. */
+/** Terminal CLI records the request before its notification; embedded CLI can record it immediately after. */
 export function copilotPermissionState(
   jsonl: string,
   notification: { timestamp: number | string; message: string } | string,
 ): { requestId: string; completed: boolean } | undefined {
   let requestId = typeof notification === 'string' ? notification : undefined;
-  let previousRequest: string | undefined;
+  let previousRequest: { requestId: string; eventId: unknown } | undefined;
+  let previousNotification: { eventId: unknown } | undefined;
+  const linked = (parentId: unknown, eventId: unknown) =>
+    typeof parentId !== 'string' || typeof eventId !== 'string' || parentId === eventId;
   const requested = new Set<string>();
   const completed = new Set<string>();
   for (const line of jsonl.split(/\r?\n/)) {
     if (!line.trim()) continue;
+    const precedingNotification = previousNotification;
+    previousNotification = undefined;
     let event: unknown;
     try { event = JSON.parse(line); } catch { previousRequest = undefined; continue; }
     if (!isRecord(event) || !isRecord(event.data)) { previousRequest = undefined; continue; }
     const data = event.data;
     if (event.type === 'permission.requested' && nonempty(data.requestId)) {
       requested.add(data.requestId);
-      previousRequest = data.requestId;
+      if (precedingNotification && linked(event.parentId, precedingNotification.eventId)) requestId = data.requestId;
+      previousRequest = { requestId: data.requestId, eventId: event.id };
       continue;
     }
     if (event.type === 'permission.completed' && nonempty(data.requestId)) completed.add(data.requestId);
@@ -76,7 +83,8 @@ export function copilotPermissionState(
       }
       if (isRecord(input) && input.notificationType === 'permission_prompt' &&
           input.timestamp === notification.timestamp && input.message === notification.message) {
-        requestId = previousRequest;
+        if (previousRequest && linked(event.parentId, previousRequest.eventId)) requestId = previousRequest.requestId;
+        previousNotification = { eventId: event.id };
       }
     }
     previousRequest = undefined;

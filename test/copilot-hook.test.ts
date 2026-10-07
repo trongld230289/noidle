@@ -347,13 +347,14 @@ describe('Copilot CLI voice permissions', () => {
     expect(log().slice(before).match(/notify → play pid/g)).toHaveLength(1);
   });
 
-  function permissionFixture(session: string) {
+  function permissionFixture(session: string, embedded = false) {
     const transcriptPath = path.join(work, `${session}.jsonl`);
     const input = cli(session, { notificationType: 'permission_prompt', message: 'Fetch URL', transcriptPath });
     const events = [
-      { type: 'permission.requested', data: { requestId: session } },
-      { type: 'hook.start', data: { hookType: 'notification', input } },
+      { id: 'permission-1', ...(embedded ? { parentId: 'notification-1' } : {}), type: 'permission.requested', data: { requestId: session } },
+      { id: 'notification-1', ...(!embedded ? { parentId: 'permission-1' } : {}), type: 'hook.start', data: { hookType: 'notification', input } },
     ];
+    if (embedded) events.reverse();
     fs.writeFileSync(transcriptPath, events.map((e) => JSON.stringify(e)).join('\n') + '\n');
     return {
       input,
@@ -363,9 +364,9 @@ describe('Copilot CLI voice permissions', () => {
     };
   }
 
-  it('does not announce or highlight a permission that completed before notification handling', async () => {
+  it.each([false, true])('does not announce or highlight a completed permission (embedded: %s)', async (embedded) => {
     configure({ handsFree: false });
-    const fixture = permissionFixture('cli-permission-completed');
+    const fixture = permissionFixture('cli-permission-completed', embedded);
     fixture.complete();
     const before = log().length;
     await run('notify', fixture.input, ['--event', 'Notification']);
@@ -373,9 +374,9 @@ describe('Copilot CLI voice permissions', () => {
     expect(log().slice(before)).not.toContain('play pid');
   });
 
-  it('drops a permission announcement that completes while waiting in the audio queue', async () => {
+  it.each([false, true])('drops a permission completed while waiting in the audio queue (embedded: %s)', async (embedded) => {
     configure({ handsFree: false });
-    const fixture = permissionFixture('cli-permission-queued');
+    const fixture = permissionFixture('cli-permission-queued', embedded);
     const held = holdPlayback();
     try {
       await run('notify', fixture.input, ['--event', 'Notification']);
@@ -389,9 +390,9 @@ describe('Copilot CLI voice permissions', () => {
     expect(fs.readFileSync(playedAudio, 'utf8')).toBe('');
   });
 
-  it('does not queue speech if the permission completes during visual attention', async () => {
+  it.each([false, true])('does not queue speech if permission completes during visual attention (embedded: %s)', async (embedded) => {
     configure({ handsFree: false });
-    const fixture = permissionFixture('cli-permission-attention');
+    const fixture = permissionFixture('cli-permission-attention', embedded);
     onAttention = fixture.complete;
     const before = log().length;
     await run('notify', fixture.input, ['--event', 'Notification']);
@@ -399,9 +400,10 @@ describe('Copilot CLI voice permissions', () => {
     expect(log().slice(before)).not.toContain('play pid');
   });
 
-  it('drops synthesized audio if permission completes before the first sound', async () => {
-    configure({ handsFree: false, voice: 'en-US-JennyNeural' });
-    const fixture = permissionFixture('cli-permission-synthesis');
+  it.each([false, true])('drops synthesized audio if permission completes before the first sound (embedded: %s)', async (embedded) => {
+    // Each case must synthesize instead of reusing the other case's cached audio.
+    configure({ handsFree: false, voice: embedded ? 'en-US-AriaNeural' : 'en-US-JennyNeural' });
+    const fixture = permissionFixture('cli-permission-synthesis', embedded);
     fs.writeFileSync(synthesisGate, '');
     const before = log().length;
     try {
@@ -417,9 +419,9 @@ describe('Copilot CLI voice permissions', () => {
     expect(log().slice(before)).not.toContain('player exited with code');
   });
 
-  it('still speaks a tracked permission while it remains pending', async () => {
+  it.each([false, true])('still speaks a tracked permission while pending (embedded: %s)', async (embedded) => {
     configure({ handsFree: false });
-    const fixture = permissionFixture('cli-permission-pending');
+    const fixture = permissionFixture('cli-permission-pending', embedded);
     await run('notify', fixture.input, ['--event', 'Notification']);
     await vi.waitFor(() => expect(fs.readFileSync(playedAudio, 'utf8')).not.toBe(''), { timeout: 10_000 });
     await playbackFinished();
@@ -586,6 +588,13 @@ describe('Copilot Chat voice controls', () => {
     const input = { ...chat('run_in_terminal', { command: 'git push origin main' }), hook_event_name: 'PostToolUse', tool_use_id: 'call-x__vscode-1', tool_response: { output: 'ok' } };
     expect((await run('notify', input, ['--event', 'PostToolUse'])).stdout).toBe('');
     expect(signals).toEqual([expect.objectContaining({ event: 'chatDone', session: 'chat-voice', toolUseId: 'call-x__vscode-1', command: 'git push origin main' })]);
+  });
+
+  it('ignores a Copilot CLI PostToolUse without erroring or announcing', async () => {
+    const input = cli('cli-posttool', { toolName: 'view', toolArgs: { path: work }, toolResult: { resultType: 'success' } });
+    const result = await run('notify', input, ['--event', 'PostToolUse']);
+    expect(result.stdout).toBe('');
+    expect(signals).toEqual([]);
   });
 
   it.each(['create_file', 'replace_string_in_file'])('allows a known ordinary file operation only after confirmation: %s', async (tool) => {
