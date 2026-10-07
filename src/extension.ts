@@ -22,7 +22,7 @@ import { installPlan, installLabel, manualHint, afterInstallNote, type Tool } fr
 import { findExecutable } from './findTool';
 import { needsTranslation, recapPromptsFor, translateRecap, type RecapTranslator } from './recapPrompt';
 import { claudeCliTranslator } from './translate';
-import { explainSelection, autoExplainText } from './explain';
+import { explainSelection, captureExplainSelection, explainPrompt, type ExplainResult } from './explain';
 import { chatAutoApproveFrom } from './chatAutoApprove';
 import { ChatPendingTracker, isAgentTerminal, type PendingChatTool } from './chatPending';
 import { createHash } from 'crypto';
@@ -680,45 +680,56 @@ export function activate(ctx: vscode.ExtensionContext): void {
     if (!quiet) vscode.window.setStatusBarMessage('NoIdle: đã bỏ qua', 1500);
   }
 
-  /**
-   * Quét chữ rồi bấm phím tắt: Haiku giải nghĩa đoạn đó. Editor thì đọc thẳng vùng chọn; terminal không có API đọc
-   * vùng chọn (chỉ proposed) nên chép qua clipboard rồi trả clipboard như cũ.
-   * Claude Code (TUI) tự bắt chuột: vùng nó bôi không phải vùng chọn của terminal (terminalTextSelected tắt), nhưng nó tự
-   * chép chữ đã quét vào clipboard, nên lúc đó đọc thẳng clipboard (8/10/2026: "The terminal has no selection to copy").
-   */
+  let capturingSelection = false;
   async function explainSelected(arg?: unknown): Promise<void> {
-    // Phím tắt truyền { source } theo focus và vùng chọn; menu chuột phải của editor truyền Uri của file, của terminal không truyền gì.
-    const source = arg instanceof vscode.Uri ? 'editor' : (arg as { source?: string } | undefined)?.source;
-    const editor = vscode.window.activeTextEditor;
+    if (!vscode.workspace.getConfiguration('noIdle').get<boolean>('translate', true)) {
+      vscode.window.setStatusBarMessage('NoIdle: dịch đang tắt. Bật NoIdle: Translate để dùng Alt+D.', 3000);
+      return;
+    }
+    // Alt+D truyền { source: 'clipboard' } (dịch nội dung đã Ctrl+C). Menu chuột phải editor truyền Uri của file, của terminal không truyền gì.
+    const source = arg instanceof vscode.Uri ? 'editor' : arg === undefined ? 'terminal'
+      : typeof arg === 'object' && arg !== null && 'source' in arg ? arg.source : undefined;
+    if (source !== 'editor' && source !== 'terminal' && source !== 'chat' && source !== 'clipboard') {
+      vscode.window.setStatusBarMessage('NoIdle: Ctrl+C để copy chữ rồi bấm Alt+D để dịch.', 3000);
+      return;
+    }
+    if (capturingSelection) return;
+    capturingSelection = true;
     let text = '';
-    if (source === 'editor') {
-      if (editor && !editor.selection.isEmpty) text = editor.document.getText(editor.selection);
-    } else if (source === 'clipboard') {
-      text = await vscode.env.clipboard.readText();
-    } else {
-      // Vòng canh clipboard nghỉ trong lúc mượn clipboard, không thì nó bắt luôn chữ tạm này.
-      clipboardBorrowed = true;
-      try {
-        const saved = await vscode.env.clipboard.readText();
-        await vscode.env.clipboard.writeText('');
-        await vscode.commands.executeCommand('workbench.action.terminal.copySelection');
-        text = await vscode.env.clipboard.readText();
-        await vscode.env.clipboard.writeText(saved);
-        lastClipboard = saved;
-      } finally {
-        clipboardBorrowed = false;
-      }
+    try {
+      text = await captureExplainSelection(source, {
+        editorSelection: () => {
+          const editor = vscode.window.activeTextEditor;
+          if (!editor || editor.selection.isEmpty ||
+            (arg instanceof vscode.Uri && arg.toString() !== editor.document.uri.toString())) return '';
+          return editor.document.getText(editor.selection);
+        },
+        readClipboard: () => vscode.env.clipboard.readText(),
+        writeClipboard: (value) => vscode.env.clipboard.writeText(value),
+        copySelection: (target) => vscode.commands.executeCommand(target === 'terminal'
+          ? 'workbench.action.terminal.copySelection' : 'editor.action.clipboardCopyAction'),
+      });
+    } catch (err) {
+      log(`lấy vùng chọn lỗi (${source}): ${(err as Error).message}`);
+      void vscode.window.showWarningMessage(`NoIdle: không lấy được vùng chọn. ${source === 'terminal'
+        ? 'Bôi chữ rồi chọn Giải nghĩa, hoặc Ctrl+C rồi bấm Alt+D.' : 'Bôi chữ rồi Ctrl+C, sau đó bấm Alt+D.'}`);
+      return;
+    } finally {
+      capturingSelection = false;
     }
     if (!text.trim()) {
-      vscode.window.setStatusBarMessage(source === 'clipboard'
-        ? 'NoIdle: clipboard trống, quét chữ trong Claude Code (nó tự copy) rồi bấm lại'
-        : 'NoIdle: chưa quét chữ nào để giải nghĩa', 3000);
+      const msg = source === 'terminal'
+        ? 'NoIdle: chưa có vùng chọn terminal. Bôi chữ rồi chọn Giải nghĩa, hoặc Ctrl+C rồi bấm Alt+D.'
+        : source === 'editor'
+          ? 'NoIdle: chưa bôi chữ nào để dịch. Bôi chữ rồi bấm Alt+D.'
+          : 'NoIdle: clipboard trống. Bôi chữ rồi Ctrl+C, sau đó bấm Alt+D.';
+      vscode.window.setStatusBarMessage(msg, 4000);
       return;
     }
     await explainAndShow(text);
   }
 
-  /** Giải nghĩa rồi hiện thông báo góc màn hình (nút Copy). Dùng chung cho Ctrl+Alt+D và Shift + quét. */
+  /** Giải nghĩa rồi hiện thông báo góc màn hình (nút Copy). */
   const explaining = new Set<string>();
   async function explainAndShow(text: string): Promise<void> {
     if (explaining.has(text)) return;
@@ -730,78 +741,82 @@ export function activate(ctx: vscode.ExtensionContext): void {
     }
   }
 
+  /**
+   * Dịch nhanh: ưu tiên model Copilot trong tiến trình (vscode.lm) để KHỎI khởi động lại CLI (mỗi lần spawn mất nhiều
+   * giây); không có model thì mới spawn Claude/Copilot CLI. Cache theo nội dung để từ đã dịch trả về tức thì.
+   */
+  const explainCache = new Map<string, string>();
+  function rememberExplain(key: string, value: string): void {
+    explainCache.set(key, value);
+    if (explainCache.size > 300) {
+      const oldest = explainCache.keys().next().value;
+      if (oldest !== undefined) explainCache.delete(oldest);
+    }
+  }
+  async function explainViaLm(prompt: string): Promise<string | undefined> {
+    // Ưu tiên model nhỏ nhanh, ít tốn quota cho việc dịch / giải nghĩa ngắn. Chọn model có tên gợi ý "nhẹ" bất kể hãng:
+    // Claude -> haiku, OpenAI -> mini/nano, Gemini -> flash/lite. Không có cái nào thì mới dùng model Copilot đầu tiên
+    // (tránh rơi vào model lớn như Sonnet / GPT-4o vốn phản hồi chậm hơn).
+    const all = await vscode.lm.selectChatModels({ vendor: 'copilot' });
+    if (!all.length) return undefined;
+    const small = /mini|flash|haiku|lite|nano|small/i;
+    const model = all.find((m) => small.test(m.family) || small.test(m.id) || small.test(m.name)) ?? all[0];
+    if (!model) return undefined;
+    const res = await model.sendRequest([vscode.LanguageModelChatMessage.User(prompt)], {}, new vscode.CancellationTokenSource().token);
+    let out = '';
+    for await (const chunk of res.text) out += chunk;
+    return out.trim() || undefined;
+  }
+  async function explainText(text: string): Promise<ExplainResult> {
+    const key = text.trim();
+    if (!key) return { ok: false, reason: 'empty' };
+    const hit = explainCache.get(key);
+    if (hit) return { ok: true, text: hit };
+    try {
+      const lm = await explainViaLm(explainPrompt(key));
+      if (lm) {
+        rememberExplain(key, lm);
+        return { ok: true, text: lm };
+      }
+    } catch (err) {
+      log(`vscode.lm giải nghĩa lỗi, chuyển sang CLI: ${(err as Error).message}`);
+    }
+    const r = await explainSelection(key);
+    if (r.ok) rememberExplain(key, r.text);
+    return r;
+  }
+
   async function showExplanation(text: string): Promise<void> {
     const short = text.trim().replace(/\s+/g, ' ');
     const label = short.length > 40 ? `${short.slice(0, 40)}…` : short;
     const r = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Window, title: `NoIdle: đang giải nghĩa "${label}"` },
-      () => explainSelection(text),
+      () => explainText(text),
     );
     if (!r.ok) {
       log(`giải nghĩa lỗi: ${r.reason}`);
-      void vscode.window.showWarningMessage(r.reason === 'no-claude'
-        ? 'NoIdle: không tìm thấy Claude Code CLI (claude) để giải nghĩa.'
+      void vscode.window.showWarningMessage(r.reason === 'no-cli'
+        ? 'NoIdle: không dùng được Copilot Chat lẫn Claude/Copilot CLI để giải nghĩa.'
         : `NoIdle: giải nghĩa lỗi: ${r.reason}`);
       return;
     }
     const pick = await vscode.window.showInformationMessage(`${label}: ${r.text}`, 'Copy');
     if (pick === 'Copy') {
-      ownClipboardWrites.add(r.text);
       await vscode.env.clipboard.writeText(r.text);
     }
   }
 
-  /**
-   * noIdle.explainOnSelect: Shift + quét trong terminal là giải nghĩa luôn. VS Code không báo khi quét chữ trong terminal,
-   * nên bật terminal.integrated.copyOnSelection (quét là copy) rồi canh clipboard, chỉ khi cửa sổ này đang focus.
-   */
-  let lastClipboard = '';
-  let clipboardBorrowed = false;
-  const ownClipboardWrites = new Set<string>();
-  let clipboardTimer: NodeJS.Timeout | undefined;
-  async function pollClipboard(): Promise<void> {
-    if (clipboardBorrowed || !vscode.window.state.focused) return;
-    const clip = await Promise.resolve(vscode.env.clipboard.readText()).catch(() => lastClipboard);
-    if (clipboardBorrowed) return;
-    const editor = vscode.window.activeTextEditor;
-    const text = autoExplainText(clip, {
-      last: lastClipboard,
-      editorSelection: editor && !editor.selection.isEmpty ? editor.document.getText(editor.selection) : '',
-      ownWrites: ownClipboardWrites,
-    });
-    lastClipboard = clip;
-    ownClipboardWrites.clear();
-    if (text) await explainAndShow(text);
-  }
-  async function applyExplainOnSelect(): Promise<void> {
-    const on = vscode.workspace.getConfiguration('noIdle').get<boolean>('explainOnSelect', false);
+  async function restoreCopyOnSelection(): Promise<void> {
+    if (!ctx.globalState.get<boolean>('noIdle.setCopyOnSelection')) return;
     const term = vscode.workspace.getConfiguration('terminal.integrated');
-    if (on && !clipboardTimer) {
-      if (!term.get<boolean>('copyOnSelection', false)) {
-        await term.update('copyOnSelection', true, vscode.ConfigurationTarget.Global);
-        await ctx.globalState.update('noIdle.setCopyOnSelection', true);
-        log('explainOnSelect: bật terminal.integrated.copyOnSelection');
-      }
-      lastClipboard = await Promise.resolve(vscode.env.clipboard.readText()).catch(() => '');
-      clipboardTimer = setInterval(() => void pollClipboard().catch((err) => log(`canh clipboard lỗi: ${(err as Error).message}`)), 500);
-    } else if (!on && clipboardTimer) {
-      clearInterval(clipboardTimer);
-      clipboardTimer = undefined;
-    }
-    // Tắt thì trả copyOnSelection như cũ, chỉ khi chính NoIdle đã bật nó.
-    if (!on && ctx.globalState.get<boolean>('noIdle.setCopyOnSelection')) {
+    // Chỉ gỡ giá trị true mà bản cũ đã tự bật; không ghi đè lựa chọn false mới của người dùng.
+    if (term.inspect<boolean>('copyOnSelection')?.globalValue === true) {
       await term.update('copyOnSelection', undefined, vscode.ConfigurationTarget.Global);
-      await ctx.globalState.update('noIdle.setCopyOnSelection', undefined);
-      log('explainOnSelect: trả terminal.integrated.copyOnSelection về mặc định');
     }
+    await ctx.globalState.update('noIdle.setCopyOnSelection', undefined);
+    log('dịch: đã gỡ tự copy vùng chọn do NoIdle cũ bật');
   }
-  void applyExplainOnSelect().catch((err) => log(`explainOnSelect lỗi: ${(err as Error).message}`));
-  ctx.subscriptions.push(
-    { dispose: () => clipboardTimer && clearInterval(clipboardTimer) },
-    vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('noIdle.explainOnSelect')) void applyExplainOnSelect().catch((err) => log(`explainOnSelect lỗi: ${(err as Error).message}`));
-    }),
-  );
+  void restoreCopyOnSelection().catch((err) => log(`trả setting tự copy lỗi: ${(err as Error).message}`));
 
   /** Lỗi sửa câu: ghi log mỗi lần, và cảnh báo một lần khi model không tồn tại (Groq gỡ model mà không ai biết, chữ thô cứ thế hiện ra). */
   let warnedRefineModel = false;

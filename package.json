@@ -133,11 +133,6 @@
             "scope": "application",
             "markdownDescription": "Có đọc \"Workspace X:\" ở đầu câu trả lời (kiểu `recap`) để biết cửa sổ nào vừa xong không. `auto`: chỉ khi đang mở hơn một cửa sổ VS Code.",
             "order": 4
-          },
-          "noIdle.explainOnSelect": {
-            "type": "boolean",
-            "default": false,
-            "markdownDescription": "Shift + quét chữ trong terminal là giải nghĩa luôn (Haiku qua Claude Code CLI), không cần bấm Ctrl+Alt+D. Bật `terminal.integrated.copyOnSelection` (quét là copy) và canh clipboard khi cửa sổ đang focus; chỉ tự giải nghĩa tới cỡ một câu dài (500 ký tự)."
           }
         }
       },
@@ -418,8 +413,20 @@
         }
       },
       {
-        "title": "NoIdle (tên cũ Vi Voice, tự chuyển)",
+        "title": "NoIdle 6. Dịch",
         "order": 5,
+        "properties": {
+          "noIdle.translate": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Bật dịch / giải nghĩa: **bôi chữ rồi Ctrl+C để copy, sau đó bấm Alt+D** — dịch nội dung clipboard, dùng được ở editor, terminal (Copilot/Claude CLI) và Copilot Chat. Ngoài ra có thể chuột phải vào vùng đã bôi ở editor hoặc terminal rồi chọn Giải nghĩa. Đoạn đã là tiếng Việt thì dịch sang tiếng Anh. Ưu tiên model do Copilot cung cấp trong VS Code; dự phòng bằng Claude Code CLI (Haiku), không có thì Copilot CLI. Tối đa 2000 ký tự mỗi lần.",
+            "order": 0
+          }
+        }
+      },
+      {
+        "title": "NoIdle (tên cũ Vi Voice, tự chuyển)",
+        "order": 6,
         "properties": {
           "viVoice.groqApiKey": {
             "type": "string",
@@ -577,23 +584,10 @@
       },
       {
         "command": "noIdle.explainSelection",
-        "key": "ctrl+alt+d",
-        "when": "terminalFocus && terminalTextSelected"
-      },
-      {
-        "command": "noIdle.explainSelection",
-        "key": "ctrl+alt+d",
-        "when": "terminalFocus && !terminalTextSelected",
+        "key": "alt+d",
+        "when": "config.noIdle.translate",
         "args": {
           "source": "clipboard"
-        }
-      },
-      {
-        "command": "noIdle.explainSelection",
-        "key": "ctrl+alt+d",
-        "when": "editorTextFocus && editorHasSelection",
-        "args": {
-          "source": "editor"
         }
       }
     ],
@@ -601,14 +595,14 @@
       "terminal/context": [
         {
           "command": "noIdle.explainSelection",
-          "when": "terminalTextSelected",
+          "when": "config.noIdle.translate && terminalTextSelected",
           "group": "navigation@99"
         }
       ],
       "editor/context": [
         {
           "command": "noIdle.explainSelection",
-          "when": "editorHasSelection",
+          "when": "config.noIdle.translate && editorHasSelection && !inChat",
           "group": "9_cutcopypaste@99"
         }
       ]

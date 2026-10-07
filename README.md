@@ -75,7 +75,7 @@ Khi approve hoặc chọn đáp án, im lặng hoặc nói không rõ thì chuy�
 |---|---|
 | **F6** | Bắt đầu / dừng nghe. Mic đang tự mở thì F6 tắt mic. |
 | **F7** | Bỏ qua câu đang đọc, câu kế tiếp phát tiếp. |
-| **Ctrl+Alt+D** | Quét chữ trong terminal hay editor rồi bấm: Haiku (qua Claude Code CLI) giải nghĩa bằng tiếng Việt. Cũng có trong menu chuột phải. Bật `noIdle.explainOnSelect` thì Shift + quét chữ (tới một câu dài) trong terminal là giải nghĩa luôn. |
+| **Alt+D** | Bôi chữ rồi **Ctrl+C**, sau đó **Alt+D** để dịch / giải nghĩa clipboard (tối đa 2000 ký tự). Bật/tắt tại **NoIdle 6. Dịch → Translate** (`noIdle.translate`, mặc định bật). Ưu tiên model do Copilot cung cấp trong VS Code và lưu kết quả trong bộ nhớ; dự phòng bằng Claude Code CLI (Haiku), không có thì Copilot CLI. Không tự dịch khi copy hoặc bôi chữ. Editor và terminal cũng có menu chuột phải để dịch vùng chọn. |
 
 ## An toàn khi approve bằng giọng
 
@@ -143,6 +143,12 @@ Tắt Voice Response hoặc Voice Notify không tắt Hands Free. Khi không có
 | Glossary | trống | Từ hay bị nghe sai: tên project, tên biến, từ tiếng Anh. |
 | Typing Delay Ms | `12` | Hiệu ứng gõ từng ký tự. `0` là chèn cả cụm. |
 | Ffmpeg Path | `ffmpeg` | Đường dẫn ffmpeg nếu không có trong PATH. |
+
+**6. Dịch**
+
+| Setting | Mặc định | Ý nghĩa |
+|---|---|---|
+| Translate | bật | Bật/tắt dịch và giải nghĩa. Copy chữ rồi bấm Alt+D để dịch clipboard; tối đa 2000 ký tự. Giữ nguyên thiết lập `noIdle.translate` đã lưu. |
 
 ## Câu hỏi thường gặp
 

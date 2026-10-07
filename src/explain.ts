@@ -10,6 +10,13 @@ export const EXPLAIN_CLI_ARGS = [
   '-p', '--model', 'haiku', '--output-format', 'text',
   '--strict-mcp-config', '--setting-sources', 'project', '--no-session-persistence', '--disable-slash-commands',
 ];
+
+/**
+ * Không có Claude Code thì dùng Copilot CLI (`copilot`) của người dùng, cũng không cần API key. Prompt đưa qua stdin
+ * (không dùng -p để khỏi lo quote). --silent chỉ trả câu trả lời; --allow-all-tools bắt buộc cho chế độ không tương
+ * tác (prompt giải nghĩa không gọi tool nào); --disable-builtin-mcps và --log-level none cho nhanh và output sạch.
+ */
+export const EXPLAIN_COPILOT_ARGS = ['--silent', '--allow-all-tools', '--disable-builtin-mcps', '--log-level', 'none'];
 export const EXPLAIN_MAX_CHARS = 2000;
 
 export function explainPrompt(text: string): string {
@@ -24,40 +31,45 @@ export function explainPrompt(text: string): string {
 
 export type ExplainResult = { ok: true; text: string } | { ok: false; reason: string };
 
+/** Claude Code trước (Haiku rẻ, nhanh), không có thì Copilot CLI. Mỗi backend dùng cờ riêng, prompt chung qua stdin. */
 export async function explainSelection(selection: string, deps: CliDeps = {}): Promise<ExplainResult> {
   const text = selection.trim();
   if (!text) return { ok: false, reason: 'empty' };
-  const bin = await (deps.find ?? ((name: string) => findExecutable(name)))('claude');
-  if (!bin) return { ok: false, reason: 'no-claude' };
+  const find = deps.find ?? ((name: string) => findExecutable(name));
+  const claude = await find('claude');
+  const backend = claude
+    ? { bin: claude, args: EXPLAIN_CLI_ARGS }
+    : await find('copilot').then((copilot) => (copilot ? { bin: copilot, args: EXPLAIN_COPILOT_ARGS } : undefined));
+  if (!backend) return { ok: false, reason: 'no-cli' };
   try {
-    const out = await (deps.runCli ?? defaultRunCli)(bin, EXPLAIN_CLI_ARGS, explainPrompt(text));
+    const out = await (deps.runCli ?? defaultRunCli)(backend.bin, backend.args, explainPrompt(text));
     return { ok: true, text: out.trim() };
   } catch (err) {
     return { ok: false, reason: (err as Error).message };
   }
 }
 
-/**
- * Shift + quét trong terminal (noIdle.explainOnSelect bật copyOnSelection): extension canh clipboard, đổi thì tự giải
- * nghĩa. Không biết chữ được copy từ đâu, nên chỉ nhận tới cỡ một câu dài (copy cả đoạn code / log thì bỏ qua); câu dài
- * trong Claude Code bị ngắt dòng nên cho phép xuống dòng, gộp lại thành một dòng. Đoạn dài hơn vẫn dùng Ctrl+Alt+D.
- */
-export const AUTO_EXPLAIN_MAX_CHARS = 500;
+export type ExplainSource = 'editor' | 'terminal' | 'chat' | 'clipboard';
 
-export interface AutoExplainState {
-  /** Clipboard lần đọc trước. */
-  last: string;
-  /** Vùng chọn của editor đang mở: trùng thì là Ctrl+C trong editor, không phải quét terminal. */
-  editorSelection: string;
-  /** Chữ NoIdle tự ghi vào clipboard (nút Copy, trả clipboard sau Ctrl+Alt+D). */
-  ownWrites: Set<string>;
+export interface SelectionDeps {
+  editorSelection(): string;
+  readClipboard(): PromiseLike<string>;
+  writeClipboard(text: string): PromiseLike<void>;
+  copySelection(source: 'terminal' | 'chat'): PromiseLike<unknown>;
 }
 
-/** Chữ cần tự giải nghĩa, hoặc undefined nếu bỏ qua. */
-export function autoExplainText(clip: string, s: AutoExplainState): string | undefined {
-  if (clip === s.last || s.ownWrites.has(clip)) return undefined;
-  const text = clip.trim().replace(/\s+/g, ' ');
-  if (!text || text.length > AUTO_EXPLAIN_MAX_CHARS) return undefined;
-  if (s.editorSelection.trim().replace(/\s+/g, ' ') === text) return undefined;
-  return text;
+export async function captureExplainSelection(source: ExplainSource, deps: SelectionDeps): Promise<string> {
+  if (source === 'editor') return deps.editorSelection();
+  // 'clipboard': người dùng đã Ctrl+C sẵn (editor/terminal/chat đều nhận). Đọc thẳng clipboard, không đụng vùng chọn —
+  // terminal TUI (Copilot/Claude CLI) vẽ lại liên tục làm mất vùng chọn, nên không thể dựa vào copySelection ở đó.
+  if (source === 'clipboard') return deps.readClipboard();
+  const saved = await deps.readClipboard();
+  try {
+    // Copy không có vùng chọn có thể không ghi gì: xoá tạm để không nhận nhầm clipboard cũ.
+    await deps.writeClipboard('');
+    await deps.copySelection(source);
+    return await deps.readClipboard();
+  } finally {
+    await deps.writeClipboard(saved);
+  }
 }
