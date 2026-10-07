@@ -137,7 +137,7 @@
           "noIdle.explainOnSelect": {
             "type": "boolean",
             "default": false,
-            "markdownDescription": "Shift + quét chữ trong terminal là giải nghĩa luôn (Haiku qua Claude Code CLI), không cần bấm Ctrl+Alt+D. Bật `terminal.integrated.copyOnSelection` (quét là copy) và canh clipboard khi cửa sổ đang focus; chỉ tự giải nghĩa chữ ngắn một dòng (tối đa 6 từ)."
+            "markdownDescription": "Shift + quét chữ trong terminal là giải nghĩa luôn (Haiku qua Claude Code CLI), không cần bấm Ctrl+Alt+D. Bật `terminal.integrated.copyOnSelection` (quét là copy) và canh clipboard khi cửa sổ đang focus; chỉ tự giải nghĩa tới cỡ một câu dài (500 ký tự)."
           }
         }
       },

@@ -38,21 +38,20 @@ describe('explainSelection', () => {
   });
 });
 
-/** Shift + quét trong terminal (copyOnSelection bật): clipboard đổi thì tự giải nghĩa, chỉ với chữ ngắn. */
+/** Shift + quét trong terminal (copyOnSelection bật): clipboard đổi thì tự giải nghĩa, tới cỡ một câu dài. */
 describe('autoExplainText', () => {
   const base = { last: 'old', editorSelection: '', ownWrites: new Set<string>() };
 
-  it('explains a short new clipboard text', () => {
+  it('explains new clipboard text up to a long sentence, joining the lines Claude Code wrapped', () => {
     expect(autoExplainText('  canary ', base)).toBe('canary');
-    expect(autoExplainText('stack canary value', base)).toBe('stack canary value');
+    expect(autoExplainText('Các bước còn lại giữ nguyên: canary, đối soát refund\n  từng kiện, refund cả khi có lỗi.', base))
+      .toBe('Các bước còn lại giữ nguyên: canary, đối soát refund từng kiện, refund cả khi có lỗi.');
   });
 
-  it('ignores unchanged, empty, long or multi-line text', () => {
+  it('ignores unchanged, empty or longer-than-a-sentence text', () => {
     expect(autoExplainText('old', base)).toBeUndefined();
     expect(autoExplainText('   ', base)).toBeUndefined();
-    expect(autoExplainText('one two three four five six seven', base)).toBeUndefined();
     expect(autoExplainText('x'.repeat(AUTO_EXPLAIN_MAX_CHARS + 1), base)).toBeUndefined();
-    expect(autoExplainText('line one\nline two', base)).toBeUndefined();
   });
 
   it('ignores a copy from the editor selection and text NoIdle wrote itself (Copy button, restored clipboard)', () => {
