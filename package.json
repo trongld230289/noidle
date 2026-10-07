@@ -573,7 +573,15 @@
       {
         "command": "noIdle.explainSelection",
         "key": "ctrl+alt+d",
-        "when": "terminalFocus"
+        "when": "terminalFocus && terminalTextSelected"
+      },
+      {
+        "command": "noIdle.explainSelection",
+        "key": "ctrl+alt+d",
+        "when": "terminalFocus && !terminalTextSelected",
+        "args": {
+          "source": "clipboard"
+        }
       },
       {
         "command": "noIdle.explainSelection",

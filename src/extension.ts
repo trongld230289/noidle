@@ -683,14 +683,18 @@ export function activate(ctx: vscode.ExtensionContext): void {
   /**
    * Quét chữ rồi bấm phím tắt: Haiku giải nghĩa đoạn đó. Editor thì đọc thẳng vùng chọn; terminal không có API đọc
    * vùng chọn (chỉ proposed) nên chép qua clipboard rồi trả clipboard như cũ.
+   * Claude Code (TUI) tự bắt chuột: vùng nó bôi không phải vùng chọn của terminal (terminalTextSelected tắt), nhưng nó tự
+   * chép chữ đã quét vào clipboard, nên lúc đó đọc thẳng clipboard (8/10/2026: "The terminal has no selection to copy").
    */
   async function explainSelected(arg?: unknown): Promise<void> {
-    // Phím tắt truyền { source } theo focus; menu chuột phải của editor truyền Uri của file, của terminal không truyền gì.
-    const fromEditor = arg instanceof vscode.Uri || (arg as { source?: string } | undefined)?.source === 'editor';
+    // Phím tắt truyền { source } theo focus và vùng chọn; menu chuột phải của editor truyền Uri của file, của terminal không truyền gì.
+    const source = arg instanceof vscode.Uri ? 'editor' : (arg as { source?: string } | undefined)?.source;
     const editor = vscode.window.activeTextEditor;
     let text = '';
-    if (fromEditor) {
+    if (source === 'editor') {
       if (editor && !editor.selection.isEmpty) text = editor.document.getText(editor.selection);
+    } else if (source === 'clipboard') {
+      text = await vscode.env.clipboard.readText();
     } else {
       const saved = await vscode.env.clipboard.readText();
       await vscode.env.clipboard.writeText('');
@@ -699,7 +703,9 @@ export function activate(ctx: vscode.ExtensionContext): void {
       await vscode.env.clipboard.writeText(saved);
     }
     if (!text.trim()) {
-      vscode.window.setStatusBarMessage('NoIdle: chưa quét chữ nào để giải nghĩa', 2500);
+      vscode.window.setStatusBarMessage(source === 'clipboard'
+        ? 'NoIdle: clipboard trống, quét chữ trong Claude Code (nó tự copy) rồi bấm lại'
+        : 'NoIdle: chưa quét chữ nào để giải nghĩa', 3000);
       return;
     }
     const short = text.trim().replace(/\s+/g, ' ');
