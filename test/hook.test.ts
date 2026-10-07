@@ -151,15 +151,48 @@ describe('claude-hook background task notifications', () => {
     const before = readLog().length;
     const result = await run(['prompt', '--config', cfg], JSON.stringify({ session_id: session, cwd: work, prompt: notification }));
     expect(result.code).toBe(0);
-    expect(result.stdout).toBe('');
+    // 7/10/2026: thiếu hướng dẫn thì Claude viết phần 🔊 bằng tiếng Anh theo tin nhắn hệ thống: vẫn dặn, theo ngôn ngữ phiên.
+    expect(JSON.parse(result.stdout).hookSpecificOutput.additionalContext).toContain('tiếng Việt');
     expect(readLog().slice(before)).not.toContain('signal submitted');
     expect(readLog().slice(before)).toContain('resumed');
     const mark = JSON.parse(fs.readFileSync(path.join(work, 'tmp', 'noidle-tts', 'sessions', session), 'utf8'));
     expect(mark.count).toBe(1);
     expect(mark.lang).toBe('vi');
+    expect(mark.resumed).toBe(true);
+    await run(['prompt', '--config', cfg], JSON.stringify({ session_id: session, cwd: work, prompt: 'ok tiếp đi' }));
+    expect(JSON.parse(fs.readFileSync(path.join(work, 'tmp', 'noidle-tts', 'sessions', session), 'utf8')).resumed).toBeUndefined();
   });
 
-  it('a subagent hand-back message is system text too: no English instruction, no language switch, only resumed', async () => {
+  it('the answer to a system message queues behind the one still being read instead of cutting it', async () => {
+    // 7/10/2026: câu tiếng Việt đang đọc bị câu trả lời cho thông báo việc nền cắt ngang, nghe hai câu dính nhau.
+    const session = 'resumed-queue';
+    const cfg = path.join(work, 'resumed-queue.json');
+    fs.writeFileSync(cfg, JSON.stringify({ language: 'auto' }));
+    await run(['prompt', '--config', cfg], JSON.stringify({ session_id: session, cwd: work, prompt: 'Push và tạo PR đi' }));
+    await run(['prompt', '--config', cfg], JSON.stringify({ session_id: session, cwd: work, prompt: notification }));
+    const reading = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 20000)']);
+    const queue = path.join(work, 'tmp', 'noidle-tts', 'queue');
+    fs.mkdirSync(queue, { recursive: true });
+    const ticket = path.join(queue, `${String(Date.now() - 1000).padStart(15, '0')}-${reading.pid}.json`);
+    fs.writeFileSync(ticket, JSON.stringify({ pid: reading.pid, kind: 'speak', session }));
+    try {
+      const transcript = path.join(work, 'resumed-queue.jsonl');
+      fs.writeFileSync(transcript, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Xong.\n\n🔊 Thông báo đó cũ, không có gì đổi.' }] } }));
+      await run(['speak', '--config', cfg, '--player', path.join(work, 'no-such-player.exe')], JSON.stringify({ session_id: session, cwd: work, transcript_path: transcript }));
+      // Tiến trình play tách rời lấy vé sau khi speak thoát: chờ vé của nó xuất hiện.
+      const t0 = Date.now();
+      while (fs.readdirSync(queue).filter((f) => f !== path.basename(ticket) && fs.readFileSync(path.join(queue, f), 'utf8').includes(session)).length === 0 && Date.now() - t0 < 10_000) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      expect(reading.exitCode).toBeNull();
+      expect(fs.existsSync(ticket)).toBe(true);
+    } finally {
+      reading.kill();
+      fs.rmSync(ticket, { force: true });
+    }
+  });
+
+  it('a subagent hand-back message is system text too: instruction stays in the session language, no language switch, only resumed', async () => {
     // 3/10/2026: "<agent-message ...>[Subagent hand-back] ..." bị coi là prompt tiếng Anh → Claude đọc phần 🔊 bằng tiếng Anh
     // ngay sau một đoạn tiếng Việt.
     const cfg = path.join(work, 'background-auto.json');
@@ -170,7 +203,7 @@ describe('claude-hook background task notifications', () => {
     const message = '<agent-message from="af0e2c4c91ed3a19f">\n[Subagent hand-back] The text below is the final report of a subagent.\n  ## Review: done\n</agent-message>';
     const result = await run(['prompt', '--config', cfg], JSON.stringify({ session_id: session, cwd: work, prompt: message }));
     expect(result.code).toBe(0);
-    expect(result.stdout).toBe('');
+    expect(JSON.parse(result.stdout).hookSpecificOutput.additionalContext).toContain('tiếng Việt');
     expect(readLog().slice(before)).toContain('resumed');
     const mark = JSON.parse(fs.readFileSync(path.join(work, 'tmp', 'noidle-tts', 'sessions', session), 'utf8'));
     expect(mark.count).toBe(1);

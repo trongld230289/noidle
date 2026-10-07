@@ -339,10 +339,13 @@ function kill(pid?: number): void {
   }
 }
 
-/** Ghi vé của mình. Câu trả lời mới của cùng một phiên thì cắt câu trả lời cũ của phiên đó. */
+/**
+ * Ghi vé của mình. Câu trả lời mới của cùng một phiên thì cắt câu trả lời cũ của phiên đó, trừ khi lượt này do tin nhắn
+ * hệ thống mở lại: người dùng chưa nói gì mới, câu cũ (trả lời họ) vẫn đáng nghe hết, câu này xếp hàng sau.
+ */
 function takeTicket(kind: Ticket['kind'], session: string): string {
   fs.mkdirSync(QUEUE_DIR, { recursive: true });
-  if (kind === 'speak' && session) {
+  if (kind === 'speak' && session && !readMark(session).resumed) {
     for (const { file, t } of listTickets()) {
       if (t.kind === 'speak' && t.session === session) {
         kill(t.player);
@@ -398,6 +401,8 @@ interface SessionMark {
   style?: 'recap' | 'announce';
   /** Chuỗi pid từ agent lên, neo = pid agent (bỏ shell bọc hook); dùng lại khi neo còn sống, khỏi tra cây tiến trình mỗi lượt. */
   proc?: { anchor: number; chain: number[] };
+  /** Lượt hiện tại do tin nhắn hệ thống mở lại (việc nền xong, subagent báo về): phần 🔊 của nó không cắt câu đang đọc. */
+  resumed?: boolean;
 }
 
 function markPath(session: string): string {
@@ -415,9 +420,10 @@ function readMark(session: string): SessionMark {
   const n = Number(raw);
   if (!Number.isNaN(n)) return { count: n };
   try {
-    const o = JSON.parse(raw) as { count?: unknown; lang?: unknown; style?: unknown; proc?: { anchor?: unknown; chain?: unknown } };
+    const o = JSON.parse(raw) as { count?: unknown; lang?: unknown; style?: unknown; resumed?: unknown; proc?: { anchor?: unknown; chain?: unknown } };
     const mark: SessionMark = { count: Number(o.count) || 0, lang: o.lang === 'en' ? 'en' : o.lang === 'vi' ? 'vi' : undefined };
     if (o.style === 'announce' || o.style === 'recap') mark.style = o.style;
+    if (o.resumed === true) mark.resumed = true;
     // Dấu cũ (proc.pid) không có anchor: bỏ, tra lại.
     if (o.proc && typeof o.proc.anchor === 'number' && Array.isArray(o.proc.chain)) {
       mark.proc = { anchor: o.proc.anchor, chain: o.proc.chain.filter((n): n is number => typeof n === 'number') };
@@ -534,7 +540,17 @@ async function modePrompt(): Promise<void> {
   if (isSystemPrompt(promptText)) {
     // Không phải người dùng nói: không đếm, không đổi ngôn ngữ, không tắt mic. Nhưng Claude sắp chạy tiếp,
     // cửa sổ không còn "done": bảo extension bỏ màu và chữ "Claude is done".
-    log(`prompt: ${systemPromptKind(promptText)}, session ${input.session_id ?? '-'}, chỉ báo resumed`);
+    // Vẫn dặn phần 🔊 theo ngôn ngữ của phiên: thiếu hướng dẫn thì Claude viết recap bằng tiếng Anh theo tin nhắn
+    // hệ thống (7/10/2026: câu trước tiếng Việt, câu sau tiếng Anh). Phần 🔊 của lượt này xếp hàng, không cắt câu đang đọc.
+    const cfg = loadConfig();
+    const mark = input.session_id ? readMark(input.session_id) : { count: 0 };
+    if (input.session_id) writeMark(input.session_id, { ...mark, resumed: true });
+    const lang = isAuto(cfg.language) ? mark.lang ?? 'vi' : langOf(cfg.language);
+    const recap = !voiceOff(cfg) && cfg.voiceStyle !== 'announce';
+    log(`prompt: ${systemPromptKind(promptText)}, session ${input.session_id ?? '-'}, chỉ báo resumed${recap ? `, dặn 🔊 tiếng ${lang}` : ''}`);
+    if (recap) {
+      process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: recapInstruction(cfg.recapPrompt, lang) } }));
+    }
     await routeSignal(
       { event: 'resumed', session: input.session_id ?? '', cwd: input.cwd || process.cwd(), source: sourceArg(), ancestors: cachedChain(input.session_id ?? '') },
       { cwdFallback: true }, undefined, log,
@@ -547,7 +563,7 @@ async function modePrompt(): Promise<void> {
     if (input.session_id) {
       const mark = readMark(input.session_id);
       const lang = isAuto(cfg.language) ? detectLang(promptText) ?? mark.lang ?? 'vi' : langOf(cfg.language);
-      writeMark(input.session_id, { ...mark, count: mark.count + 1, lang });
+      writeMark(input.session_id, { ...mark, count: mark.count + 1, lang, resumed: undefined });
     }
     log('prompt: voiceResponse tắt, không chèn hướng dẫn');
   }
