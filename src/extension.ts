@@ -22,6 +22,7 @@ import { installPlan, installLabel, manualHint, afterInstallNote, type Tool } fr
 import { findExecutable } from './findTool';
 import { needsTranslation, recapPromptsFor, translateRecap, type RecapTranslator } from './recapPrompt';
 import { claudeCliTranslator } from './translate';
+import { explainSelection } from './explain';
 import { chatAutoApproveFrom } from './chatAutoApprove';
 import { ChatPendingTracker, isAgentTerminal, type PendingChatTool } from './chatPending';
 import { createHash } from 'crypto';
@@ -122,7 +123,7 @@ function config() {
 async function ensureTerminalSkipShell(): Promise<void> {
   const cfg = vscode.workspace.getConfiguration('terminal.integrated');
   const list = cfg.get<string[]>('commandsToSkipShell', []);
-  const missing = ['noIdle.toggle', 'noIdle.skipSpeech'].filter((c) => !list.includes(c));
+  const missing = ['noIdle.toggle', 'noIdle.skipSpeech', 'noIdle.explainSelection'].filter((c) => !list.includes(c));
   if (missing.length === 0) return;
   await cfg.update('commandsToSkipShell', [...list, ...missing], vscode.ConfigurationTarget.Global);
   void vscode.window.showInformationMessage(
@@ -677,6 +678,45 @@ export function activate(ctx: vscode.ExtensionContext): void {
     child.on('error', (e) => void vscode.window.showErrorMessage(`NoIdle: không chạy được node để bỏ qua: ${e.message}`));
     child.unref();
     if (!quiet) vscode.window.setStatusBarMessage('NoIdle: đã bỏ qua', 1500);
+  }
+
+  /**
+   * Quét chữ rồi bấm phím tắt: Haiku giải nghĩa đoạn đó. Editor thì đọc thẳng vùng chọn; terminal không có API đọc
+   * vùng chọn (chỉ proposed) nên chép qua clipboard rồi trả clipboard như cũ.
+   */
+  async function explainSelected(arg?: unknown): Promise<void> {
+    // Phím tắt truyền { source } theo focus; menu chuột phải của editor truyền Uri của file, của terminal không truyền gì.
+    const fromEditor = arg instanceof vscode.Uri || (arg as { source?: string } | undefined)?.source === 'editor';
+    const editor = vscode.window.activeTextEditor;
+    let text = '';
+    if (fromEditor) {
+      if (editor && !editor.selection.isEmpty) text = editor.document.getText(editor.selection);
+    } else {
+      const saved = await vscode.env.clipboard.readText();
+      await vscode.env.clipboard.writeText('');
+      await vscode.commands.executeCommand('workbench.action.terminal.copySelection');
+      text = await vscode.env.clipboard.readText();
+      await vscode.env.clipboard.writeText(saved);
+    }
+    if (!text.trim()) {
+      vscode.window.setStatusBarMessage('NoIdle: chưa quét chữ nào để giải nghĩa', 2500);
+      return;
+    }
+    const short = text.trim().replace(/\s+/g, ' ');
+    const label = short.length > 40 ? `${short.slice(0, 40)}…` : short;
+    const r = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Window, title: `NoIdle: đang giải nghĩa "${label}"` },
+      () => explainSelection(text),
+    );
+    if (!r.ok) {
+      log(`giải nghĩa lỗi: ${r.reason}`);
+      void vscode.window.showWarningMessage(r.reason === 'no-claude'
+        ? 'NoIdle: không tìm thấy Claude Code CLI (claude) để giải nghĩa.'
+        : `NoIdle: giải nghĩa lỗi: ${r.reason}`);
+      return;
+    }
+    const pick = await vscode.window.showInformationMessage(`${label}: ${r.text}`, 'Copy');
+    if (pick === 'Copy') await vscode.env.clipboard.writeText(r.text);
   }
 
   /** Lỗi sửa câu: ghi log mỗi lần, và cảnh báo một lần khi model không tồn tại (Groq gỡ model mà không ai biết, chữ thô cứ thế hiện ra). */
@@ -1442,6 +1482,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('noIdle.installNode', installNode),
     vscode.commands.registerCommand('noIdle.toggleMute', toggleMute),
     vscode.commands.registerCommand('noIdle.toggleHandsFree', toggleHandsFree),
+    vscode.commands.registerCommand('noIdle.explainSelection', explainSelected),
   );
 }
 

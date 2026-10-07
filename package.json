@@ -69,6 +69,10 @@
       {
         "command": "noIdle.installNode",
         "title": "NoIdle: Cài Node.js (để chạy hook)"
+      },
+      {
+        "command": "noIdle.explainSelection",
+        "title": "NoIdle: Giải nghĩa chữ đang quét"
       }
     ],
     "configuration": [
@@ -565,8 +569,37 @@
         "args": {
           "target": "terminal"
         }
+      },
+      {
+        "command": "noIdle.explainSelection",
+        "key": "ctrl+alt+d",
+        "when": "terminalFocus"
+      },
+      {
+        "command": "noIdle.explainSelection",
+        "key": "ctrl+alt+d",
+        "when": "editorTextFocus && editorHasSelection",
+        "args": {
+          "source": "editor"
+        }
       }
-    ]
+    ],
+    "menus": {
+      "terminal/context": [
+        {
+          "command": "noIdle.explainSelection",
+          "when": "terminalTextSelected",
+          "group": "navigation@99"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "noIdle.explainSelection",
+          "when": "editorHasSelection",
+          "group": "9_cutcopypaste@99"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run build",
