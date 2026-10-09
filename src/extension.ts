@@ -235,16 +235,20 @@ export function activate(ctx: vscode.ExtensionContext): void {
    * PATH trong registry và thư mục winget/choco/scoop/Homebrew; ghi vào hook để Claude chạy từ shell nào cũng thấy,
    * và Recorder cũng dùng nên cài ffmpeg xong không cần mở lại VS Code. Không thấy thì giữ tên trần như trước.
    */
-  const tools = { ffmpeg: config().ffmpegPath, ffplay: playerPath() };
+  const tools = { ffmpeg: config().ffmpegPath, ffplay: playerPath(), node: 'node' };
   async function resolveTools(): Promise<boolean> {
     const ff = config().ffmpegPath;
     const bare = ff === 'ffmpeg';
     const next = {
       ffmpeg: bare ? (await findExecutable('ffmpeg')) ?? ff : ff,
       ffplay: bare ? (await findExecutable('ffplay')) ?? 'ffplay' : playerPath(),
+      // Hook phát tiếng do Claude/Copilot chạy từ shell có node; còn F7 (skip), đọc thử và báo approve của Chat
+      // là extension host tự spawn node. Extension host có thể giữ PATH cũ không có node (winget/installer cập nhật
+      // PATH cho cửa sổ mở sau), nên tìm đường dẫn tuyệt đối như ffmpeg để spawn không lỗi ENOENT âm thầm.
+      node: (await findExecutable('node')) ?? 'node',
     };
-    const changed = next.ffmpeg !== tools.ffmpeg || next.ffplay !== tools.ffplay;
-    if (changed) log(`ffmpeg: ${next.ffmpeg}; ffplay: ${next.ffplay}`);
+    const changed = next.ffmpeg !== tools.ffmpeg || next.ffplay !== tools.ffplay || next.node !== tools.node;
+    if (changed) log(`ffmpeg: ${next.ffmpeg}; ffplay: ${next.ffplay}; node: ${next.node}`);
     Object.assign(tools, next);
     return changed;
   }
@@ -661,7 +665,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     // --config để play biết giọng ElevenLabs nếu đang chọn; ghi lại file trước cho chắc.
     await writeHookConfig();
     const args = [hookScript, 'play', file, '--voice', voice, '--rate', cfg.voiceRate, '--player', playerPath(), '--config', hookConfigPath];
-    const child = spawn('node', args, {
+    const child = spawn(tools.node, args, {
       detached: true,
       stdio: 'ignore',
       windowsHide: true,
@@ -674,8 +678,12 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   /** Bỏ qua bản đang đọc: hook tắt player của vé đầu hàng; bản kế tiếp trong hàng đợi phát tiếp. */
   function skipSpeech(quiet = false): void {
-    const child = spawn('node', [hookScript, 'skip'], { detached: true, stdio: 'ignore', windowsHide: true });
-    child.on('error', (e) => void vscode.window.showErrorMessage(`NoIdle: không chạy được node để bỏ qua: ${e.message}`));
+    log(`skip: gọi hook bỏ qua bằng node ${tools.node}`);
+    const child = spawn(tools.node, [hookScript, 'skip'], { detached: true, stdio: 'ignore', windowsHide: true });
+    child.on('error', (e) => {
+      log(`skip: không chạy được node (${tools.node}): ${e.message}`);
+      void vscode.window.showErrorMessage(`NoIdle: không chạy được node để bỏ qua: ${e.message}`);
+    });
     child.unref();
     if (!quiet) vscode.window.setStatusBarMessage('NoIdle: đã bỏ qua', 1500);
   }
@@ -1291,7 +1299,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     fs.writeFileSync(file, pronounce(p.text, cfg.pronunciations, usesVietPronunciation(voice, lang)), 'utf8');
     const args = [hookScript, 'play', file, '--voice', voice, '--rate', cfg.voiceRate, '--player', playerPath(), '--config', hookConfigPath,
       '--kind', 'notify', '--session', p.session || '-'];
-    const child = spawn('node', args, { detached: true, stdio: 'ignore', windowsHide: true });
+    const child = spawn(tools.node, args, { detached: true, stdio: 'ignore', windowsHide: true });
     child.on('error', (e) => log(`chat pending: không chạy được node để đọc: ${e.message}`));
     child.unref();
   }
