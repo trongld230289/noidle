@@ -6,8 +6,9 @@ import * as path from 'path';
 export default defineConfig({
   test: {
     include: ['test/**/*.test.ts'],
-    // Test hook spawn node + PowerShell (tra chuỗi pid) vài lần mỗi test; chạy 6 file song song thì 5 giây không đủ.
-    testTimeout: 15_000,
+    // Test hook spawn node + PowerShell (tra chuỗi pid, tách tiến trình play qua Start-Process) vài lần mỗi test; chạy 6 file
+    // song song thì 15 giây không đủ (hook-auto: 6,6 giây khi chạy riêng, quá 15 giây khi chạy cả bộ).
+    testTimeout: 30_000,
     env: { VI_VOICE_HOST_FLASH: '0', NOIDLE_NATIVE_DIR: path.join(os.tmpdir(), 'noidle-tts', 'native') },
   },
 });

@@ -48,10 +48,10 @@ describe('copilotHooksFile', () => {
     const cmd = hookCommands(opts);
     expect(file.version).toBe(1);
     expect(file.hooks.sessionStart).toEqual([
-      { type: 'command', command: 'node "C:/ext/noidle/dist/claude-hook.js" start --config "C:/ext/noidle/hook-config.json" --source copilot' },
+      { type: 'command', command: 'node "C:/ext/noidle/dist/claude-hook.js" start --config "C:/ext/noidle/hook-config.json" --source copilot; exit 0' },
     ]);
-    expect(file.hooks.agentStop).toEqual([{ type: 'command', command: `${cmd.Stop} --source copilot`, timeoutSec: 60 }]);
-    expect(file.hooks.userPromptSubmitted).toEqual([{ type: 'command', command: `${cmd.UserPromptSubmit} --source copilot` }]);
+    expect(file.hooks.agentStop).toEqual([{ type: 'command', command: `${cmd.Stop} --source copilot; exit 0`, timeoutSec: 60 }]);
+    expect(file.hooks.userPromptSubmitted).toEqual([{ type: 'command', command: `${cmd.UserPromptSubmit} --source copilot; exit 0` }]);
     expect(Object.keys(file.hooks).sort()).toEqual([
       'agentStop', 'notification', 'permissionRequest', 'postToolUse', 'preToolUse', 'sessionStart', 'userPromptSubmitted',
     ]);
@@ -62,18 +62,27 @@ describe('copilotHooksFile', () => {
     const file = copilotHooksFile(opts);
     const cmd = hookCommands(opts);
     expect(file.hooks.permissionRequest).toEqual([
-      { type: 'command', command: `${cmd.Notify} --event PermissionRequest --source copilot`, timeoutSec: 120 },
+      { type: 'command', command: `${cmd.Notify} --event PermissionRequest --source copilot; exit 0`, timeoutSec: 120 },
     ]);
     expect(file.hooks.preToolUse).toEqual([
-      { type: 'command', command: `${cmd.Notify} --event PreToolUse --source copilot`, timeoutSec: 180 },
+      { type: 'command', command: `${cmd.Notify} --event PreToolUse --source copilot; exit 0`, timeoutSec: 180 },
     ]);
     expect(file.hooks.notification).toEqual([
-      { type: 'command', command: `${cmd.Notify} --event Notification --source copilot` },
+      { type: 'command', command: `${cmd.Notify} --event Notification --source copilot; exit 0` },
     ]);
     // Chat: PostToolUse là bằng chứng tool đã chạy, extension dùng để không đọc "cần approve" cho lệnh đã tự duyệt.
     expect(file.hooks.postToolUse).toEqual([
-      { type: 'command', command: `${cmd.Notify} --event PostToolUse --source copilot`, timeoutSec: 30 },
+      { type: 'command', command: `${cmd.Notify} --event PostToolUse --source copilot; exit 0`, timeoutSec: 30 },
     ]);
+  });
+
+  it('always exits 0: Copilot CLI denies the tool when a preToolUse command fails (missing node or script)', () => {
+    for (const hooks of Object.values(copilotHooksFile(opts).hooks)) {
+      expect(hooks[0].command).toMatch(/ --source copilot; exit 0$/);
+    }
+    for (const groups of Object.values(applyHooks({}, opts).hooks ?? {})) {
+      for (const g of groups) for (const h of g.hooks ?? []) expect(h.command).not.toContain('exit 0');
+    }
   });
 
   it('gates all notification events without disabling lifecycle hooks', () => {
@@ -96,7 +105,7 @@ describe('copilotHooksFile', () => {
   it('omits the optional config flag from every command', () => {
     const file = copilotHooksFile({ ...opts, config: undefined });
     for (const hooks of Object.values(file.hooks)) expect(hooks[0].command).not.toContain('--config');
-    expect(file.hooks.sessionStart[0].command).toBe('node "C:/ext/noidle/dist/claude-hook.js" start --source copilot');
+    expect(file.hooks.sessionStart[0].command).toBe('node "C:/ext/noidle/dist/claude-hook.js" start --source copilot; exit 0');
   });
 
   it('does not change Claude hook names, matchers, timeouts or sources', () => {

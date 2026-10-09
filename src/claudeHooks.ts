@@ -69,18 +69,22 @@ function isOurs(h: HookCommand): boolean {
 export function copilotHooksFile(o: HookOptions): { version: 1; hooks: Record<string, HookCommand[]> } {
   const cmd = hookCommands(o);
   const configArg = o.config ? ` --config ${q(o.config)}` : '';
+  // Copilot CLI (và phiên Copilot trên Agent Host của VS Code) từ chối tool khi preToolUse thoát khác 0, kể cả khi
+  // thiếu node hay mất script sau khi gỡ extension: mọi lệnh shell bị chặn. Hook chỉ để đọc và nháy, nên luôn thoát 0;
+  // quyết định duyệt bằng giọng đi qua JSON trên stdout. `; exit 0` chạy được cả trong PowerShell lẫn sh.
+  const failOpen = (command: string) => `${command}; exit 0`;
   const hooks: Record<string, HookCommand[]> = {
-    sessionStart: [{ type: 'command', command: `node ${q(o.script)} start${configArg} --source copilot` }],
-    userPromptSubmitted: [{ type: 'command', command: `${cmd.UserPromptSubmit} --source copilot` }],
-    agentStop: [{ type: 'command', command: `${cmd.Stop} --source copilot`, timeoutSec: 60 }],
+    sessionStart: [{ type: 'command', command: failOpen(`node ${q(o.script)} start${configArg} --source copilot`) }],
+    userPromptSubmitted: [{ type: 'command', command: failOpen(`${cmd.UserPromptSubmit} --source copilot`) }],
+    agentStop: [{ type: 'command', command: failOpen(`${cmd.Stop} --source copilot`), timeoutSec: 60 }],
   };
   if (o.notify) {
-    hooks.permissionRequest = [{ type: 'command', command: `${cmd.Notify} --event PermissionRequest --source copilot`, timeoutSec: 120 }];
-    hooks.preToolUse = [{ type: 'command', command: `${cmd.Notify} --event PreToolUse --source copilot`, timeoutSec: 180 }];
+    hooks.permissionRequest = [{ type: 'command', command: failOpen(`${cmd.Notify} --event PermissionRequest --source copilot`), timeoutSec: 120 }];
+    hooks.preToolUse = [{ type: 'command', command: failOpen(`${cmd.Notify} --event PreToolUse --source copilot`), timeoutSec: 180 }];
     // Chat: PostToolUse là bằng chứng tool đã chạy; extension dùng để không đọc "cần approve" cho lệnh đã tự duyệt.
-    hooks.postToolUse = [{ type: 'command', command: `${cmd.Notify} --event PostToolUse --source copilot`, timeoutSec: 30 }];
+    hooks.postToolUse = [{ type: 'command', command: failOpen(`${cmd.Notify} --event PostToolUse --source copilot`), timeoutSec: 30 }];
     // The handler filters notification types, including actual permission prompts.
-    hooks.notification = [{ type: 'command', command: `${cmd.Notify} --event Notification --source copilot` }];
+    hooks.notification = [{ type: 'command', command: failOpen(`${cmd.Notify} --event Notification --source copilot`) }];
   }
   return { version: 1, hooks };
 }

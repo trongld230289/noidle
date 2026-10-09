@@ -34,6 +34,7 @@ import { agentChainFrom, procTable, procChain, type ProcEntry } from './proctree
 import { resolvePlayer } from './findTool';
 import { flashHostWindow } from './attention';
 import { nativeScript, runPowerShell, parseChain } from './native';
+import { launchDetached } from './launch';
 import { hedged } from './hedge';
 import { pronounce } from './pronounce';
 import { prefetchInOrder } from './prefetch';
@@ -680,7 +681,10 @@ function modeSkip(): void {
   }
 }
 
-/** Tách tiến trình phát rồi thoát ngay để Claude Code không phải chờ. listenCwd: phát xong thì báo extension mở mic. */
+/**
+ * Tách tiến trình phát rồi thoát để agent không phải chờ. listenCwd: phát xong thì báo extension mở mic.
+ * Tách qua launchDetached (launch.ts): spawn detached trực tiếp thì play giữ pipe của VS Code và hook kéo dài tới lúc đọc xong.
+ */
 function spawnPlay(raw: string, kind: Ticket['kind'], session: string, lang: Lang, listenCwd?: string, ancestors?: number[]): void {
   if (!speechEnabled(kind) && !listenCwd) return;
   // Giọng vi-VN đọc sai chữ viết tắt và đuôi file tiếng Anh; viết sẵn cách đọc trước khi tổng hợp.
@@ -702,9 +706,11 @@ function spawnPlay(raw: string, kind: Ticket['kind'], session: string, lang: Lan
     // Số prompt của phiên lúc này; play so lại trước khi mở mic để câu cũ không bật mic khi đã có prompt mới.
     if (session) args.push('--prompt-count', String(readMark(session).count));
   }
-  const child = spawn(process.execPath, args, { detached: true, stdio: 'ignore', windowsHide: true });
-  child.unref();
-  log(`${kind} → play pid ${child.pid} (${voice}): ${JSON.stringify(text)}`);
+  const child = launchDetached(process.execPath, args);
+  void child.then((r) => {
+    const via = r.error ? ` [Start-Process không dùng được (${r.error}), tách trực tiếp]` : '';
+    log(`${kind} → play pid ${r.pid ?? '?'} (${voice})${via}: ${JSON.stringify(text)}`);
+  });
 }
 
 /** Agent gọi hook: --source copilot (file hook Copilot) hay mặc định claude. Đi kèm tín hiệu listen để extension chọn đích. */
@@ -1352,6 +1358,18 @@ async function playText(text: string, ticket: string, voice: string): Promise<vo
 
 async function main(): Promise<void> {
   const mode = process.argv[2];
+  if (mode !== 'play' && mode !== 'skip') {
+    // Agent chờ hook này: thoát khác 0 thì Copilot CLI từ chối tool (preToolUse), VS Code coi exit 2 là lỗi chặn.
+    // Lỗi lọt ra ngoài main (callback, promise không ai bắt) chỉ ghi log.
+    process.on('uncaughtException', (err) => {
+      log(`lỗi ${mode} không bắt được: ${err.stack ?? err}`);
+      process.exitCode = 0;
+    });
+    process.on('unhandledRejection', (err) => {
+      log(`lỗi ${mode} (promise): ${(err as Error)?.stack ?? err}`);
+      process.exitCode = 0;
+    });
+  }
   // Extension gọi `claude -p` để dịch recapPrompt: tiến trình đó kế thừa hook này, từng làm tắt mic và đọc "done" giả.
   if (process.env.NOIDLE_INTERNAL === '1') {
     log(`${mode}: NOIDLE_INTERNAL, agent do NoIdle gọi, bỏ qua`);
@@ -1364,7 +1382,9 @@ async function main(): Promise<void> {
   if (mode === 'notify') return modeNotify();
   if (mode === 'skip') return modeSkip();
   process.stderr.write('usage: claude-hook.js start | prompt | speak | notify | play <file>\n');
-  process.exitCode = 2;
+  // Mode lạ (file hook của bản NoIdle khác): không được chặn agent.
+  log(`mode lạ ${JSON.stringify(mode)}, bỏ qua`);
+  process.exitCode = 0;
 }
 
 main().catch((err) => {
