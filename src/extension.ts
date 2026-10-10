@@ -37,8 +37,8 @@ const WELCOMED_KEY = 'noIdle.welcomed';
 /** Bản dịch của noIdle.recapPrompt: { hash của text nguồn, bản dịch }. Đổi text là hash khác, dịch lại. */
 const RECAP_CACHE_KEY = 'noIdle.recapPromptTranslation';
 const GROQ_KEYS_URL = 'https://console.groq.com/keys';
-/** Dòng báo cửa sổ khác cần người dùng giữ trên status bar bao lâu. */
-const PEER_NOTICE_MS = 10_000;
+/** Dòng báo cửa sổ khác cần người dùng giữ trên status bar bao lâu (bấm vào để nhảy sang). */
+const PEER_NOTICE_MS = 15_000;
 const MAX_RECORD_MS = 120_000;
 const MIN_RECORD_MS = 500;
 /** Hands-free: tổng chữ ít hơn chừng này từ thì không tự gửi, tránh gửi nhầm tiếng động hay một từ lẻ. */
@@ -1316,7 +1316,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     if (s.event === 'peerAttention') {
       if (!vscode.window.state.focused || !s.text || !s.reason) return;
       log(`cửa sổ "${s.text}" cần người dùng (${s.reason}), hiện trên status bar`);
-      vscode.window.setStatusBarMessage(peerNotice(s.text, s.reason, s.source === 'claude' || !s.source ? 'Claude' : 'Copilot'), PEER_NOTICE_MS);
+      showPeerNotice(peerNotice(s.text, s.reason, s.source === 'claude' || !s.source ? 'Claude' : 'Copilot'), s.cwd);
       return;
     }
     log(`tín hiệu ${s.event} (session ${s.session || '-'})`);
@@ -1522,6 +1522,38 @@ export function activate(ctx: vscode.ExtensionContext): void {
   }
 
   /**
+   * Dòng báo cửa sổ khác cần người dùng; bấm vào thì nhảy sang cửa sổ đó: chạy CLI của chính VS Code này với đúng folder
+   * hay file workspace của nó, VS Code thấy đã mở thì focus cửa sổ đó (tiến trình chính đang foreground nên Windows cho).
+   */
+  const peerItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 1000);
+  peerItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+  let peerTimer: NodeJS.Timeout | undefined;
+  ctx.subscriptions.push(peerItem, { dispose: () => clearTimeout(peerTimer) });
+  function showPeerNotice(text: string, target: string): void {
+    peerItem.text = text;
+    peerItem.tooltip = target ? 'Click to switch to that window' : undefined;
+    peerItem.command = target ? { title: 'Switch window', command: 'noIdle.focusPeer', arguments: [target] } : undefined;
+    peerItem.show();
+    clearTimeout(peerTimer);
+    peerTimer = setTimeout(() => peerItem.hide(), PEER_NOTICE_MS);
+  }
+  function focusPeer(target: unknown): void {
+    peerItem.hide();
+    if (typeof target !== 'string' || !target) return;
+    const cli = path.join(vscode.env.appRoot, 'out', 'cli.js');
+    log(`nhảy sang cửa sổ ${target}`);
+    const child = spawn(process.execPath, [cli, target], {
+      // Như bin/code.cmd; bỏ VSCODE_IPC_HOOK_CLI để CLI nói thẳng với tiến trình chính, không qua cửa sổ này.
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', VSCODE_DEV: undefined, VSCODE_IPC_HOOK_CLI: undefined },
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    child.on('error', (e) => log(`không nhảy được sang cửa sổ ${target}: ${e.message}`));
+    child.unref();
+  }
+
+  /**
    * Báo các cửa sổ VS Code khác: cửa sổ nào đang focus thì hiện một dòng tạm trên status bar. Nháy taskbar của cửa sổ
    * này không thấy được khi một cửa sổ VS Code khác đang ở trên cùng (chung tiến trình, chung một nút taskbar).
    */
@@ -1529,9 +1561,14 @@ export function activate(ctx: vscode.ExtensionContext): void {
     const name = wsName();
     if (!name) return;
     const source = agentLabel === 'Claude' ? 'claude' : 'copilot';
+    // cwd: file .code-workspace hay folder của cửa sổ này; cửa sổ nhận mở lại đúng nó bằng CLI để VS Code focus cửa sổ này.
+    // Workspace chưa lưu (untitled) thì không có gì để mở lại: mở folder đầu sẽ ra cửa sổ mới, nên không cho bấm.
+    const ws = vscode.workspace.workspaceFile;
+    const own = ws ?? vscode.workspace.workspaceFolders?.[0]?.uri;
+    const cwd = own?.scheme === 'file' ? own.fsPath : '';
     for (const e of readRegistry()) {
       if (e.pid === process.pid) continue;
-      void signalPid(e.pid, { event: 'peerAttention', session: '', cwd: '', reason, text: name, source }).catch(() => undefined);
+      void signalPid(e.pid, { event: 'peerAttention', session: '', cwd, reason, text: name, source }).catch(() => undefined);
     }
   }
 
@@ -1602,6 +1639,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       },
     },
     vscode.commands.registerCommand('noIdle.toggle', toggle),
+    vscode.commands.registerCommand('noIdle.focusPeer', focusPeer),
     vscode.commands.registerCommand('noIdle.setApiKey', setApiKey),
     vscode.commands.registerCommand('noIdle.retry', retry),
     vscode.commands.registerCommand('noIdle.pickMic', pickMic),
