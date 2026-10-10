@@ -74,7 +74,7 @@ Khi approve hoặc chọn đáp án, im lặng hoặc nói không rõ thì chuy�
 | Phím | Tác dụng |
 |---|---|
 | **F6** | Bắt đầu / dừng nghe. Mic đang tự mở thì F6 tắt mic. |
-| **F7** | Bỏ qua câu đang đọc, câu kế tiếp phát tiếp. |
+| **F7** | Bỏ qua câu đang đọc, câu kế tiếp phát tiếp. Lúc đang đọc thì bấm được ở mọi app (Teams, trình duyệt...). |
 | **Alt+D** | Bôi chữ rồi **Ctrl+C**, sau đó **Alt+D** để dịch / giải nghĩa clipboard (tối đa 2000 ký tự). Bật/tắt tại **NoIdle 6. Dịch → Translate** (`noIdle.translate`, mặc định bật). Ưu tiên model do Copilot cung cấp trong VS Code và lưu kết quả trong bộ nhớ; dự phòng bằng Claude Code CLI (Haiku), không có thì Copilot CLI. Không tự dịch khi copy hoặc bôi chữ. Editor và terminal cũng có menu chuột phải để dịch vùng chọn. |
 
 ## An toàn khi approve bằng giọng
