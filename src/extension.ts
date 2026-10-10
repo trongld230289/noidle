@@ -410,7 +410,14 @@ export function activate(ctx: vscode.ExtensionContext): void {
       },
     };
     await fs.promises.mkdir(path.dirname(hookConfigPath), { recursive: true });
-    await fs.promises.writeFile(hookConfigPath, JSON.stringify(data, null, 2), 'utf8');
+    // Ghi ra file tạm rồi đổi tên: mọi cửa sổ cùng ghi lúc reload, hook đọc giữa chừng từng gặp file rỗng
+    // ("Unexpected end of JSON input", 11/10/2026) và chạy với cấu hình mặc định.
+    const tmp = `${hookConfigPath}.${process.pid}.tmp`;
+    await fs.promises.writeFile(tmp, JSON.stringify(data, null, 2), 'utf8');
+    await fs.promises.rename(tmp, hookConfigPath).catch(async (err) => {
+      await fs.promises.rm(tmp, { force: true });
+      throw err;
+    });
   }
 
   const recapHash = (text: string): string => createHash('sha1').update(text.trim()).digest('hex');

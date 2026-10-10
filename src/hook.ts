@@ -707,6 +707,7 @@ function spawnPlay(raw: string, kind: Ticket['kind'], session: string, lang: Lan
     if (session) args.push('--prompt-count', String(readMark(session).count));
   }
   const child = launchDetached(process.execPath, args);
+  background.add(child);
   void child.then((r) => {
     const via = r.error ? ` [Start-Process không dùng được (${r.error}), tách trực tiếp]` : '';
     log(`${kind} → play pid ${r.pid ?? '?'} (${voice})${via}: ${JSON.stringify(text)}`);
@@ -1398,8 +1399,21 @@ async function main(): Promise<void> {
   process.exitCode = 0;
 }
 
-main().catch((err) => {
-  log(`lỗi ${process.argv[2]}: ${(err as Error).stack ?? err}`);
-  // Hook không được làm Claude Code lỗi theo.
-  process.exitCode = 0;
-});
+/**
+ * Xong việc mà vẫn còn sống thì tự thoát. Gửi tín hiệu tới pipe của một cửa sổ đang bận (cửa sổ đang reload) thì libuv
+ * chờ WaitNamedPipe 30 giây trong threadpool, socket.destroy() không huỷ được: hook prompt sống đúng 30 giây và Claude Code
+ * báo "timed out after 30s" (đo 11/10/2026: destroy ở 1 giây, thoát ở 30 giây); tiến trình play còn giữ vé, câu sau phải chờ.
+ */
+const EXIT_GRACE_MS = 1000;
+/** Việc chạy nền không ai await (tách tiến trình play qua Start-Process): chờ xong rồi mới tự thoát. */
+const background = new Set<Promise<unknown>>();
+main()
+  .catch((err) => {
+    log(`lỗi ${process.argv[2]}: ${(err as Error).stack ?? err}`);
+    // Hook không được làm Claude Code lỗi theo.
+    process.exitCode = 0;
+  })
+  .finally(async () => {
+    await Promise.allSettled(background);
+    setTimeout(() => process.exit(), EXIT_GRACE_MS).unref();
+  });

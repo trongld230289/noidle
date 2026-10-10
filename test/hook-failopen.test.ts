@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { build } from 'esbuild';
+import { writeRegistry } from '../src/signal';
 
 /**
  * Copilot CLI (và phiên Copilot trên Agent Host của VS Code) coi preToolUse thoát khác 0 là lỗi và từ chối tool đó
@@ -38,5 +39,26 @@ describe('hook never fails the agent', () => {
 
   it('exits 0 when the agent sends input it cannot parse', async () => {
     expect(await run(['notify', '--event', 'PreToolUse', '--source', 'copilot'], '{ not json')).toBe(0);
+  });
+});
+
+describe.runIf(process.platform === 'win32')('hook does not outlive its work', () => {
+  it('exits promptly when a window pipe is busy (libuv would wait 30 s in WaitNamedPipe)', async () => {
+    const name = `noidle-busy-${process.pid}`;
+    // Một instance duy nhất, tự nối một client vào: client khác nối tới gặp ERROR_PIPE_BUSY như cửa sổ đang reload.
+    const holder = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+      `$s = New-Object System.IO.Pipes.NamedPipeServerStream('${name}', [System.IO.Pipes.PipeDirection]::InOut, 1); ` +
+      `$c = New-Object System.IO.Pipes.NamedPipeClientStream('.', '${name}'); $c.Connect(); $s.WaitForConnection(); ` +
+      `[Console]::Out.WriteLine('ready'); [Console]::Out.Flush(); Start-Sleep 60`], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+    try {
+      await new Promise<void>((resolve) => holder.stdout.on('data', (d: Buffer) => d.toString().includes('ready') && resolve()));
+      const cwd = path.join(work, 'proj');
+      writeRegistry({ pid: process.pid, pipe: `\\\\.\\pipe\\${name}`, folders: [cwd] }, path.join(tmp, 'noidle-tts', 'windows'));
+      const t0 = Date.now();
+      expect(await run(['prompt'], JSON.stringify({ prompt: 'hello', cwd, session_id: 'busy-test' }))).toBe(0);
+      expect(Date.now() - t0).toBeLessThan(10_000);
+    } finally {
+      holder.kill();
+    }
   });
 });
