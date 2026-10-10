@@ -21,9 +21,18 @@ export interface IdleStatus {
   warning: boolean;
 }
 
+function attentionLabel(reason: AttentionReason, agent: string): string {
+  return { done: `${agent} is done`, approve: 'needs approval', answer: 'needs your answer' }[reason];
+}
+
+/** Dòng tạm trên status bar của cửa sổ đang focus khi một cửa sổ VS Code khác cần người dùng. */
+export function peerNotice(workspace: string, reason: AttentionReason, agent: string): string {
+  return `$(bell-dot) ${workspace}: ${attentionLabel(reason, agent)}`;
+}
+
 export function idleStatus(input: IdleStatusInput): IdleStatus {
   if (input.attention) {
-    const label = { done: `${input.agent} is done`, approve: 'needs approval', answer: 'needs your answer' }[input.attention];
+    const label = attentionLabel(input.attention, input.agent);
     return { text: `$(bell-dot) ${label}`, tooltip: 'This window needs you. Clears when the window gets focus', command: 'noIdle.toggle', warning: true };
   }
   if (input.missingPlayer) {

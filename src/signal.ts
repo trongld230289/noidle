@@ -24,7 +24,11 @@ export interface WindowEntry {
  * tool đã chạy (terminal Copilot mở, lệnh bắt đầu, chatDone) rồi mới đọc "cần approve". chatDone: PostToolUse của Chat.
  */
 /** probe: hook hỏi "cửa sổ này có chứa agent không" (trả 'owned' hay 'no'); là event riêng để extension cũ không xử lý nhầm. */
-export type SignalEvent = 'listen' | 'submitted' | 'ask' | 'attention' | 'resumed' | 'chatPending' | 'chatDone' | 'probe';
+/**
+ * peerAttention: cửa sổ khác vừa cần người dùng mà không được focus (text = tên workspace của nó). Cửa sổ VS Code đang
+ * focus hiện một dòng trên status bar, vì nháy taskbar của cửa sổ VS Code kia không thấy được khi VS Code đang ở trên cùng.
+ */
+export type SignalEvent = 'listen' | 'submitted' | 'ask' | 'attention' | 'resumed' | 'chatPending' | 'chatDone' | 'probe' | 'peerAttention';
 /** attention: vì sao cửa sổ cần người dùng. */
 export type AttentionReason = 'done' | 'approve' | 'answer';
 export type SignalSource = 'claude' | 'copilot' | 'copilot-cli';
@@ -98,7 +102,7 @@ export function pickWindow(entries: WindowEntry[], cwd: string, caseInsensitive 
 export function parseSignal(line: string): Signal | undefined {
   try {
     const o = JSON.parse(line.trim()) as Partial<Signal>;
-    const events: SignalEvent[] = ['listen', 'submitted', 'ask', 'attention', 'resumed', 'chatPending', 'chatDone', 'probe'];
+    const events: SignalEvent[] = ['listen', 'submitted', 'ask', 'attention', 'resumed', 'chatPending', 'chatDone', 'probe', 'peerAttention'];
     const event = o.event as SignalEvent | undefined;
     if (!event || !events.includes(event) || typeof o.cwd !== 'string') return undefined;
     const out: Signal = { event, session: typeof o.session === 'string' ? o.session : '', cwd: o.cwd };

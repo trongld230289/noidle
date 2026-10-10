@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { idleStatus } from '../src/statusText';
+import { idleStatus, peerNotice } from '../src/statusText';
 
 describe('idleStatus: nút NoIdle trên status bar lúc rảnh', () => {
   it('bình thường: mic, bấm để nghe (F6)', () => {
@@ -19,5 +19,13 @@ describe('idleStatus: nút NoIdle trên status bar lúc rảnh', () => {
     expect(s.warning).toBe(true);
     expect(idleStatus({ agent: 'Claude', attention: 'approve' }).text).toBe('$(bell-dot) needs approval');
     expect(idleStatus({ agent: 'Claude', attention: 'answer' }).text).toBe('$(bell-dot) needs your answer');
+  });
+});
+
+describe('peerNotice: cửa sổ đang focus báo cửa sổ VS Code khác cần người dùng', () => {
+  it('ghi tên workspace và lý do', () => {
+    expect(peerNotice('Research', 'done', 'Claude')).toBe('$(bell-dot) Research: Claude is done');
+    expect(peerNotice('Research', 'approve', 'Copilot')).toBe('$(bell-dot) Research: needs approval');
+    expect(peerNotice('Research', 'answer', 'Claude')).toBe('$(bell-dot) Research: needs your answer');
   });
 });

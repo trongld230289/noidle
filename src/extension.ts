@@ -13,7 +13,8 @@ import { langOf, isAuto, effectiveVoice, usesVietPronunciation, DEFAULT_VOICE, t
 import { ELEVEN_DEFAULT_VOICE, ELEVEN_DEFAULT_MODEL, readUsage, usageFilePath } from './elevenlabs';
 import { applyHooks, copilotHooksFile, copilotHookPaths, hooksEnabled, ClaudeSettings, HookOptions } from './claudeHooks';
 import { inject, InjectorApi, Target } from './injector';
-import { startServer, writeRegistry, removeRegistry, pipeName, Signal, acquireMic, releaseMic, micHolder, signalPid, canAutoListen, type AttentionReason } from './signal';
+import { startServer, writeRegistry, removeRegistry, readRegistry, pipeName, Signal, acquireMic, releaseMic, micHolder, signalPid, canAutoListen, type AttentionReason } from './signal';
+import { peerNotice } from './statusText';
 import { audioLevel, pcmToWav } from './wav';
 import { terminalForAgent, agentInWindow } from './proctree';
 import { planMigration, planMuteMigration, configProperties } from './migrate';
@@ -36,6 +37,8 @@ const WELCOMED_KEY = 'noIdle.welcomed';
 /** Bản dịch của noIdle.recapPrompt: { hash của text nguồn, bản dịch }. Đổi text là hash khác, dịch lại. */
 const RECAP_CACHE_KEY = 'noIdle.recapPromptTranslation';
 const GROQ_KEYS_URL = 'https://console.groq.com/keys';
+/** Dòng báo cửa sổ khác cần người dùng giữ trên status bar bao lâu. */
+const PEER_NOTICE_MS = 10_000;
 const MAX_RECORD_MS = 120_000;
 const MIN_RECORD_MS = 500;
 /** Hands-free: tổng chữ ít hơn chừng này từ thì không tự gửi, tránh gửi nhầm tiếng động hay một từ lẻ. */
@@ -1310,6 +1313,12 @@ export function activate(ctx: vscode.ExtensionContext): void {
       // (Claude Code, Copilot CLI) nằm trong chuỗi pid thì mới là cửa sổ chứa agent. Chỉ trả lời, không xử lý.
       return (await agentInWindow(s.ancestors, process.pid, vscode.window.terminals)) ? 'owned' : 'no';
     }
+    if (s.event === 'peerAttention') {
+      if (!vscode.window.state.focused || !s.text || !s.reason) return;
+      log(`cửa sổ "${s.text}" cần người dùng (${s.reason}), hiện trên status bar`);
+      vscode.window.setStatusBarMessage(peerNotice(s.text, s.reason, s.source === 'claude' || !s.source ? 'Claude' : 'Copilot'), PEER_NOTICE_MS);
+      return;
+    }
     log(`tín hiệu ${s.event} (session ${s.session || '-'})`);
     if (s.source) agentLabel = s.source === 'claude' ? 'Claude' : 'Copilot';
     if (s.event === 'chatPending') {
@@ -1488,6 +1497,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       status.attention(reason, langOf(cfg.language), agentLabel);
       await tintTitleBar();
     }
+    tellPeers(reason);
     if (cfg.attentionFlash && process.platform === 'darwin') {
       // macOS: không có taskbar, nháy title bar thay thế; attentionColor bật thì nháy xong giữ màu.
       const my = ++blinkRun;
@@ -1508,6 +1518,20 @@ export function activate(ctx: vscode.ExtensionContext): void {
       const r = await flashWindowEx(name, { hwnd: myHwnd, hasEditor: hasEditor() });
       log(`attention ${reason}: nháy taskbar ${used ? `hwnd ${used}` : `"${name}"`} → ${r.result}${r.staleHandle ? ' (handle không còn đúng, đã tìm theo tên; sẽ học lại)' : ''}`);
       if (r.staleHandle && myHwnd === used) myHwnd = undefined;
+    }
+  }
+
+  /**
+   * Báo các cửa sổ VS Code khác: cửa sổ nào đang focus thì hiện một dòng tạm trên status bar. Nháy taskbar của cửa sổ
+   * này không thấy được khi một cửa sổ VS Code khác đang ở trên cùng (chung tiến trình, chung một nút taskbar).
+   */
+  function tellPeers(reason: AttentionReason): void {
+    const name = wsName();
+    if (!name) return;
+    const source = agentLabel === 'Claude' ? 'claude' : 'copilot';
+    for (const e of readRegistry()) {
+      if (e.pid === process.pid) continue;
+      void signalPid(e.pid, { event: 'peerAttention', session: '', cwd: '', reason, text: name, source }).catch(() => undefined);
     }
   }
 

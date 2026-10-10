@@ -81,3 +81,11 @@ describe('mic lock is taken atomically and can be handed over', () => {
     expect(parseSignal('{"event":"submitted","session":"","cwd":"D:/x"}')).toBeTruthy();
   });
 });
+
+describe('peerAttention', () => {
+  it('giữ tên workspace, lý do và agent qua pipe', () => {
+    expect(parseSignal('{"event":"peerAttention","session":"","cwd":"","reason":"done","text":"Research","source":"claude"}')).toEqual({
+      event: 'peerAttention', session: '', cwd: '', reason: 'done', text: 'Research', source: 'claude',
+    });
+  });
+});
