@@ -45,9 +45,34 @@ public static class NoIdleNative {
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern bool Process32FirstW(IntPtr snap, ref PROCESSENTRY32W e);
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern bool Process32NextW(IntPtr snap, ref PROCESSENTRY32W e);
   [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
+  [StructLayout(LayoutKind.Sequential)]
+  public struct MSG { public IntPtr hwnd; public uint message; public IntPtr wParam; public IntPtr lParam; public uint time; public int ptX; public int ptY; }
+  [DllImport("user32.dll")] public static extern bool RegisterHotKey(IntPtr hWnd, int id, uint mods, uint vk);
+  [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+  [DllImport("user32.dll")] public static extern bool PeekMessage(out MSG msg, IntPtr hWnd, uint min, uint max, uint remove);
 
   // FLASHW_ALL | FLASHW_TIMERNOFG: nhay toi khi cua so len foreground.
   const uint FLASH_FLAGS = 15;
+
+  // ---- Phim tat toan he thong (F7 bo qua khi dang doc, ca luc dang o app khac) ----
+  /**
+   * Giu phim vk (MOD_NOREPEAT) toi khi tien trinh cha thoat; moi lan bam in "hotkey". App khac da giu phim thi in "busy"
+   * va thoat. Khong dung keyboard hook: Windows chi bao dung phim nay, va tu tra phim khi tien trinh chet.
+   */
+  public static void WatchHotkey(uint vk, int parentPid) {
+    if (!RegisterHotKey(IntPtr.Zero, 1, 0x4000, vk)) { Console.Out.WriteLine("busy"); Console.Out.Flush(); return; }
+    Console.Out.WriteLine("ready"); Console.Out.Flush();
+    try {
+      int tick = 0;
+      while (true) {
+        MSG m;
+        while (PeekMessage(out m, IntPtr.Zero, 0x0312, 0x0312, 1)) { Console.Out.WriteLine("hotkey"); Console.Out.Flush(); }
+        System.Threading.Thread.Sleep(30);
+        if (++tick % 15 != 0) continue;
+        try { if (System.Diagnostics.Process.GetProcessById(parentPid).HasExited) return; } catch { return; }
+      }
+    } finally { UnregisterHotKey(IntPtr.Zero, 1); }
+  }
 
   // ---- Cay tien trinh (Toolhelp32, vai ms) ----
   public static Dictionary<uint, uint> Parent = new Dictionary<uint, uint>();
@@ -281,6 +306,42 @@ export function runPowerShell(script: string, name: string): Promise<RunResult> 
       resolve({ code: code ?? -1, out });
     });
   });
+}
+
+export const VK_F7 = 0x76;
+let hotkeySeq = 0;
+
+/**
+ * Giữ phím tắt toàn hệ thống vk (mặc định F7) tới khi gọi hàm trả về; mỗi lần bấm gọi onPress, kể cả lúc người dùng
+ * đang ở Teams hay trình duyệt. Chạy một PowerShell riêng (RegisterHotKey cần vòng nhận message); nó tự thoát khi
+ * tiến trình này chết nên không giữ phím mãi. App khác đã giữ phím thì onBusy, F7 chỉ còn chạy trong VS Code như cũ.
+ */
+export function watchHotkey(onPress: () => void, opts: { vk?: number; onBusy?: () => void; onReady?: () => void } = {}): () => void {
+  const dir = path.join(os.tmpdir(), 'noidle-tts');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `hotkey-${process.pid}-${++hotkeySeq}.ps1`);
+  fs.writeFileSync(file, nativeScript(`[NoIdleNative]::WatchHotkey(${opts.vk ?? VK_F7}, ${process.pid})`), 'utf8');
+  const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], {
+    stdio: ['ignore', 'pipe', 'ignore'],
+    windowsHide: true,
+  });
+  child.on('error', () => undefined);
+  let buf = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (chunk: string) => {
+    buf += chunk;
+    const lines = buf.split(/\r?\n/);
+    buf = lines.pop() ?? '';
+    for (const line of lines) {
+      if (line === 'hotkey') onPress();
+      else if (line === 'busy') opts.onBusy?.();
+      else if (line === 'ready') opts.onReady?.();
+    }
+  });
+  return () => {
+    child.kill();
+    fs.rm(file, { force: true }, () => undefined);
+  };
 }
 
 /** Đọc các dòng "chain<tab>pid<tab>exe" script in ra (gần nhất trước). */

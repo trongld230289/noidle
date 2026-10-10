@@ -33,7 +33,7 @@ import { routeSignal, readRegistry, micHolder, MIC_LOCK_MAX_AGE_MS, type Signal,
 import { agentChainFrom, procTable, procChain, type ProcEntry } from './proctree';
 import { resolvePlayer } from './findTool';
 import { flashHostWindow } from './attention';
-import { nativeScript, runPowerShell, parseChain } from './native';
+import { nativeScript, runPowerShell, parseChain, watchHotkey } from './native';
 import { launchDetached } from './launch';
 import { hedged } from './hedge';
 import { pronounce } from './pronounce';
@@ -1321,6 +1321,16 @@ async function playText(text: string, ticket: string, voice: string): Promise<vo
   };
   // ffplay can still be speaking buffered audio after the last chunk was written.
   const permissionMonitor = permissionPlayback ? setInterval(cancelCompletedPermission, PERMISSION_POLL_MS) : undefined;
+  // F7 toàn hệ thống chỉ trong lúc đang đọc: người dùng đang ở Teams hay app khác vẫn bỏ qua được, đọc xong trả phím.
+  const releaseHotkey = process.platform === 'win32' && process.env.NOIDLE_GLOBAL_SKIP !== '0'
+    ? watchHotkey(() => {
+      if (stopped) return;
+      log('skip: F7 toàn hệ thống');
+      cancelled = true;
+      stopped = true;
+      player.kill();
+    }, { onBusy: () => log('F7 toàn hệ thống: app khác đang giữ phím, F7 chỉ chạy trong VS Code') })
+    : undefined;
 
   // Đường ống: luôn có SYNTH_AHEAD khối đang tổng hợp (khối đang chờ phát và các khối sau), đưa vào ffplay theo
   // thứ tự. Edge có lúc mất 5-8 giây một khối trong khi khối đầu chỉ phát ~5 giây, tổng hợp một khối phía trước
@@ -1352,6 +1362,7 @@ async function playText(text: string, ticket: string, voice: string): Promise<vo
     await finished;
   } finally {
     clearInterval(permissionMonitor);
+    releaseHotkey?.();
   }
   if (!failed && !cancelled) log(`phát xong sau ${Date.now() - t0}ms`);
 }
