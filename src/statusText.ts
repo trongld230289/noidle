@@ -25,9 +25,9 @@ function attentionLabel(reason: AttentionReason, agent: string): string {
   return { done: `${agent} is done`, approve: 'needs approval', answer: 'needs your answer' }[reason];
 }
 
-/** Dòng tạm trên status bar của cửa sổ đang focus khi một cửa sổ VS Code khác cần người dùng. */
+/** Popup trên cửa sổ đang focus khi một cửa sổ VS Code khác cần người dùng (popup không vẽ codicon, nên không có icon). */
 export function peerNotice(workspace: string, reason: AttentionReason, agent: string): string {
-  return `$(bell-dot) ${workspace}: ${attentionLabel(reason, agent)}`;
+  return `${workspace}: ${attentionLabel(reason, agent)}`;
 }
 
 export function idleStatus(input: IdleStatusInput): IdleStatus {

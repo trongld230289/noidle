@@ -24,8 +24,8 @@ describe('idleStatus: nút NoIdle trên status bar lúc rảnh', () => {
 
 describe('peerNotice: cửa sổ đang focus báo cửa sổ VS Code khác cần người dùng', () => {
   it('ghi tên workspace và lý do', () => {
-    expect(peerNotice('Research', 'done', 'Claude')).toBe('$(bell-dot) Research: Claude is done');
-    expect(peerNotice('Research', 'approve', 'Copilot')).toBe('$(bell-dot) Research: needs approval');
-    expect(peerNotice('Research', 'answer', 'Claude')).toBe('$(bell-dot) Research: needs your answer');
+    expect(peerNotice('Research', 'done', 'Claude')).toBe('Research: Claude is done');
+    expect(peerNotice('Research', 'approve', 'Copilot')).toBe('Research: needs approval');
+    expect(peerNotice('Research', 'answer', 'Claude')).toBe('Research: needs your answer');
   });
 });

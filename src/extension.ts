@@ -37,8 +37,6 @@ const WELCOMED_KEY = 'noIdle.welcomed';
 /** Bản dịch của noIdle.recapPrompt: { hash của text nguồn, bản dịch }. Đổi text là hash khác, dịch lại. */
 const RECAP_CACHE_KEY = 'noIdle.recapPromptTranslation';
 const GROQ_KEYS_URL = 'https://console.groq.com/keys';
-/** Dòng báo cửa sổ khác cần người dùng giữ trên status bar bao lâu (bấm vào để nhảy sang). */
-const PEER_NOTICE_MS = 15_000;
 const MAX_RECORD_MS = 120_000;
 const MIN_RECORD_MS = 500;
 /** Hands-free: tổng chữ ít hơn chừng này từ thì không tự gửi, tránh gửi nhầm tiếng động hay một từ lẻ. */
@@ -1529,23 +1527,26 @@ export function activate(ctx: vscode.ExtensionContext): void {
   }
 
   /**
-   * Dòng báo cửa sổ khác cần người dùng; bấm vào thì nhảy sang cửa sổ đó: chạy CLI của chính VS Code này với đúng folder
+   * Popup báo cửa sổ khác cần người dùng, có nút nhảy sang cửa sổ đó: chạy CLI của chính VS Code này với đúng folder
    * hay file workspace của nó, VS Code thấy đã mở thì focus cửa sổ đó (tiến trình chính đang foreground nên Windows cho).
+   * Mỗi cửa sổ nguồn chỉ một popup đang mở, tránh chồng popup khi nó báo nhiều lần trước khi người dùng bấm.
    */
-  const peerItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 1000);
-  peerItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
-  let peerTimer: NodeJS.Timeout | undefined;
-  ctx.subscriptions.push(peerItem, { dispose: () => clearTimeout(peerTimer) });
+  const PEER_SWITCH = 'Switch to window';
+  const peerOpen = new Set<string>();
   function showPeerNotice(text: string, target: string): void {
-    peerItem.text = text;
-    peerItem.tooltip = target ? 'Click to switch to that window' : undefined;
-    peerItem.command = target ? { title: 'Switch window', command: 'noIdle.focusPeer', arguments: [target] } : undefined;
-    peerItem.show();
-    clearTimeout(peerTimer);
-    peerTimer = setTimeout(() => peerItem.hide(), PEER_NOTICE_MS);
+    const key = target || text;
+    if (peerOpen.has(key)) return;
+    peerOpen.add(key);
+    const buttons = target ? [PEER_SWITCH] : [];
+    void vscode.window.showInformationMessage(text, ...buttons).then(
+      (pick) => {
+        peerOpen.delete(key);
+        if (pick === PEER_SWITCH) focusPeer(target);
+      },
+      () => peerOpen.delete(key),
+    );
   }
   function focusPeer(target: unknown): void {
-    peerItem.hide();
     if (typeof target !== 'string' || !target) return;
     const cli = path.join(vscode.env.appRoot, 'out', 'cli.js');
     log(`nhảy sang cửa sổ ${target}`);
