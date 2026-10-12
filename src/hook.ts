@@ -606,8 +606,9 @@ async function modeSpeak(): Promise<void> {
     return;
   }
   // Claude kết thúc lượt mà còn agent hay lệnh chạy nền: nó đang chờ, chưa xong. Claude Code sẽ gọi nó lại
-  // khi việc nền xong. Không báo "done", không nháy, không mở mic; chỉ đọc nếu Claude chủ ý viết phần 🔊
-  // (báo tiến độ cho người đang nghe). Hết việc nền rồi mới báo như thường, kể cả ở lượt do notification mở.
+  // khi việc nền xong. Không báo "done", không nháy, không mở mic, cũng không đọc phần 🔊: prompt bắt Claude
+  // viết 🔊 ở mọi câu trả lời nên lượt chờ nào cũng có, đọc hết thì cứ vài chục giây lại một câu "vẫn đang chờ"
+  // (12/10/2026: 418 lần trong log). Hết việc nền rồi mới báo như thường, kể cả ở lượt do notification mở.
   // Người dùng gõ tiếp lúc Claude đang làm: câu đó nằm trong hàng đợi và Claude làm ngay, cũng chưa xong.
   const queued = queuedPrompts(transcript);
   const pending = [...pendingBackgroundTasks(transcript), ...(queued ? [`${queued} prompt đang xếp hàng`] : [])];
@@ -622,12 +623,11 @@ async function modeSpeak(): Promise<void> {
     await attentionSent;
     return;
   }
-  const answer = lastAssistantText(transcript);
-  if (waiting && !hasSpeakSection(answer)) {
-    log(`speak: còn ${pending.length} việc nền đang chạy (${pending.join(', ')}), chưa xong nên không báo`);
+  if (waiting) {
+    log(`speak: còn ${pending.length} việc nền đang chạy (${pending.join(', ')}), chưa xong nên không đọc, không báo`);
     return;
   }
-  if (waiting) log(`speak: còn ${pending.length} việc nền đang chạy, chỉ đọc phần 🔊, không mở mic`);
+  const answer = lastAssistantText(transcript);
   const session = input.session_id ?? '';
   const cwd = input.cwd || process.cwd();
   // announce luôn đọc tiếng Anh ("Workspace X is done."), bất kể ngôn ngữ của phiên.
@@ -643,7 +643,7 @@ async function modeSpeak(): Promise<void> {
   }
   // Hands-free: extension mở mic sau khi loa phát xong. Tiến trình play gửi tín hiệu listen khi xong;
   // không có gì để đọc thì gửi ngay từ đây.
-  const listenCwd = cfg.handsFree && !waiting ? cwd : undefined;
+  const listenCwd = cfg.handsFree ? cwd : undefined;
   if (text) {
     // Không chờ tra chuỗi ở đây (giọng đọc sẽ chậm): đưa chuỗi đã lưu nếu có; không thì play đọc lại từ dấu phiên
     // sau khi phát xong, lúc đó attention() chạy song song đã lưu chuỗi.

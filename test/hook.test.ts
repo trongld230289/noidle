@@ -233,12 +233,14 @@ describe('claude-hook background task notifications', () => {
   const agentLaunch = JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: 'Async agent launched successfully.' }] }, toolUseResult: { isAsync: true, status: 'async_launched', agentId: 'server' } });
   const notificationRow = JSON.stringify({ type: 'user', message: { content: notification } });
 
-  it('a turn that leaves a background agent running is silent: no "done", no attention, no mic; the turn after its notification, with nothing left running, announces and opens the mic', async () => {
+  it('a turn that leaves a background agent running is silent even with a 🔊 section: no speech, no "done", no attention, no mic; the turn after its notification, with nothing left running, announces and opens the mic', async () => {
+    // 12/10/2026: prompt bắt Claude viết 🔊 ở mọi câu trả lời, nên lượt chờ việc nền nào cũng có 🔊; đọc hết thì
+    // cứ vài chục giây lại "test được 44%, vẫn đang chờ". Mục tiêu là báo lúc xong hay cần approve, không phải tường thuật.
     const session = 'background-speech';
     const cfg = path.join(work, 'background-handsfree.json');
     fs.writeFileSync(cfg, JSON.stringify({ handsFree: true }));
     const transcript = path.join(work, 'background-transcript.jsonl');
-    fs.writeFileSync(transcript, [agentLaunch, JSON.stringify({ type: 'assistant', message: { content: 'Task 1 is running; waiting for its report.' } })].join('\n'));
+    fs.writeFileSync(transcript, [agentLaunch, JSON.stringify({ type: 'assistant', message: { content: 'Task 1 is running; waiting for its report.\n\n🔊 Test được 44%, mình vẫn đang chờ.' } })].join('\n'));
     await run(['prompt', '--config', cfg], JSON.stringify({ session_id: session, cwd: work, prompt: 'Run the plan with subagents' }));
     const before = readLog().length;
     const result = await run(['speak', '--config', cfg, '--player', path.join(work, 'no-such-player.exe')], JSON.stringify({ session_id: session, cwd: work, transcript_path: transcript }));
@@ -260,23 +262,6 @@ describe('claude-hook background task notifications', () => {
     expect(await waitLog(resumed, 'signal listen')).toContain('signal listen');
   }, 30_000);
 
-  it('reads the 🔊 section Claude wrote while background work is still running, without opening the mic', async () => {
-    const session = 'background-report';
-    const cfg = path.join(work, 'background-report.json');
-    fs.writeFileSync(cfg, JSON.stringify({ handsFree: true }));
-    const transcript = path.join(work, 'background-report.jsonl');
-    fs.writeFileSync(
-      transcript,
-      [agentLaunch, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Review done.\n🔊 The task 4 review found one real bug.' }] } })].join('\n') + '\n',
-    );
-    await run(['prompt', '--config', cfg], JSON.stringify({ session_id: session, cwd: work, prompt: notification }));
-    const before = readLog().length;
-    await run(['speak', '--config', cfg, '--player', path.join(work, 'no-such-player.exe')], JSON.stringify({ session_id: session, cwd: work, transcript_path: transcript }));
-    const added = readLog().slice(before);
-    expect(added).toContain('play pid');
-    expect(added).toContain('task 4 review');
-    expect(added).not.toContain('signal listen');
-  });
 });
 
 describe('claude-hook pronunciations', () => {
