@@ -102,7 +102,7 @@ function config() {
     glossary: c.get<string[]>('glossary', []),
     pronunciations: c.get<Record<string, string>>('pronunciations', {}) || {},
     voiceSayWorkspace: c.get<'auto' | 'always' | 'never'>('voiceSayWorkspace', 'auto') || 'auto',
-    voiceStyle: (c.get<string>('voiceStyle', 'recap') === 'announce' ? 'announce' : 'recap') as 'recap' | 'announce',
+    voiceStyle: (['announce', 'ting'].includes(c.get<string>('voiceStyle', 'recap')) ? c.get<string>('voiceStyle') : 'recap') as 'recap' | 'announce' | 'ting',
     /** Thân hướng dẫn recap người dùng tự sửa; rỗng là bản mặc định (recapPromptsFor xử lý). */
     recapPrompt: (c.get<string>('recapPrompt', '') || '').trim(),
     attentionFlash: c.get<boolean>('attentionFlash', true),
@@ -1306,7 +1306,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, pronounce(p.text, cfg.pronunciations, usesVietPronunciation(voice, lang)), 'utf8');
     const args = [hookScript, 'play', file, '--voice', voice, '--rate', cfg.voiceRate, '--player', playerPath(), '--config', hookConfigPath,
-      '--kind', 'notify', '--session', p.session || '-'];
+      '--kind', 'notify', '--session', p.session || '-', ...(cfg.voiceStyle === 'ting' ? ['--chime', 'approve'] : [])];
     const child = spawn(tools.node, args, { detached: true, stdio: 'ignore', windowsHide: true });
     child.on('error', (e) => log(`chat pending: không chạy được node để đọc: ${e.message}`));
     child.unref();

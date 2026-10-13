@@ -32,6 +32,7 @@ Ngoài ra: bấm **F6** để nói thành chữ ở bất kỳ đâu trong VS Co
 - Không cần nói thì không cần lấy Groq key.
 - Không cần nghe agent đọc thì tắt **Voice Response**, cửa sổ vẫn nháy.
 - Chỉ cần nghe ngắn gọn "Workspace A is done" thì chọn **Voice Style** = `announce`.
+- Không muốn nghe đọc, chỉ cần tiếng ting thì chọn **Voice Style** = `ting`.
 
 ## Cài trong 3 bước
 
@@ -92,7 +93,7 @@ Khi approve hoặc chọn đáp án, im lặng hoặc nói không rõ thì chuy�
 | Setting | Mặc định | Ý nghĩa |
 |---|---|---|
 | Voice Response | bật | Đọc câu trả lời và câu báo của Claude Code, Copilot Chat, Copilot CLI. Tắt thì không đọc; mic vẫn hoạt động theo Hands Free, cửa sổ vẫn nháy. Lệnh nhanh: `NoIdle: Tắt/bật giọng đọc`. |
-| Voice Style | `recap` | `recap`: đọc tóm tắt nội dung (tốn thêm ít token mỗi lượt). `announce`: chỉ đọc "Workspace X is done" (tiếng Anh), không tốn token. |
+| Voice Style | `recap` | `recap`: đọc tóm tắt nội dung (tốn thêm ít token mỗi lượt). `announce`: chỉ đọc "Workspace X is done" (tiếng Anh), không tốn token. `ting`: không đọc gì, xong việc, cần approve, cần trả lời mỗi loại một tiếng ting khác nhau. |
 | Recap Prompt | bản tiếng Việt sẵn | Dặn agent viết gì trong phần recap; nghe mệt thì sửa ngắn lại. Viết một thứ tiếng, extension tự dịch sang tiếng kia bằng Copilot Chat hoặc Claude Code đang có (không cần key). Quy tắc số viết bằng chữ số luôn được nối sẵn, không cần ghi. |
 | Voice Notify | bật | Đọc "Workspace X cần approve" / "cần bạn trả lời". Tắt Voice Response thì không đọc dù đang bật. |
 | Voice Say Workspace | `auto` | Đọc tên workspace ở đầu câu. `auto`: chỉ khi mở hơn một cửa sổ. |

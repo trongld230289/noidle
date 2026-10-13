@@ -514,6 +514,41 @@ describe('claude-hook voiceStyle announce', () => {
   });
 });
 
+describe('claude-hook voiceStyle ting', () => {
+  const cfgTing = path.join(work, 'ting.json');
+  const transcript = path.join(work, 'transcript-ting.jsonl');
+  const bogusPlayer = path.join(work, 'no-such-player.exe');
+  beforeAll(() => fs.writeFileSync(cfgTing, JSON.stringify({ voiceResponse: true, handsFree: false, voiceStyle: 'ting' })));
+
+  it('prompt: không chèn hướng dẫn 🔊', async () => {
+    const r = await run(['prompt', '--config', cfgTing], JSON.stringify({ session_id: 'ting-1', cwd: work, prompt: 'sửa hàm A' }));
+    expect(r.code).toBe(0);
+    expect(r.stdout.trim()).toBe('');
+  });
+
+  it('speak: không đọc câu trả lời, chỉ kêu ting done', async () => {
+    fs.writeFileSync(transcript, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Đã sửa.\n\n🔊 Sửa xong hàm A.' }] } }) + '\n');
+    const before = readLog().length;
+    const r = await run(['speak', '--config', cfgTing, '--player', bogusPlayer], JSON.stringify({ session_id: 'ting-1', cwd: work, transcript_path: transcript }));
+    expect(r.code).toBe(0);
+    const added = await waitLog(before, 'play pid');
+    expect(added).toMatch(/speak → play pid \d+ \([^)]*, ting done\)/);
+    expect(added).not.toContain('Sửa xong hàm A');
+  });
+
+  it.each([
+    ['approve', { hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'ls' } }],
+    ['answer', { hook_event_name: 'Notification', notification_type: 'elicitation_dialog' }],
+  ] as const)('notify: cần %s thì kêu tiếng ting riêng, không đọc câu báo', async (chime, event) => {
+    const before = readLog().length;
+    const r = await run(['notify', '--config', cfgTing, '--player', bogusPlayer], JSON.stringify({ session_id: `ting-${chime}`, cwd: work, ...event }));
+    expect(r.code).toBe(0);
+    const added = await waitLog(before, 'play pid');
+    expect(added).toMatch(new RegExp(`notify → play pid \\d+ \\([^)]*, ting ${chime}\\)`));
+    expect(added).toContain('signal attention');
+  });
+});
+
 describe('claude-hook đổi voiceStyle giữa phiên', () => {
   const cfgRecap = path.join(work, 'style-recap.json');
   const cfgAnnounce = path.join(work, 'style-announce.json');

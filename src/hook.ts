@@ -118,8 +118,9 @@ interface HookConfig {
   /**
    * recap (mặc định): dặn Claude viết phần 🔊 và đọc phần đó. announce: không dặn gì (0 token), Stop chỉ đọc câu cứng tiếng Anh
    * "Workspace X is done." hoặc "is asking you."; approve và chọn đáp án vẫn như cũ vì vốn là câu cứng.
+   * ting: không dặn gì, không đọc gì; xong việc, cần approve, cần trả lời mỗi loại một tiếng ting (CHIMES).
    */
-  voiceStyle?: 'recap' | 'announce';
+  voiceStyle?: 'recap' | 'announce' | 'ting';
   /** Mở đầu phần đọc bằng "Workspace X:" — auto: chỉ khi có hơn một cửa sổ VS Code đang mở. */
   voiceSayWorkspace?: 'auto' | 'always' | 'never';
   /**
@@ -463,7 +464,8 @@ function lastAnswerHadSpeak(transcriptPath: string | undefined): boolean {
  */
 function promptContextFor(session: string | undefined, cfg: HookConfig, promptText: string, lastHadSpeak = false): string {
   const auto = isAuto(cfg.language);
-  const style = cfg.voiceStyle === 'announce' ? 'announce' : 'recap';
+  // Dấu phiên chỉ cần biết lượt trước có dặn 🔊 không: ting cũng không dặn nên ghi như announce.
+  const style = writesRecap(cfg) ? 'recap' : 'announce';
   if (!session) return style === 'announce' ? '' : recapInstruction(cfg.recapPrompt, auto ? (detectLang(promptText) ?? 'vi') : langOf(cfg.language));
   const mark = readMark(session);
   const lang = auto ? (detectLang(promptText) ?? mark.lang ?? 'vi') : langOf(cfg.language);
@@ -474,15 +476,20 @@ function promptContextFor(session: string | undefined, cfg: HookConfig, promptTe
   if (style === 'announce') {
     // Hướng dẫn 🔊 còn trong lịch sử phiên (hay Claude tự viết theo memory/lượt trước) thì Claude vẫn viết phần đó: bảo thôi.
     if (prevStyle === 'recap' || lastHadSpeak) {
-      log(`prompt: ${prevStyle === 'recap' ? 'voiceStyle recap → announce' : 'câu trước có phần 🔊'}, bảo Claude thôi viết phần 🔊`);
+      log(`prompt: ${prevStyle === 'recap' ? `voiceStyle recap → ${cfg.voiceStyle}` : 'câu trước có phần 🔊'}, bảo Claude thôi viết phần 🔊`);
       return promptStopRecap(lang);
     }
-    log('prompt: voiceStyle announce, không chèn hướng dẫn');
+    log(`prompt: voiceStyle ${cfg.voiceStyle}, không chèn hướng dẫn`);
     return '';
   }
   if (mark.lang !== undefined && mark.lang !== lang) log(`prompt: đổi ngôn ngữ ${mark.lang} → ${lang}`);
-  if (prevStyle === 'announce') log('prompt: voiceStyle announce → recap, chèn lại hướng dẫn recap');
+  if (prevStyle === 'announce') log('prompt: voiceStyle announce/ting → recap, chèn lại hướng dẫn recap');
   return recapInstruction(cfg.recapPrompt, lang);
+}
+
+/** Chỉ kiểu recap dặn Claude viết phần 🔊; announce và ting không dặn gì (0 token). */
+function writesRecap(cfg: HookConfig): boolean {
+  return cfg.voiceStyle !== 'announce' && cfg.voiceStyle !== 'ting';
 }
 
 /** Xoá dấu của các phiên cũ hơn một tuần; chỉ chạy khi gặp phiên mới nên rất thưa. */
@@ -502,7 +509,7 @@ async function modeStart(): Promise<void> {
   const input = await readHookInput('SessionStart');
   if (sourceArg() !== 'copilot-cli' || input.agent_id) return;
   const cfg = loadConfig();
-  if (voiceOff(cfg) || cfg.voiceStyle === 'announce') return;
+  if (voiceOff(cfg) || !writesRecap(cfg)) return;
   const lang = isAuto(cfg.language)
     ? detectLang(input.initial_prompt ?? '') ?? sessionLang(cfg, input.session_id)
     : langOf(cfg.language);
@@ -549,7 +556,7 @@ async function modePrompt(): Promise<void> {
     const mark = input.session_id ? readMark(input.session_id) : { count: 0 };
     if (input.session_id) writeMark(input.session_id, { ...mark, resumed: true });
     const lang = isAuto(cfg.language) ? mark.lang ?? 'vi' : langOf(cfg.language);
-    const recap = !voiceOff(cfg) && cfg.voiceStyle !== 'announce';
+    const recap = !voiceOff(cfg) && writesRecap(cfg);
     log(`prompt: ${systemPromptKind(promptText)}, session ${input.session_id ?? '-'}, chỉ báo resumed${recap ? `, dặn 🔊 tiếng ${lang}` : ''}`);
     if (recap) {
       process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: recapInstruction(cfg.recapPrompt, lang) } }));
@@ -633,6 +640,12 @@ async function modeSpeak(): Promise<void> {
   // announce luôn đọc tiếng Anh ("Workspace X is done."), bất kể ngôn ngữ của phiên.
   const lang = cfg.voiceStyle === 'announce' ? 'en' : sessionLang(cfg, session);
   let text: string;
+  if (cfg.voiceStyle === 'ting') {
+    // Không đọc gì: một tiếng ting "xong". Hands-free vẫn mở mic sau tiếng ting như sau câu đọc.
+    spawnPlay('ting done', 'speak', session, lang, cfg.handsFree ? cwd : undefined, cfg.handsFree ? cachedChain(session) : undefined, 'done');
+    await attentionSent;
+    return;
+  }
   if (cfg.voiceStyle === 'announce') {
     // Câu cứng luôn có tên workspace, không cần tiền tố "Workspace X:" nữa.
     text = doneAnnouncement(answer, cwd, lang);
@@ -685,7 +698,7 @@ function modeSkip(): void {
  * Tách tiến trình phát rồi thoát để agent không phải chờ. listenCwd: phát xong thì báo extension mở mic.
  * Tách qua launchDetached (launch.ts): spawn detached trực tiếp thì play giữ pipe của VS Code và hook kéo dài tới lúc đọc xong.
  */
-function spawnPlay(raw: string, kind: Ticket['kind'], session: string, lang: Lang, listenCwd?: string, ancestors?: number[]): void {
+function spawnPlay(raw: string, kind: Ticket['kind'], session: string, lang: Lang, listenCwd?: string, ancestors?: number[], chime?: Chime): void {
   if (!speechEnabled(kind) && !listenCwd) return;
   // Giọng vi-VN đọc sai chữ viết tắt và đuôi file tiếng Anh; viết sẵn cách đọc trước khi tổng hợp.
   // Tiếng Anh hoặc giọng đa ngôn ngữ thì bỏ bảng mặc định (nó phiên âm sang tiếng Việt), chỉ giữ bảng của người dùng.
@@ -696,6 +709,7 @@ function spawnPlay(raw: string, kind: Ticket['kind'], session: string, lang: Lan
   fs.writeFileSync(file, text, 'utf8');
   const args = [__filename, 'play', file, '--voice', voice, '--rate', arg('rate', '+0%'), '--player', arg('player', 'ffplay')];
   args.push('--kind', kind, '--session', session || '-');
+  if (chime) args.push('--chime', chime);
   if (permissionPlayback) args.push('--permission-transcript', permissionPlayback.transcript, '--permission-request', permissionPlayback.requestId);
   // play đọc file cấu hình để biết giọng ElevenLabs (key không đi qua dòng lệnh).
   if (arg('config', '')) args.push('--config', arg('config', ''));
@@ -710,7 +724,7 @@ function spawnPlay(raw: string, kind: Ticket['kind'], session: string, lang: Lan
   background.add(child);
   void child.then((r) => {
     const via = r.error ? ` [Start-Process không dùng được (${r.error}), tách trực tiếp]` : '';
-    log(`${kind} → play pid ${r.pid ?? '?'} (${voice})${via}: ${JSON.stringify(text)}`);
+    log(`${kind} → play pid ${r.pid ?? '?'} (${voice}${chime ? `, ting ${chime}` : ''})${via}: ${JSON.stringify(text)}`);
   });
 }
 
@@ -800,6 +814,9 @@ async function modeNotify(): Promise<void> {
     : announcement(input, lang);
   log(`notify ${input.hook_event_name ?? '?'} ${input.notification_type ?? input.tool_name ?? ''}: ${JSON.stringify(text)}`);
   if (!text) return;
+  const reasonKind: AttentionReason = /approve|approval/i.test(text) ? 'approve' : 'answer';
+  // voiceStyle ting: câu báo không đọc, chỉ kêu tiếng ting của approve hay answer (câu chỉ để log).
+  const chime: Chime | undefined = cfg.voiceStyle === 'ting' ? reasonKind : undefined;
   if (chat && approval && input.tool_name === 'Bash' && (!cfg.handsFree || !canVoiceApprove)) {
     // Lệnh terminal của Chat mà không duyệt bằng giọng: Chat gọi hook trước mọi tool, kể cả tool sẽ tự duyệt, và
     // không báo khi hộp thoại hiện. Ép hộp thoại bằng 'ask' thì VS Code ẩn menu "Allow in this session/workspace/
@@ -831,14 +848,14 @@ async function modeNotify(): Promise<void> {
     log('notify: không có cửa sổ nhận chatPending, ép hộp thoại và đọc');
     await attention('approve', input.session_id ?? '', input.cwd || process.cwd(), cfg);
     manualChatApproval(cfg.handsFree ? reason : say.announcedByVoice);
-    spawnPlay(reason, 'notify', input.session_id ?? '', lang);
+    spawnPlay(reason, 'notify', input.session_id ?? '', lang, undefined, undefined, chime);
     return;
   }
   if (chat && approval && !cfg.handsFree) {
     log('notify: Chat sửa file, Hands Free tắt, không ép hộp thoại');
     return;
   }
-  await attention(/approve|approval/i.test(text) ? 'approve' : 'answer', input.session_id ?? '', input.cwd || process.cwd(), cfg);
+  await attention(reasonKind, input.session_id ?? '', input.cwd || process.cwd(), cfg);
   if (permissionCompleted()) return;
   if (voiceOff(cfg)) {
     log('notify: voiceResponse tắt, không đọc câu báo');
@@ -853,7 +870,7 @@ async function modeNotify(): Promise<void> {
       log(`approve: ${input.tool_name} ${dangerous ? 'nguy hiểm' : 'không trong danh sách an toàn'}, không nghe`);
       const reason = dangerous ? say.dangerous(text) : say.notSafe(text);
       manualChatApproval(reason);
-      spawnPlay(reason, 'notify', input.session_id ?? '', lang);
+      spawnPlay(reason, 'notify', input.session_id ?? '', lang, undefined, undefined, chime);
       return;
     }
     await voiceApprove(text, input, cfg, lang);
@@ -871,7 +888,7 @@ async function modeNotify(): Promise<void> {
       if (permissionCompleted()) return;
     }
   }
-  spawnPlay(text, 'notify', input.session_id ?? '', lang);
+  spawnPlay(text, 'notify', input.session_id ?? '', lang, undefined, undefined, chime);
 }
 
 /**
@@ -882,7 +899,7 @@ async function voiceChoose(text: string, input: AgentHookInput, cfg: HookConfig,
   const session = input.session_id ?? '';
   const questions = (input.tool_input?.questions ?? []).filter((q) => q?.question);
   if (!questions.length) {
-    spawnPlay(text, 'notify', session, lang);
+    spawnPlay(text, 'notify', session, lang, undefined, undefined, cfg.voiceStyle === 'ting' ? 'answer' : undefined);
     return;
   }
   const timeoutSec = Math.max(3, cfg.approveTimeoutSec ?? 15);
@@ -1212,8 +1229,11 @@ async function modePlay(): Promise<void> {
   const listenCwd = arg('listen', '');
   const savedAncestors = arg('ancestors', '').split(',').map(Number).filter((pid) => Number.isSafeInteger(pid) && pid > 0);
   await waitTurn(ticket);
-  // --voice ở đây đã được spawnPlay chọn theo ngôn ngữ.
-  if (!arg('kind', '') || speechEnabled(kind)) await playText(text, ticket, arg('voice', DEFAULT_VOICE));
+  // --voice ở đây đã được spawnPlay chọn theo ngôn ngữ. --chime (voiceStyle ting): chỉ phát tiếng ting, chữ chỉ để log.
+  const chime = arg('chime', '');
+  if (!arg('kind', '') || speechEnabled(kind)) {
+    await (isChime(chime) ? playChime(chime, ticket) : playText(text, ticket, arg('voice', DEFAULT_VOICE)));
+  }
   try {
     fs.unlinkSync(file);
   } catch {
@@ -1273,6 +1293,49 @@ async function waitMicFree(): Promise<boolean> {
   }
   if (waited) log(`play: mic cửa sổ khác đang mở, đã chờ ${Date.now() - t0}ms`);
   return true;
+}
+
+/**
+ * Tiếng ting của voiceStyle ting, tổng hợp bằng ffmpeg (aevalsrc), khác tiếng bíp 880Hz trước khi mở mic.
+ * done: một tiếng tắt dần. approve: hai tiếng cao liền nhau, gấp hơn. answer: hai nốt đi lên như câu hỏi.
+ */
+type Chime = 'done' | 'approve' | 'answer';
+const CHIMES: Record<Chime, string> = {
+  done: 'sin(2*PI*1047*t)*exp(-7*t)',
+  approve: 'sin(2*PI*1319*t)*(exp(-14*t)*lt(t,0.16)+exp(-9*(t-0.16))*gte(t,0.16))',
+  answer: 'if(lt(t,0.15),sin(2*PI*1047*t)*exp(-12*t),sin(2*PI*1568*t)*exp(-8*(t-0.15)))',
+};
+
+function isChime(s: string): s is Chime {
+  return Object.prototype.hasOwnProperty.call(CHIMES, s);
+}
+
+/** Phát tiếng ting trong lượt của vé: vẫn chờ mic rảnh, bỏ nếu permission đã xong, F7/skip tắt được qua player của vé. */
+async function playChime(chime: Chime, ticket: string): Promise<void> {
+  if (!(await waitMicFree())) return;
+  if (permissionCompleted()) return;
+  const playerExe = await resolvePlayer(arg('player', 'ffplay'));
+  const player = spawn(
+    playerExe,
+    ['-nodisp', '-autoexit', '-loglevel', 'error', '-f', 'lavfi', '-i', `aevalsrc='0.6*(${CHIMES[chime]})':d=0.6`],
+    { stdio: 'ignore', windowsHide: true },
+  );
+  updateTicket(ticket, { player: player.pid });
+  const permissionMonitor = permissionPlayback
+    ? setInterval(() => { if (permissionCompleted()) player.kill(); }, PERMISSION_POLL_MS)
+    : undefined;
+  try {
+    await new Promise<void>((resolve) => {
+      player.on('error', (e) => {
+        log(`không chạy được player: ${e.message}`);
+        resolve();
+      });
+      player.on('close', () => resolve());
+    });
+  } finally {
+    clearInterval(permissionMonitor);
+  }
+  log(`play: ting ${chime}`);
 }
 
 async function playText(text: string, ticket: string, voice: string): Promise<void> {

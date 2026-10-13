@@ -91,14 +91,16 @@
             "type": "string",
             "enum": [
               "recap",
-              "announce"
+              "announce",
+              "ting"
             ],
             "default": "recap",
             "enumDescriptions": [
               "Claude được dặn viết phần 🔊 tóm tắt câu trả lời và chỉ phần đó được đọc.",
-              "Không dặn Claude gì cả (không tốn token). Trả lời xong chỉ đọc \"Workspace X is done\" hoặc \"Workspace X is asking you\"."
+              "Không dặn Claude gì cả (không tốn token). Trả lời xong chỉ đọc \"Workspace X is done\" hoặc \"Workspace X is asking you\".",
+              "Không đọc gì, không tốn token. Chỉ kêu ting: xong việc, cần approve, cần trả lời mỗi loại một tiếng khác nhau."
             ],
-            "markdownDescription": "Đọc gì khi Claude trả lời xong.\n\n- `recap`: Claude viết thêm một đoạn tóm tắt 🔊 và đọc đoạn đó. Nghe được nội dung, tốn thêm chút token.\n- `announce`: chỉ đọc \"Workspace X is done\" hoặc \"Workspace X is asking you\". Không tốn token, không nghe nội dung.\n\nCâu báo approve và chọn đáp án giống nhau ở cả hai kiểu.",
+            "markdownDescription": "Đọc gì khi Claude trả lời xong.\n\n- `recap`: Claude viết thêm một đoạn tóm tắt 🔊 và đọc đoạn đó. Nghe được nội dung, tốn thêm chút token.\n- `announce`: chỉ đọc \"Workspace X is done\" hoặc \"Workspace X is asking you\". Không tốn token, không nghe nội dung.\n- `ting`: không đọc gì, kể cả câu báo approve và chọn đáp án. Xong việc kêu một tiếng ting, cần approve kêu hai tiếng, cần trả lời kêu hai nốt đi lên. Hands Free vẫn đọc câu hỏi để duyệt hay chọn bằng giọng.\n\nỞ `recap` và `announce`, câu báo approve và chọn đáp án được đọc như nhau.",
             "scope": "application",
             "order": 1
           },
