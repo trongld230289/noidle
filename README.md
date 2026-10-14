@@ -126,6 +126,7 @@ Tắt Voice Response hoặc Voice Notify không tắt Hands Free. Khi không có
 |---|---|---|
 | Tts Provider | `edge` | `edge`: miễn phí, không cần key. `elevenlabs`: hay hơn, cần key. |
 | Voice | Brian | Giọng Edge. Brian đa ngôn ngữ, đọc trộn Việt Anh trong câu. Muốn tiếng Việt chuẩn hơn thì chọn Hoài My hoặc Nam Minh. |
+| Language | `vi` | `vi`, `en` hoặc `auto` (đoán theo từng prompt). Đổi cả giọng đọc, câu báo và nhận dạng. |
 | Voice Rate | `+0%` | Tốc độ đọc, ví dụ `+20%`. |
 | Eleven Labs Api Key | trống | Không bắt buộc. Cách lấy ghi ngay trong Settings. Gói miễn phí đọc khoảng 20.000 ký tự/tháng, hết thì tự về Edge. |
 | Eleven Labs Voice Id | George | Giọng ElevenLabs. |
@@ -137,7 +138,6 @@ Tắt Voice Response hoặc Voice Notify không tắt Hands Free. Khi không có
 | Setting | Mặc định | Ý nghĩa |
 |---|---|---|
 | Groq Api Key | trống | Cần để nói thành chữ. Cách lấy ở trên. |
-| Language | `vi` | `vi`, `en` hoặc `auto` (đoán theo từng prompt). Đổi cả giọng đọc, câu báo và nhận dạng. |
 | Mic Device | trống | Micro dùng để nghe. Chọn bằng lệnh `NoIdle: Chọn micro`. |
 | Refine | bật | AI sửa dấu, chính tả sau khi nghe. Tắt thì chữ ra nhanh hơn khoảng 1 giây. |
 | Refine Model | `gpt-oss-120b` | Model Groq dùng để sửa câu. |

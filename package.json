@@ -285,26 +285,45 @@
             "markdownDescription": "Giọng Edge. Giọng vi-VN đọc tiếng Việt chuẩn nhất nhưng đọc tiếng Anh theo âm Việt; giọng Multilingual đọc trộn Việt Anh tự nhiên hơn. Đọc tiếng Anh mà đang chọn giọng vi-VN thì tự đổi sang Ava.",
             "order": 1
           },
+          "noIdle.language": {
+            "type": "string",
+            "enum": [
+              "vi",
+              "en",
+              "auto",
+              ""
+            ],
+            "enumDescriptions": [
+              "Tiếng Việt: Whisper nghe tiếng Việt, LLM sửa dấu thanh, Claude viết phần 🔊 bằng tiếng Việt, hook nói tiếng Việt.",
+              "English: Whisper listens for English, the LLM cleans up English, Claude writes the 🔊 part in English, the hook speaks English, and a vi-VN voice is swapped for a multilingual one.",
+              "Tự động: hook nhìn prompt bạn vừa gửi (có dấu tiếng Việt hay không) để chọn ngôn ngữ cho phần 🔊, câu báo và giọng, nhớ theo từng phiên; mic để Whisper tự nhận diện (nói tiếng Việt trộn thuật ngữ tiếng Anh có thể bị đoán nhầm sang tiếng Anh). / Auto: the hook picks the language from each prompt you send and remembers it per session; the mic lets Whisper auto-detect.",
+              "Whisper tự nhận diện ngôn ngữ; mọi thứ khác như tiếng Việt."
+            ],
+            "default": "vi",
+            "markdownDescription": "Ngôn ngữ làm việc. `vi` (mặc định) hoặc `en` chi phối cả Whisper, LLM sửa câu, hướng dẫn 🔊 cho Claude/Copilot, câu hook nói ra và bảng phiên âm; `auto` đoán theo prompt mỗi lượt và nhớ theo phiên, đổi ngôn ngữ giữa phiên là Claude đổi theo ngay lượt đó. Đổi là có hiệu lực ngay ở lượt sau. Để trống thì Whisper tự nhận diện, còn lại như `vi`. / Working language: `en` switches Whisper, the LLM cleanup, the 🔊 instructions for Claude/Copilot and every spoken hook phrase to English; `auto` follows the language of each prompt.",
+            "scope": "application",
+            "order": 2
+          },
           "noIdle.voiceRate": {
             "type": "string",
             "default": "+0%",
             "scope": "application",
             "markdownDescription": "Tốc độ đọc: `+20%` nhanh hơn, `-10%` chậm hơn.",
-            "order": 2
+            "order": 3
           },
           "noIdle.elevenLabsApiKey": {
             "type": "string",
             "default": "",
             "markdownDescription": "Không bắt buộc. Để trống thì đọc bằng giọng Edge miễn phí. Muốn giọng hay hơn:\n\n1. Mở [elevenlabs.io/app/settings/api-keys](https://elevenlabs.io/app/settings/api-keys), đăng nhập.\n2. Bấm **Create API Key**, copy key dán vào ô dưới.\n\nGói miễn phí đọc được khoảng 20.000 ký tự mỗi tháng. Có bật Settings Sync thì thêm `noIdle.elevenLabsApiKey` vào `settingsSync.ignoredSettings`.",
             "scope": "application",
-            "order": 3
+            "order": 4
           },
           "noIdle.elevenLabsVoiceId": {
             "type": "string",
             "default": "JBFqnCBsd6RMkjVDRZzb",
             "markdownDescription": "Voice ID ElevenLabs. Mặc định `JBFqnCBsd6RMkjVDRZzb` là **George** (nam, giọng có sẵn của ElevenLabs, đọc trộn Việt Anh trong một câu, tiếng Việt hơi ngữ điệu Tây). Giọng có sẵn khác: Liam `TX3LPaxmHKxFdv7VOQHJ`, Daniel `onwK4e9ZLuTAKqWW03F9`, Charlie `IKne3meq5aSn8XLyUdCD`, Sarah `EXAVITQu4vr4xnSDxMaL`. Giọng trong Voice Library như Nhật Phong (`6adFm46eyy74snVn6YrT`) chỉ gọi được qua API từ gói Starter trở lên; gói Free bị lỗi 402 và hook lùi về Edge.",
             "scope": "application",
-            "order": 4
+            "order": 5
           },
           "noIdle.elevenLabsModel": {
             "type": "string",
@@ -323,7 +342,7 @@
             ],
             "description": "Model ElevenLabs dùng để đọc. Gói Free 10.000 credit: Flash đọc được khoảng 20.000 ký tự mỗi tháng, Multilingual v2 hay v3 chỉ 10.000.",
             "scope": "application",
-            "order": 5
+            "order": 6
           },
           "noIdle.pronunciations": {
             "type": "object",
@@ -333,7 +352,7 @@
             "default": {},
             "markdownDescription": "Cách đọc thuật ngữ khi Claude Code trả lời bằng giọng nói. Giọng vi-VN đọc chữ viết tắt và đuôi file tiếng Anh sai (`.md` thành \"mờ đờ\"), nên hook thay sẵn bằng âm tiếng Việt trước khi đọc: `.md` → \"chấm em đi\", `API` → \"ây pi ai\", `JSON` → \"chây sơn\"... Bảng này thêm hoặc ghi đè bảng mặc định. Khoá bắt đầu bằng dấu chấm là đuôi file, khoá khác là nguyên từ, không phân biệt hoa thường. Ví dụ `{\"Claude\": \"cờ lốt\", \"acme\": \"ác mi\"}`. Đổi là có hiệu lực ngay ở lượt sau.",
             "scope": "application",
-            "order": 6
+            "order": 7
           }
         }
       },
@@ -348,45 +367,26 @@
             "scope": "application",
             "order": 0
           },
-          "noIdle.language": {
-            "type": "string",
-            "enum": [
-              "vi",
-              "en",
-              "auto",
-              ""
-            ],
-            "enumDescriptions": [
-              "Tiếng Việt: Whisper nghe tiếng Việt, LLM sửa dấu thanh, Claude viết phần 🔊 bằng tiếng Việt, hook nói tiếng Việt.",
-              "English: Whisper listens for English, the LLM cleans up English, Claude writes the 🔊 part in English, the hook speaks English, and a vi-VN voice is swapped for a multilingual one.",
-              "Tự động: hook nhìn prompt bạn vừa gửi (có dấu tiếng Việt hay không) để chọn ngôn ngữ cho phần 🔊, câu báo và giọng, nhớ theo từng phiên; mic để Whisper tự nhận diện (nói tiếng Việt trộn thuật ngữ tiếng Anh có thể bị đoán nhầm sang tiếng Anh). / Auto: the hook picks the language from each prompt you send and remembers it per session; the mic lets Whisper auto-detect.",
-              "Whisper tự nhận diện ngôn ngữ; mọi thứ khác như tiếng Việt."
-            ],
-            "default": "vi",
-            "markdownDescription": "Ngôn ngữ làm việc. `vi` (mặc định) hoặc `en` chi phối cả Whisper, LLM sửa câu, hướng dẫn 🔊 cho Claude/Copilot, câu hook nói ra và bảng phiên âm; `auto` đoán theo prompt mỗi lượt và nhớ theo phiên, đổi ngôn ngữ giữa phiên là Claude đổi theo ngay lượt đó. Đổi là có hiệu lực ngay ở lượt sau. Để trống thì Whisper tự nhận diện, còn lại như `vi`. / Working language: `en` switches Whisper, the LLM cleanup, the 🔊 instructions for Claude/Copilot and every spoken hook phrase to English; `auto` follows the language of each prompt.",
-            "scope": "application",
-            "order": 1
-          },
           "noIdle.micDevice": {
             "type": "string",
             "default": "",
             "scope": "machine",
             "markdownDescription": "Micro dùng để nghe. Bỏ trống thì Windows lấy mic đầu tiên, macOS lấy mic mặc định của máy. Chọn bằng lệnh `NoIdle: Chọn micro`.",
-            "order": 2
+            "order": 1
           },
           "noIdle.refine": {
             "type": "boolean",
             "default": true,
             "scope": "application",
             "markdownDescription": "**Bật** thì sau khi nghe, câu được sửa chính tả, dấu thanh, dấu câu bằng AI trên Groq. Tắt để chữ ra nhanh hơn.",
-            "order": 3
+            "order": 2
           },
           "noIdle.refineModel": {
             "type": "string",
             "default": "openai/gpt-oss-120b",
             "description": "Model Groq dùng để sửa câu. openai/gpt-oss-20b nhanh hơn nhưng kém chính xác hơn. Groq đã gỡ llama-3.3-70b-versatile và llama-3.1-8b-instant khỏi gói miễn phí (16/8/2026); model không tồn tại thì extension cảnh báo và dùng chữ thô.",
             "scope": "application",
-            "order": 4
+            "order": 3
           },
           "noIdle.glossary": {
             "type": "array",
@@ -396,21 +396,21 @@
             "default": [],
             "description": "Từ tiếng Anh hay nói mà Whisper nghe sai, cùng tên project, tên biến, tên người. Ví dụ [\"impact\", \"order view\", \"claimNext\"]. Được đưa vào prompt Whisper và LLM để viết đúng.",
             "scope": "application",
-            "order": 5
+            "order": 4
           },
           "noIdle.typingDelayMs": {
             "type": "number",
             "default": 12,
             "scope": "application",
             "markdownDescription": "Chữ hiện ra kiểu gõ từng ký tự, nghỉ bao nhiêu ms giữa các ký tự. `0` là chèn cả cụm một lần.",
-            "order": 6
+            "order": 5
           },
           "noIdle.ffmpegPath": {
             "type": "string",
             "default": "ffmpeg",
             "description": "Đường dẫn ffmpeg. Mặc định lấy từ PATH.",
             "scope": "machine",
-            "order": 7
+            "order": 6
           }
         }
       },
