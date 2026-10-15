@@ -55,7 +55,13 @@ beforeAll(async () => {
             exports.OUTPUT_FORMAT = { AUDIO_24KHZ_48KBITRATE_MONO_MP3: 'mp3' };
             exports.MsEdgeTTS = class {
               async setMetadata() {}
-              toStream(text) { return { audioStream: Readable.from([Buffer.from(text)]) }; }
+              toStream(text) {
+                if (!text.includes('force-tts-failure')) return { audioStream: Readable.from([Buffer.from(text)]) };
+                // Như mạng công ty ký lại HTTPS mà node không tin: câu nào cũng lỗi chứng chỉ.
+                const audioStream = new Readable({ read() {} });
+                setImmediate(() => audioStream.destroy(new Error('Edge TTS WebSocket error: unable to get local issuer certificate (code=UNABLE_TO_GET_ISSUER_CERT_LOCALLY)')));
+                return { audioStream };
+              }
               close() {}
             };
           `,
@@ -227,5 +233,27 @@ describe('standalone Claude playback after VS Code closes', () => {
     expect(added).toContain('player exited with code 2');
     expect(added).toContain('test audio device is unavailable');
     expect(added).not.toContain('phát xong');
+  });
+
+  // 15/10/2026: mọi câu lỗi chứng chỉ mà log vẫn ghi "phát xong", không báo gì lên VS Code; người dùng tưởng loa hỏng.
+  it('says no sentence could be read when every sentence fails, records it for the status bar, and clears it once the voice works', async () => {
+    const logFile = path.join(tmp, 'noidle-tts', 'hook.log');
+    const statusFile = path.join(tmp, 'noidle-tts', 'voice-status.json');
+    const failing = path.join(work, 'tts-failure.txt');
+    fs.writeFileSync(failing, 'force-tts-failure one. force-tts-failure two.');
+    const before = fs.readFileSync(logFile, 'utf8').length;
+    expect(await run(['play', failing, '--player', process.execPath], '')).toBe(0);
+    const added = fs.readFileSync(logFile, 'utf8').slice(before);
+    expect(added).toContain('không đọc được câu nào');
+    expect(added).not.toContain('phát xong');
+    const failed = JSON.parse(fs.readFileSync(statusFile, 'utf8'));
+    expect(failed.ok).toBe(false);
+    expect(failed.error).toContain('UNABLE_TO_GET_ISSUER_CERT_LOCALLY');
+    expect(failed.hint).toMatch(/certificate/i);
+
+    const working = path.join(work, 'tts-works.txt');
+    fs.writeFileSync(working, 'The voice works again.');
+    expect(await run(['play', working, '--player', process.execPath], '')).toBe(0);
+    expect(JSON.parse(fs.readFileSync(statusFile, 'utf8')).ok).toBe(true);
   });
 });

@@ -18,6 +18,8 @@ export class StatusBar implements vscode.Disposable {
   private attentionReason: AttentionReason | undefined;
   /** Không thấy ffplay: nút rảnh báo "no sound", bấm để cài ffmpeg. */
   private playerMissing = false;
+  /** Lượt đọc gần nhất không tải được giọng: nút rảnh báo "no voice" kèm lời khuyên, bấm để đọc thử. */
+  private voiceError: string | undefined;
 
   constructor() {
     this.item.command = 'noIdle.toggle';
@@ -29,6 +31,13 @@ export class StatusBar implements vscode.Disposable {
   missingPlayer(missing: boolean): void {
     if (this.playerMissing === missing) return;
     this.playerMissing = missing;
+    if (this.state === 'idle') this.render();
+  }
+
+  /** Hook báo lượt đọc gần nhất hỏng (lời khuyên), hay đã đọc ra tiếng lại (undefined). */
+  voiceFailure(message: string | undefined): void {
+    if (this.voiceError === message) return;
+    this.voiceError = message;
     if (this.state === 'idle') this.render();
   }
 
@@ -59,7 +68,7 @@ export class StatusBar implements vscode.Disposable {
     this.item.command = 'noIdle.toggle';
     switch (state) {
       case 'idle': {
-        const s = idleStatus({ agent: this.agent, attention: this.attentionReason, missingPlayer: this.playerMissing });
+        const s = idleStatus({ agent: this.agent, attention: this.attentionReason, missingPlayer: this.playerMissing, voiceError: this.voiceError });
         this.item.text = s.text;
         this.item.tooltip = s.tooltip;
         this.item.command = s.command;

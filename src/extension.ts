@@ -11,6 +11,7 @@ import { refine, DEFAULT_REFINE_MODEL, resetRefinePause } from './refiner';
 import { pronounce } from './pronounce';
 import { langOf, isAuto, effectiveVoice, usesVietPronunciation, DEFAULT_VOICE, type Lang } from './lang';
 import { ELEVEN_DEFAULT_VOICE, ELEVEN_DEFAULT_MODEL, readUsage, usageFilePath } from './elevenlabs';
+import { readVoiceStatus, voiceStatusPath } from './voiceStatus';
 import { applyHooks, copilotHooksFile, copilotHookPaths, hooksEnabled, ClaudeSettings, HookOptions } from './claudeHooks';
 import { inject, InjectorApi, Target } from './injector';
 import { startServer, writeRegistry, removeRegistry, readRegistry, pipeName, Signal, acquireMic, releaseMic, micHolder, signalPid, canAutoListen, type AttentionReason } from './signal';
@@ -218,6 +219,16 @@ export function activate(ctx: vscode.ExtensionContext): void {
   fs.watchFile(usageFile, { interval: 2000 }, refreshUsage);
   refreshUsage();
   ctx.subscriptions.push(usageBar, { dispose: () => fs.unwatchFile(usageFile, refreshUsage) });
+  // Lượt đọc gần nhất không tải được giọng (mạng công ty chặn chứng chỉ, Edge 403): hook ghi file, nút NoIdle báo "no voice"
+  // tới khi tải được giọng lại, thay vì chỉ nằm trong hook.log.
+  const voiceFile = voiceStatusPath();
+  const refreshVoice = () => {
+    const v = readVoiceStatus(voiceFile);
+    status.voiceFailure(v && !v.ok ? v.hint ?? v.error ?? 'unknown error' : undefined);
+  };
+  fs.watchFile(voiceFile, { interval: 2000 }, refreshVoice);
+  refreshVoice();
+  ctx.subscriptions.push({ dispose: () => fs.unwatchFile(voiceFile, refreshVoice) });
   const out = vscode.window.createOutputChannel('NoIdle');
   // Ghi thêm ra file để xem lại được sau khi đóng VS Code.
   const logFile = path.join(ctx.globalStorageUri.fsPath, 'noidle.log');

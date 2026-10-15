@@ -39,6 +39,8 @@ import { hedged } from './hedge';
 import { pronounce } from './pronounce';
 import { prefetchInOrder } from './prefetch';
 import { synthElevenLabs, rateToSpeed, fetchUsage, writeUsage, readUsage, formatUsage, isQuotaError, elevenExhausted } from './elevenlabs';
+import { trustSystemCertificates } from './systemCa';
+import { writeVoiceStatus, voiceErrorHint } from './voiceStatus';
 import { normalizeCopilotInput, copilotPermissionState, type AgentHookInput } from './copilot';
 import { chatWouldAutoApprove, type ChatAutoApprove } from './chatAutoApprove';
 
@@ -1127,7 +1129,7 @@ const FIRST_HOLD_MS = 4000;
 const ELEVEN_ATTEMPTS = 2;
 
 async function synthEleven(eleven: TtsConfig & { elevenLabsApiKey: string }, rate: string, text: string): Promise<Buffer> {
-  return hedged(
+  const audio = await hedged(
     () =>
       synthElevenLabs({
         apiKey: eleven.elevenLabsApiKey,
@@ -1139,14 +1141,18 @@ async function synthEleven(eleven: TtsConfig & { elevenLabsApiKey: string }, rat
       }),
     { hedgeMs: SYNTH_TIMEOUT_MS, maxAttempts: ELEVEN_ATTEMPTS, maxInFlight: 1, onEvent: (m) => log(`elevenlabs ${m}`) },
   );
+  fetchedVoice = true;
+  return audio;
 }
 
 async function synthEdge(voice: string, rate: string, text: string): Promise<Buffer> {
-  return hedged(() => synthOnce(voice, rate, text), {
+  const audio = await hedged(() => synthOnce(voice, rate, text), {
     hedgeMs: HEDGE_MS,
     maxAttempts: MAX_ATTEMPTS,
     onEvent: (m) => log(`tts ${m}`),
   });
+  fetchedVoice = true;
+  return audio;
 }
 
 /** Lượt này có câu nào tốn credit ElevenLabs không; có thì sau khi đọc xong hỏi lại số credit còn lại cho status bar. */
@@ -1170,6 +1176,23 @@ async function reportElevenUsage(): Promise<void> {
   await refreshElevenUsage(eleven);
 }
 
+/** Đã thêm CA hệ thống chưa; undefined: tiến trình này chưa cần mạng lần nào (xem systemCa.ts). */
+let systemCa: boolean | undefined;
+
+/** Lần đầu sắp gọi mạng: tin thêm kho chứng chỉ hệ thống, vì mạng công ty ký lại HTTPS bằng CA chỉ có ở đó. */
+function trustSystemCaOnce(): void {
+  if (systemCa !== undefined) return;
+  systemCa = false;
+  try {
+    systemCa = trustSystemCertificates();
+  } catch (err) {
+    log(`tls: không đọc được kho chứng chỉ hệ thống: ${(err as Error).message}`);
+  }
+}
+
+/** Tiến trình này đã tải được giọng từ mạng ít nhất một câu; câu lấy từ cache không tính. */
+let fetchedVoice = false;
+
 async function synth(voice: string, rate: string, text: string): Promise<Buffer> {
   const eleven = elevenConfig();
   const cacheable = text.length <= CACHE_MAX_CHARS;
@@ -1181,6 +1204,7 @@ async function synth(voice: string, rate: string, text: string): Promise<Buffer>
       /* chưa có */
     }
   }
+  trustSystemCaOnce();
   let audio: Buffer;
   if (eleven && elevenExhausted(readUsage(), text.length)) {
     // Hết credit từ lượt trước: đi thẳng Edge, không gọi ElevenLabs lỗi hai lần cho từng câu.
@@ -1358,6 +1382,10 @@ async function playText(text: string, ticket: string, voice: string): Promise<vo
   let failed = false;
   let cancelled = false;
   let stderrTail = '';
+  /** Số câu đã đưa vào ffplay, số câu tải lỗi và lỗi đầu tiên: không câu nào vào loa thì không được ghi "phát xong". */
+  let played = 0;
+  let dropped = 0;
+  let firstError: Error | undefined;
   player.stderr.setEncoding('utf8');
   player.stderr.on('data', (chunk: string) => { stderrTail = (stderrTail + chunk).slice(-4096); });
   player.stdin.on('error', () => undefined); // ffplay bị tắt giữa chừng thì bỏ qua EPIPE
@@ -1418,9 +1446,16 @@ async function playText(text: string, ticket: string, voice: string): Promise<vo
           }
         }
         cancelCompletedPermission();
-        if (!stopped) player.stdin.write(audio);
+        if (!stopped) {
+          player.stdin.write(audio);
+          played++;
+        }
       },
-      onError: (err, i) => log(`bỏ câu ${i + 1}: ${err.message}`),
+      onError: (err, i) => {
+        dropped++;
+        firstError ??= err;
+        log(`bỏ câu ${i + 1}: ${err.message}`);
+      },
     });
     player.stdin.end();
     await finished;
@@ -1428,7 +1463,17 @@ async function playText(text: string, ticket: string, voice: string): Promise<vo
     clearInterval(permissionMonitor);
     releaseHotkey?.();
   }
-  if (!failed && !cancelled) log(`phát xong sau ${Date.now() - t0}ms`);
+  if (failed || cancelled) return;
+  // Mọi câu tải lỗi thì loa không có gì để phát (15/10/2026: lỗi chứng chỉ mà vẫn ghi "phát xong", người dùng tưởng
+  // loa hỏng). Nói thẳng trong log và ghi trạng thái cho extension hiện "no voice" trên status bar.
+  if (!played && firstError) {
+    log(`không đọc được câu nào (${dropped} câu lỗi): ${firstError.message}`);
+    writeVoiceStatus({ ok: false, error: firstError.message, hint: voiceErrorHint(firstError.message, systemCa === true), at: Date.now() });
+    return;
+  }
+  log(`phát xong sau ${Date.now() - t0}ms`);
+  // Câu lấy từ cache không chứng minh mạng đã ổn: chỉ xoá cảnh báo khi đã tải được giọng thật.
+  if (fetchedVoice) writeVoiceStatus({ ok: true, at: Date.now() });
 }
 
 async function main(): Promise<void> {

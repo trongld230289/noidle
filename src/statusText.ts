@@ -11,6 +11,8 @@ export interface IdleStatusInput {
   attention?: AttentionReason;
   /** Không thấy ffplay: hook chỉ nháy cửa sổ, không đọc thành tiếng. */
   missingPlayer?: boolean;
+  /** Lượt đọc gần nhất không tải được giọng (xem voiceStatus.ts): lời khuyên cho người dùng. */
+  voiceError?: string;
 }
 
 export interface IdleStatus {
@@ -40,6 +42,14 @@ export function idleStatus(input: IdleStatusInput): IdleStatus {
       text: '$(mute) NoIdle: no sound',
       tooltip: 'ffplay not found: the window flashes but nothing is read aloud. Click to install ffmpeg',
       command: 'noIdle.installFfmpeg',
+      warning: true,
+    };
+  }
+  if (input.voiceError) {
+    return {
+      text: '$(mute) NoIdle: no voice',
+      tooltip: `The last reply was not read aloud: ${input.voiceError}. Click to test the voice`,
+      command: 'noIdle.testVoice',
       warning: true,
     };
   }

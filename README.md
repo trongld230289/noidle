@@ -176,6 +176,7 @@ Tắt Voice Response hoặc Voice Notify không tắt Hands Free. Khi không có
 | Hiện tượng | Cách xử lý |
 |---|---|
 | Không tìm thấy ffmpeg, hoặc cửa sổ nháy mà không có tiếng | Bấm **Cài ffmpeg** trên cảnh báo, hoặc bấm nút "NoIdle: no sound" trên status bar, hoặc chạy lệnh `NoIdle: Cài ffmpeg` (winget/brew chạy giúp, đóng terminal là xong). Cài tay thì đổi bất kỳ setting NoIdle nào để extension tìm lại, hoặc điền đường dẫn vào Ffmpeg Path. |
+| Status bar báo "NoIdle: no voice" | Lượt đọc gần nhất không tải được giọng, tooltip ghi lý do. Mạng công ty ký lại HTTPS thì NoIdle tự tin kho chứng chỉ của máy khi Node từ 22.19 hoặc 24.5 trở lên; Node cũ hơn thì cập nhật Node, rồi đóng hết VS Code và mở lại. Bấm nút để đọc thử; đọc ra tiếng là cảnh báo tự tắt. |
 | Báo cần Node.js, hoặc Copilot Chat hiện "Warning from ... hook" | Bấm **Cài Node.js** trên cảnh báo hoặc chạy lệnh `NoIdle: Cài Node.js` (winget/brew chạy giúp), rồi đóng hết cửa sổ VS Code và mở lại. |
 | Sai key | Chạy `NoIdle: Set Groq API Key`, nhập lại. |
 | Nói mà không ra chữ | Kiểm tra mic trong cài đặt Sound của máy (macOS: thêm quyền mic cho VS Code ở Privacy & Security > Microphone). Chạy `NoIdle: Chọn micro`. |
