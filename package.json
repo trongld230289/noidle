@@ -421,7 +421,7 @@
           "noIdle.translate": {
             "type": "boolean",
             "default": true,
-            "markdownDescription": "Bật dịch / giải nghĩa: **bôi chữ rồi Ctrl+C để copy, sau đó bấm Alt+D** — dịch nội dung clipboard, dùng được ở editor, terminal (Copilot/Claude CLI) và Copilot Chat. Ngoài ra có thể chuột phải vào vùng đã bôi ở editor hoặc terminal rồi chọn Giải nghĩa. Đoạn đã là tiếng Việt thì dịch sang tiếng Anh. Ưu tiên model do Copilot cung cấp trong VS Code; dự phòng bằng Claude Code CLI (Haiku), không có thì Copilot CLI. Tối đa 2000 ký tự mỗi lần.",
+            "markdownDescription": "Bật dịch / giải nghĩa: **bôi chữ rồi Ctrl+C để copy, sau đó bấm Alt+D** — dịch nội dung clipboard, dùng được ở editor, terminal (Copilot/Claude CLI) và Copilot Chat. Ngoài ra có thể chuột phải vào vùng đã bôi ở editor hoặc terminal rồi chọn Giải nghĩa. Chỉ đoạn toàn tiếng Việt mới dịch sang tiếng Anh; đoạn tiếng Anh hoặc lẫn Anh – Việt thì trả lời bằng tiếng Việt. Ưu tiên model do Copilot cung cấp trong VS Code; dự phòng bằng Claude Code CLI (Haiku), không có thì Copilot CLI. Tối đa 2000 ký tự mỗi lần.",
             "order": 0
           }
         }

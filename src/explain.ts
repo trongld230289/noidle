@@ -23,7 +23,8 @@ export function explainPrompt(text: string): string {
   return [
     'Giải thích ngắn gọn bằng tiếng Việt nghĩa của đoạn dưới đây, hiểu theo ngữ cảnh lập trình / phần mềm.',
     'Một từ hay cụm từ: nêu nghĩa trong 1-2 câu. Câu hay đoạn dài: dịch sang tiếng Việt, giữ nguyên thuật ngữ kỹ thuật.',
-    'Nếu đoạn đã là tiếng Việt thì dịch sang tiếng Anh. Chỉ trả lời nội dung, không markdown, không mở đầu.',
+    'Chỉ khi toàn bộ đoạn là tiếng Việt mới dịch sang tiếng Anh; đoạn lẫn tiếng Anh và tiếng Việt thì vẫn trả lời bằng tiếng Việt.',
+    'Chỉ trả lời nội dung, không markdown, không mở đầu.',
     '',
     text.slice(0, EXPLAIN_MAX_CHARS),
   ].join('\n');

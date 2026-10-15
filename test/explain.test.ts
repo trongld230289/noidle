@@ -53,6 +53,12 @@ describe('explainSelection', () => {
     expect(prompt).toContain('tiếng Anh');
     expect(prompt).toContain('canary');
   });
+
+  it('prompt translates to English only when the whole text is Vietnamese; mixed English/Vietnamese stays Vietnamese', () => {
+    const prompt = explainPrompt('canary');
+    expect(prompt).toContain('toàn bộ đoạn là tiếng Việt mới dịch sang tiếng Anh');
+    expect(prompt).toContain('lẫn tiếng Anh và tiếng Việt thì vẫn trả lời bằng tiếng Việt');
+  });
 });
 
 describe('explicit explanation selection', () => {
