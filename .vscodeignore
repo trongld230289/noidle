@@ -17,3 +17,4 @@ hub/**
 !images/icon.png
 images/icon.svg
 .superpowers/**
+glancedeck/**
