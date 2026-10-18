@@ -1,0 +1,6 @@
+{
+  "name": "timesheet",
+  "version": "0.1.0",
+  "description": "Real time per project: your work blocks, AI turn time and turns; /timesheet [week|month]",
+  "author": { "name": "trongld230289" }
+}

@@ -117,5 +117,5 @@ test('a stored file is read leniently and sent history keeps today only', () => 
 test('two folders with the same name get different queue files', () => {
   expect(projectKey('D:\\Project\\app')).not.toBe(projectKey('C:/work/app'))
   expect(projectKey('D:\\Project\\App\\')).toBe(projectKey('d:/project/app'))
-  expect(projectKey('D:/Project/vi-voice')).toMatch(/^vi-voice-[a-z0-9]+$/)
+  expect(projectKey('D:/Project/acme-web')).toMatch(/^acme-web-[a-z0-9]+$/)
 })

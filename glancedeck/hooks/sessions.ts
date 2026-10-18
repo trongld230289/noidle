@@ -1,6 +1,6 @@
 // Other sessions on this machine, across accounts: each glancedeck writes a heartbeat file to a
 // shared folder and reads the others'. Pure functions here; the reads and writes are in register.tsx.
-import type { Heartbeat, LogLine, SessionRow } from '../types'
+import type { AgentCard, Heartbeat, LogLine, SessionRow, SharedAgent } from '../types'
 import { fmtUntil, shorten } from './core'
 
 /** Older than this, a heartbeat's session is gone (closed, crashed, or its machine asleep). */
@@ -38,6 +38,11 @@ export const parseHeartbeat = (text: string): Heartbeat | null => {
       startedAt: typeof h.startedAt === 'number' ? h.startedAt : h.updatedAt,
       updatedAt: h.updatedAt,
       log: Array.isArray(h.log) ? h.log.filter((l): l is LogLine => typeof l === 'object' && l !== null && typeof l.text === 'string') : [],
+      agents: Array.isArray(h.agents)
+        ? h.agents.filter(
+            (a): a is SharedAgent => typeof a === 'object' && a !== null && typeof a.name === 'string' && typeof a.spawnedAt === 'number',
+          )
+        : [],
     }
   } catch {
     return null
@@ -54,16 +59,19 @@ export const rowsOf = (
   return beats
     .filter(h => h.sessionId !== selfId && isLive(h, now))
     .sort((a, b) => rank[a.status] - rank[b.status] || b.since - a.since)
-    .map(h => ({
-      sessionId: h.sessionId,
-      queueKey: h.queueKey,
-      status: h.status === 'idle' ? 'done' : h.status,
-      project: h.project,
-      account: h.account,
-      activity: h.status === 'idle' ? 'rảnh' : shorten(h.activity || (h.status === 'waiting' ? 'chờ bạn' : 'đang làm'), 40),
-      elapsed: fmtUntil(now - h.since),
-    }))
+    .map(h => rowOf(h, now))
 }
+
+/** One heartbeat as a SESSIONS row. */
+export const rowOf = (h: Heartbeat, now: number): SessionRow & { sessionId: string; queueKey: string } => ({
+  sessionId: h.sessionId,
+  queueKey: h.queueKey,
+  status: h.status === 'idle' ? 'done' : h.status,
+  project: h.project,
+  account: h.account,
+  activity: h.status === 'idle' ? 'rảnh' : shorten(h.activity || (h.status === 'waiting' ? 'chờ bạn' : 'đang làm'), 40),
+  elapsed: fmtUntil(now - h.since),
+})
 
 /**
  * Which live session sends this project's queue: the one that started first. Two sessions on one
@@ -101,6 +109,23 @@ export const mergeLogs = (own: readonly LogLine[], beats: readonly Heartbeat[], 
     )
   return [...own, ...others].sort((a, b) => a.at - b.at)
 }
+
+/** How long a finished subagent stays in the others' AGENTS block. */
+export const AGENT_LINGER_MS = 10 * 60_000
+
+/** This session's subagents worth showing the others: running, or finished a short while ago. */
+export const sharedAgents = (cards: readonly AgentCard[], now: number): SharedAgent[] =>
+  cards
+    .filter(c => c.status === 'running' || (c.endedAt !== null && now - c.endedAt < AGENT_LINGER_MS))
+    .slice(-9)
+    .map(({ name, ctx, out, spawnedAt, endedAt, status }) => ({ name, ctx, out, spawnedAt, endedAt, status }))
+
+/** The other live sessions' subagents, each tagged with where it runs; running ones first. */
+export const peerAgents = (beats: readonly Heartbeat[], selfId: string, now: number) =>
+  beats
+    .filter(h => h.sessionId !== selfId && isLive(h, now))
+    .flatMap(h => h.agents.map(a => ({ ...a, project: h.project, account: h.account })))
+    .sort((a, b) => Number(b.status === 'running') - Number(a.status === 'running') || b.spawnedAt - a.spawnedAt)
 
 /** The question an AskUserQuestion call asks, for the heartbeat and the log. */
 export const questionOf = (input: unknown): string => {

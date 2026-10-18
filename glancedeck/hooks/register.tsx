@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { AgentCard, Block, Heartbeat, LogLine, QueueFile, QueueItem, Runtime, SessionRow, View } from '../types'
+import type { AgentCard, Block, Heartbeat, LogLine, QueueFile, QueueItem, Runtime, SessionRow, Turn, View } from '../types'
 import {
   AGENTS_MAX,
   EDIT_TOOLS,
@@ -13,8 +13,10 @@ import {
   fmtUntil,
   isLogged,
   kTokens,
+  laneText,
   noteTool,
   pathOf,
+  prettyModel,
   promptText,
   pushLog,
   shorten,
@@ -34,7 +36,7 @@ import {
   projectKey,
   shouldStart,
 } from './queue'
-import { accountOf, dueAlerts, isQueueOwner, mergeLogs, parseHeartbeat, questionOf, rowsOf } from './sessions'
+import { accountOf, dueAlerts, isQueueOwner, mergeLogs, parseHeartbeat, peerAgents, questionOf, rowOf, rowsOf, sharedAgents } from './sessions'
 
 const PANE = 'glancedeck'
 const PANE_COLUMNS = 58
@@ -74,6 +76,10 @@ const log = atom({ plugin: 'glancedeck', key: 'log' } as const, [] as LogLine[])
 const queue = atom({ plugin: 'glancedeck', key: 'queue' } as const, EMPTY_QUEUE)
 const runtime = atom({ plugin: 'glancedeck', key: 'runtime' } as const, IDLE)
 const others = atom({ plugin: 'glancedeck', key: 'others' } as const, [] as Heartbeat[])
+const self = atom({ plugin: 'glancedeck', key: 'self' } as const, null as Heartbeat | null)
+const NO_TURN: Turn = { startedAt: null, endedAt: null, model: '', edits: 0, errors: 0, agents: 0, reason: null }
+const turn = atom({ plugin: 'glancedeck', key: 'turn' } as const, NO_TURN)
+const setTurn = ($: EngineInterface, change: (t: Turn) => Turn) => update($, turn, t => change({ ...NO_TURN, ...t }))
 
 const BLOCK_OF_KEY: Record<string, Block> = { q: 'queue', s: 'sessions', a: 'agents', l: 'log' }
 
@@ -180,12 +186,13 @@ async function tick($: EngineInterface, isGone = false) {
   const dir = await sharedDir($)
   const key = await queueKey($)
   if (!dir || !key) return
-  const [id, cwd, configDir, rt0, own, now] = await Promise.all([
+  const [id, cwd, configDir, rt0, own, cards, now] = await Promise.all([
     $.session.id(),
     $.session.cwd(),
     $.env.get('CLAUDE_CONFIG_DIR'),
     read($, runtime),
     read($, log),
+    read($, agents),
     $.clock.now(),
   ])
   const rt = { ...IDLE, ...rt0 }
@@ -205,6 +212,7 @@ async function tick($: EngineInterface, isGone = false) {
     startedAt,
     updatedAt: isGone ? 0 : now,
     log: lines.filter(l => l.who !== 'peer').slice(-20),
+    agents: sharedAgents(cards ?? [], now),
   }
   await $.fs.write(`${dir}/sessions/${id}.json`, JSON.stringify(beat))
   if (isGone) return
@@ -218,6 +226,7 @@ async function tick($: EngineInterface, isGone = false) {
     if (h) beats.push(h)
   }
   await update($, others, () => beats.filter(h => h.sessionId !== id))
+  await update($, self, () => beat)
 
   // Two sessions on one repo share its queue: only the one that started first sends it.
   const isOwner = isQueueOwner(beats, beat, now)
@@ -407,6 +416,7 @@ export const register: Register = on => {
     if (e.reason === 'clear') {
       await update($, agents, () => [])
       await update($, log, () => [])
+      await update($, turn, () => NO_TURN)
       await setView($, v => ({ ...v, expandedAgent: null }))
     }
 
@@ -466,6 +476,8 @@ export const register: Register = on => {
       await quietly($, 'turn.start', async () => {
         await cancelCountdown($, 'turn')
         await setRuntime($, r => ({ ...r, isTurnRunning: true, turnErrors: 0 }))
+        const now = await $.clock.now()
+        await setTurn($, t => ({ ...NO_TURN, model: t.model, startedAt: now }))
         const text = e.text ? promptText(e.text) : null
         if (text) await say($, { who: 'you', label: 'you', text })
       })
@@ -518,6 +530,7 @@ export const register: Register = on => {
         answer: '',
       }
       await setAgents($, list => [...list, card].slice(-AGENTS_MAX))
+      if (!e.parentAgentId) await setTurn($, t => (t.endedAt === null && t.startedAt !== null ? { ...t, agents: t.agents + 1 } : t))
       if (e.background && !e.parentAgentId) await setRuntime($, r => ({ ...r, background: [...r.background, agentId] }))
       await say($, { who: 'agent', label: await agentLabel($, card.id), text: `bắt đầu · ${card.name}` })
     })
@@ -529,6 +542,12 @@ export const register: Register = on => {
     const result = yield* next(e)
     const id = e.agentId
     if (id) await quietly($, 'turn.step usage', () => setAgents($, list => list.map(c => (c.id === id ? applyStep(c, result.usage) : c))))
+    else if (e.model) {
+      const model = e.model
+      await quietly($, 'turn.step model', async () => {
+        if ((await read($, turn))?.model !== model) await setTurn($, t => ({ ...t, model }))
+      })
+    }
 
     return result
   })
@@ -551,6 +570,8 @@ export const register: Register = on => {
       const isError = ran.isError === true
       const id = e.agentId
       if (isError && !id) await setRuntime($, r => ({ ...r, turnErrors: r.turnErrors + 1 }))
+      if (isError && !id) await setTurn($, t => ({ ...t, errors: t.errors + 1 }))
+      if (!isError && EDIT_TOOLS.has(e.tool)) await setTurn($, t => ({ ...t, edits: t.edits + 1 }))
       if (!isLogged(e.tool)) return
       const text = describeCall(e.tool, e)
       if (id) await setAgents($, list => list.map(c => (c.id === id ? noteTool(c, text) : c)))
@@ -573,6 +594,8 @@ export const register: Register = on => {
     if (!id) {
       await quietly($, 'turn end', async () => {
         await setRuntime($, r => ({ ...r, isTurnRunning: false, lastTurnOk: r.turnErrors === 0 && e.reason === 'answer' }))
+        const now = await $.clock.now()
+        await setTurn($, t => (t.startedAt === null ? t : { ...t, endedAt: now, reason: e.reason }))
         await maybeStart($)
       })
       return done
@@ -651,13 +674,15 @@ export const register: Register = on => {
     const { Box, Text, Button } = els
     const Input = 'Input' in els ? els.Input : null
     const hasClient = 'Client' in els
-    const [v0, cards0, lines0, q0, rt0, beats0, selfId, cwd, now] = await Promise.all([
+    const [v0, cards0, lines0, q0, rt0, beats0, selfBeat, turn0, selfId, cwd, now] = await Promise.all([
       read($, view),
       read($, agents),
       read($, log),
       read($, queue),
       read($, runtime),
       read($, others),
+      read($, self),
+      read($, turn),
       $.session.id().catch(() => ''),
       $.session.cwd().catch(() => '?'),
       $.clock.now(),
@@ -669,6 +694,7 @@ export const register: Register = on => {
     const lines = lines0 ?? []
     const q = normalizeQueue(q0)
     const rt = { ...IDLE, ...rt0 }
+    const t = { ...NO_TURN, ...turn0 }
     const W = Math.max(40, e.props.bodyColumns)
     const inner = W - 4
     const isOpen = (b: Block) => !v.collapsed.includes(b)
@@ -937,6 +963,19 @@ export const register: Register = on => {
             </Box>,
           ]
         : []),
+      ...(isOpen('sessions') && !picking && selfBeat
+        ? [
+            ((s: SessionRow) =>
+              row(
+                's-self',
+                <Text wrap="truncate" color={C.dim}>
+                  {` ${MARK[s.status].icon}  ${s.project} (đây)`}
+                  {s.account ? ` @${s.account}` : ''}
+                </Text>,
+                <Text color={C.faint}>{s.elapsed ? `${s.activity} · ${s.elapsed}` : s.activity}</Text>,
+              ))(rowOf(selfBeat, now)),
+          ]
+        : []),
       ...(isOpen('sessions') && !picking
         ? sessions.map((s, i) =>
             row(
@@ -947,11 +986,21 @@ export const register: Register = on => {
                   {s.account ? <Text color={C.rose}>{` @${s.account}`}</Text> : null}
                 </Text>
               ) : (
-                <Text wrap="truncate">
-                  <Text color={MARK[s.status].color}>{` ${MARK[s.status].icon} `}</Text>
-                  <Text color={C.text}>{` ${s.project}`}</Text>
-                  {s.account ? <Text color={C.rose}>{` @${s.account}`}</Text> : null}
-                </Text>
+                <Box>
+                  {s.status === 'working' && hasClient ? (
+                    <Box flexShrink={0}>
+                      <Text> </Text>
+                      <els.Client key={`s-spin-${i}`} module="./spin.tsx" props={{ color: C.ember, now }} />
+                      <Text> </Text>
+                    </Box>
+                  ) : (
+                    <Text color={MARK[s.status].color}>{` ${MARK[s.status].icon} `}</Text>
+                  )}
+                  <Text wrap="truncate">
+                    <Text color={C.text}>{` ${s.project}`}</Text>
+                    {s.account ? <Text color={C.rose}>{` @${s.account}`}</Text> : null}
+                  </Text>
+                </Box>
               ),
               <Text color={s.status === 'waiting' ? C.sessions : C.dim} bold={s.status === 'waiting'}>
                 {s.elapsed ? `${s.activity} · ${s.elapsed}` : s.activity}
@@ -961,8 +1010,10 @@ export const register: Register = on => {
         : []),
     ])
 
-    // ---- AGENTS: this session's subagents
-    const running = cards.filter(c => c.status === 'running').length
+    // ---- AGENTS: this session's subagents, then the other sessions' (tagged with where they run)
+    const peers = peerAgents(beats, selfId, now)
+    const running = cards.filter(c => c.status === 'running').length + peers.filter(a => a.status === 'running').length
+    const totalAgents = cards.length + peers.length
     const shown = cards.slice(-9)
     const offset = cards.length - shown.length
     const expanded = v.expandedAgent !== null ? cards[v.expandedAgent] : undefined
@@ -972,17 +1023,40 @@ export const register: Register = on => {
           color={c.status === 'done' ? C.jade : C.alarm}
         >{`${c.status === 'done' ? '✓' : '✗'} ${fmtElapsed((c.endedAt ?? now) - c.spawnedAt)}`}</Text>
       ) : hasClient ? (
-        <els.Client key={`a-clock-${c.id}`} module="./elapsed.tsx" props={{ since: c.spawnedAt, now, color: C.ember }} />
+        <els.Client key={`a-clock-${c.id}`} module="./spin.tsx" props={{ since: c.spawnedAt, now, color: C.ember }} />
       ) : (
         <Text color={C.ember}>{`● ${fmtElapsed(now - c.spawnedAt)}`}</Text>
       )
+    // Swimlanes: every card of this session on one time axis, from the first spawn to now (or the last end).
+    const LANE_W = Math.max(8, Math.min(20, inner - 34))
+    const t0 = Math.min(...shown.map(c => c.spawnedAt), now)
+    const t1 = shown.some(c => c.status === 'running') ? null : Math.max(t0 + 1, ...shown.map(c => c.endedAt ?? now))
+    const lane = (c: AgentCard, j: number) => {
+      const color = c.status === 'failed' ? C.alarm : c.status === 'running' ? C.ember : C.agents
+      if (hasClient)
+        return (
+          <els.Client
+            key={`a-lane-${c.id}`}
+            module="./lane.tsx"
+            props={{ t0, t1, start: c.spawnedAt, end: c.endedAt, now, width: LANE_W, color, dim: C.faint }}
+          />
+        )
+      const x = laneText(t0, t1 ?? now, c.spawnedAt, c.endedAt ?? now, LANE_W)
+      return (
+        <Text key={`a-lane-${j}`}>
+          <Text color={C.faint}>{x.before}</Text>
+          <Text color={color}>{x.bar}</Text>
+          <Text color={C.faint}>{x.after}</Text>
+        </Text>
+      )
+    }
     const agentsBlock = frame('agents', C.agents, running > 0, [
       headRow(
         'agents',
         'AGENTS',
         C.agents,
-        <Text color={C.dim}>{cards.length === 0 ? ' · chưa có' : ` · ${running} running · ${cards.length} total`}</Text>,
-        shown.length > 0 ? <Text color={C.faint}>{`1-${shown.length} mở`}</Text> : null,
+        <Text color={C.dim}>{totalAgents === 0 ? ' · chưa có' : ` · ${running} running · ${totalAgents} total`}</Text>,
+        shown.length > 0 ? <Text color={C.faint}>{shown.length === 1 ? 'phím 1: xem việc' : `phím 1-${shown.length}: xem việc`}</Text> : null,
       ),
       ...(isOpen('agents')
         ? shown.flatMap((c, j) => {
@@ -996,14 +1070,17 @@ export const register: Register = on => {
                   hotkey={String(j + 1)}
                   onPress={() => setView($, x => ({ ...x, expandedAgent: x.expandedAgent === i ? null : i }))}
                 >
-                  <Text color={C.agents} bold>{`${j + 1} `}</Text>
-                  <Text color={c.status === 'running' ? C.text : C.dim}>{c.name}</Text>
-                  <Text color={C.faint}>{`  ${kTokens(c.ctx)}/${kTokens(c.out)}`}</Text>
+                  <Text color={c.status === 'running' ? C.text : C.dim} wrap="truncate">{c.name}</Text>
                 </Button>,
-                clock(c),
+                <Box>
+                  {lane(c, j)}
+                  <Text> </Text>
+                  {clock(c)}
+                </Box>,
               ),
               ...(v.expandedAgent === i && expanded
                 ? [
+                    row(`a-${j}-tok`, <Text color={C.faint}>{`   ${kTokens(expanded.ctx)} context · ${kTokens(expanded.out)} viết ra`}</Text>, null),
                     ...(expanded.tools.length === 0
                       ? [row(`a-${j}-none`, <Text color={C.faint}>{'   chưa gọi tool nào'}</Text>, null)]
                       : []),
@@ -1015,6 +1092,78 @@ export const register: Register = on => {
                 : []),
             ]
           })
+        : []),
+      ...(isOpen('agents')
+        ? peers.slice(0, 9).map((a, k) =>
+            row(
+              `a-peer-${k}`,
+              <Text wrap="truncate">
+                <Text color={C.agents}>◇ </Text>
+                <Text color={a.status === 'running' ? C.text : C.dim}>{a.name}</Text>
+                <Text color={C.faint}>{`  ${kTokens(a.ctx + a.out)} token · `}</Text>
+                <Text color={C.dim}>{a.project}</Text>
+                {a.account ? <Text color={C.rose}>{` @${a.account}`}</Text> : null}
+              </Text>,
+              a.status === 'running' ? (
+                <Text color={C.ember}>{`● ${fmtElapsed(now - a.spawnedAt)}`}</Text>
+              ) : (
+                <Text color={a.status === 'done' ? C.jade : C.alarm}>
+                  {`${a.status === 'done' ? '✓' : '✗'} ${fmtElapsed((a.endedAt ?? now) - a.spawnedAt)}`}
+                </Text>
+              ),
+            ),
+          )
+        : []),
+    ])
+
+    // ---- TURN: what the main model is doing now, or a receipt for the turn that just ended
+    const model = prettyModel(t.model)
+    const isTurnLive = t.startedAt !== null && t.endedAt === null
+    const isTurnOk = t.errors === 0 && (t.reason === null || t.reason === 'answer')
+    const stats = (
+      <Text color={C.dim}>
+        <Text color={t.edits > 0 ? C.text : C.dim}>{`${t.edits} sửa`}</Text>
+        {' · '}
+        <Text color={t.errors > 0 ? C.alarm : C.dim}>{`${t.errors} lỗi`}</Text>
+        {' · '}
+        <Text color={t.agents > 0 ? C.agents : C.dim}>{`${t.agents} agent`}</Text>
+      </Text>
+    )
+    const turnBlock = frame('turn', C.ember, isTurnLive, [
+      row(
+        't-head',
+        <Text wrap="truncate">
+          <Text color={C.ember} bold>
+            TURN
+          </Text>
+          <Text color={C.dim}>{` · ${model}`}</Text>
+        </Text>,
+        t.startedAt === null ? null : stats,
+      ),
+      t.startedAt === null ? (
+        row('t-none', <Text color={C.faint}>chưa có lượt nào</Text>, null)
+      ) : isTurnLive ? (
+        row(
+          't-now',
+          hasClient ? (
+            <els.Client key="t-spin" module="./spin.tsx" props={{ color: C.ember, label: 'đang làm ·', since: t.startedAt, now, bold: true }} />
+          ) : (
+            <Text color={C.ember} bold>{`● đang làm · ${fmtElapsed(now - t.startedAt)}`}</Text>
+          ),
+          null,
+        )
+      ) : (
+        row(
+          't-last',
+          <Text color={isTurnOk ? C.jade : C.alarm}>
+            {`${isTurnOk ? '✓' : '✗'} lượt trước · ${fmtElapsed((t.endedAt ?? now) - t.startedAt)}`}
+            {t.reason && t.reason !== 'answer' ? ` · dừng (${t.reason})` : ''}
+          </Text>,
+          <Text color={C.faint}>{`xong ${fmtClock(t.endedAt ?? now)}`}</Text>,
+        )
+      ),
+      ...(isTurnLive && hasClient
+        ? [<els.Client key="t-rail" module="./rail.tsx" props={{ width: inner, color: C.ember, dim: C.faint }} />]
         : []),
     ])
 
@@ -1095,13 +1244,14 @@ export const register: Register = on => {
           </Box>
         </Box>
         <Box width={W}>
-          {chip(C.queue, `${q.items.length} chờ gửi`, q.items.length > 0)}
           {chip(C.sessions, `${waiting} chờ bạn`, waiting > 0)}
+          {chip(C.queue, `${q.items.length} chờ gửi`, q.items.length > 0)}
           {chip(C.agents, `${running} agent`, running > 0)}
           {chip(C.log, 'log', false)}
         </Box>
-        {queueBlock}
         {sessionsBlock}
+        {queueBlock}
+        {turnBlock}
         {agentsBlock}
         {logBlock}
         <Box width={W}>

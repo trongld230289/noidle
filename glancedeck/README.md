@@ -4,24 +4,29 @@ A Claude Code mod: one pane beside the transcript with four blocks.
 
 - **QUEUE**: prompts for this project, sent one at a time when Claude is free, as your own words.
 - **SESSIONS**: every other Claude Code session on this machine, across all accounts (`CLAUDE_CONFIG_DIR`). Whoever waits on you sits on top in yellow.
-- **AGENTS**: this session's subagents, with context/output tokens and a running clock.
+- **TURN**: the main model's turn as it runs (spinner, clock, edits, errors, agents), then a receipt for it.
+- **AGENTS**: subagents as swimlanes on one time axis, so parallel and sequential work shows at a glance; a number key opens one's tokens, tools and answer.
 - **SESSION LOG**: prompts, edits, commands and questions; `all` merges the other sessions' logs.
 
 Tested on Claude Code **2.1.302** (Windows 11). Mods are early access: the API can change between releases.
 
 ## Install
 
-Load it in every new session, for every account, by pointing `CLAUDE_CODE_PLUGIN_DIRS` at this folder.
+At the prompt of a Claude Code terminal session:
 
-Windows (PowerShell), once:
-
-```powershell
-[Environment]::SetEnvironmentVariable('CLAUDE_CODE_PLUGIN_DIRS', 'D:\Project\vi-voice\glancedeck', 'User')
+```
+/plugin install glancedeck --marketplace trongld230289/glancedeck
 ```
 
-macOS / Linux: add `export CLAUDE_CODE_PLUGIN_DIRS=/path/to/glancedeck` to your shell profile.
+Answer `y` to add the marketplace, then pick a scope (user: every project). From a shell:
 
-Then restart your terminal (and VS Code, fully) so new sessions see the variable. Every account picks it up, since the variable lives outside any `CLAUDE_CONFIG_DIR`. For one session only: `claude --plugin-dir ./glancedeck`.
+```sh
+claude plugin install glancedeck --marketplace trongld230289/glancedeck
+```
+
+In the desktop app, where `/plugin` does not run: click + next to the prompt box, then Plugins, Add marketplace with `trongld230289/glancedeck`, then Add plugin.
+
+**Several accounts** (`CLAUDE_CONFIG_DIR=~/.claude-acc2`, ...): each account keeps its own plugins, so run the install once per account. Sessions that were already open load it only after they restart (`/exit`, then `claude --continue`).
 
 ## Commands
 

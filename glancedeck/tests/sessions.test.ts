@@ -1,7 +1,19 @@
 import { expect, test } from 'claude-code/testing'
 
-import { ALERT_MS, STALE_MS, accountOf, dueAlerts, isQueueOwner, mergeLogs, parseHeartbeat, questionOf, rowsOf } from '../hooks/sessions'
-import type { Heartbeat } from '../types'
+import {
+  ALERT_MS,
+  STALE_MS,
+  accountOf,
+  dueAlerts,
+  isQueueOwner,
+  mergeLogs,
+  parseHeartbeat,
+  peerAgents,
+  questionOf,
+  rowsOf,
+  sharedAgents,
+} from '../hooks/sessions'
+import type { AgentCard, Heartbeat } from '../types'
 
 const NOW = 1_000_000_000
 const beat = (sessionId: string, extra: Partial<Heartbeat> = {}): Heartbeat => ({
@@ -16,6 +28,7 @@ const beat = (sessionId: string, extra: Partial<Heartbeat> = {}): Heartbeat => (
   startedAt: NOW - 600_000,
   updatedAt: NOW - 1000,
   log: [],
+  agents: [],
   ...extra,
 })
 
@@ -67,6 +80,35 @@ test('the all tab merges the other sessions’ prompts, questions, errors and ed
   const merged = mergeLogs([{ at: NOW - 4000, who: 'you', label: 'you', text: 'hi' }], [other], 'self', NOW)
   expect(merged.map(l => l.text)).toEqual(['hi', 'acme-api hỏi: hỏi: xoá migration cũ?'])
   expect(merged[1]).toMatchObject({ who: 'peer', label: '@acc2' })
+})
+
+test('other sessions’ subagents are shared: running ones, and finished ones for 10 minutes', () => {
+  const card = (name: string, status: 'running' | 'done', endedAt: number | null): AgentCard => ({
+    id: name,
+    name,
+    ctx: 1000,
+    out: 10,
+    spawnedAt: NOW - 120_000,
+    endedAt,
+    status,
+    tools: [],
+    answer: '',
+  })
+  const shared = sharedAgents(
+    [card('Build core', 'running', null), card('Old', 'done', NOW - 11 * 60_000), card('Review', 'done', NOW - 60_000)],
+    NOW,
+  )
+  expect(shared.map(a => a.name)).toEqual(['Build core', 'Review'])
+  const peers = peerAgents(
+    [
+      beat('self', { agents: shared }),
+      beat('o', { project: 'acme-api', account: 'acc2', agents: shared }),
+      beat('gone', { updatedAt: 0, agents: shared }),
+    ],
+    'self',
+    NOW,
+  )
+  expect(peers.map(a => `${a.name}@${a.project}/${a.account}`)).toEqual(['Build core@acme-api/acc2', 'Review@acme-api/acc2'])
 })
 
 test('heartbeats and questions are read leniently', () => {
