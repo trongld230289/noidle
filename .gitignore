@@ -6,3 +6,7 @@ scripts/out/
 hub/node_modules/
 hub/dist/
 .playwright-mcp/
+
+# Claude Code mods: they live in their own repos (glancedeck, timesheet-mod)
+glancedeck/
+timesheet/
