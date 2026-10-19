@@ -287,6 +287,26 @@ describe('claude-hook pronunciations', () => {
 });
 
 /**
+ * Stop có thể chạy trước khi câu trả lời cuối được ghi vào transcript: hook từng đọc phần 🔊 của câu trước
+ * (19/10/2026, 89 lần đọc lặp trong log). Claude Code gửi kèm last_assistant_message, nên đọc từ đó.
+ */
+describe('claude-hook last_assistant_message', () => {
+  it('speak: đọc câu trả lời trong input khi transcript chưa có nó', async () => {
+    const transcript = path.join(work, 'transcript-stale.jsonl');
+    fs.writeFileSync(transcript, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: '🔊 Câu cũ.' }] } }) + '\n');
+    const before = readLog().length;
+    const r = await run(
+      ['speak', '--config', cfgNormal, '--voice', 'vi-VN-HoaiMyNeural'],
+      JSON.stringify({ session_id: 's-stale', cwd: work, transcript_path: transcript, last_assistant_message: 'Trả lời.\n\n🔊 Câu mới.' }),
+    );
+    expect(r.code).toBe(0);
+    const added = readLog().slice(before);
+    expect(added).toContain('Câu mới.');
+    expect(added).not.toContain('Câu cũ.');
+  });
+});
+
+/**
  * Extension gọi `claude -p` để dịch recapPrompt; tiến trình đó kế thừa hook của người dùng nên từng bắn "submitted"
  * (tắt mic) và Stop → "Workspace X is done" giả (2026-09-29). Extension đặt NOIDLE_INTERNAL=1, hook thấy là thoát ngay.
  */

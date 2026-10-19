@@ -636,7 +636,11 @@ async function modeSpeak(): Promise<void> {
     log(`speak: còn ${pending.length} việc nền đang chạy (${pending.join(', ')}), chưa xong nên không đọc, không báo`);
     return;
   }
-  const answer = lastAssistantText(transcript);
+  // Stop có thể chạy trước khi câu trả lời cuối được ghi vào transcript: đọc transcript lúc đó ra phần 🔊 của câu trước
+  // (19/10/2026). Claude Code gửi kèm câu đó trong input; Copilot không có thì mới đọc transcript.
+  const answer = typeof input.last_assistant_message === 'string' && input.last_assistant_message.trim()
+    ? input.last_assistant_message
+    : lastAssistantText(transcript);
   const session = input.session_id ?? '';
   const cwd = input.cwd || process.cwd();
   // announce luôn đọc tiếng Anh ("Workspace X is done."), bất kể ngôn ngữ của phiên.
