@@ -286,6 +286,29 @@ describe('claude-hook pronunciations', () => {
   });
 });
 
+/** Nút Keepwarm của mod promptdeck ping khi người dùng đi vắng: không dặn 🔊, không đọc, không nháy. */
+describe('claude-hook keepwarm ping', () => {
+  it('prompt [keepwarm] im lặng, speak của lượt đó không đọc; prompt thật sau đó đọc lại như thường', async () => {
+    const transcript = path.join(work, 'transcript-ping.jsonl');
+    fs.writeFileSync(transcript, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: '🔊 Câu thật.' }] } }) + '\n');
+    const session = 's-ping';
+    const before = readLog().length;
+    const p = await run(['prompt', '--config', cfgNormal], JSON.stringify({ session_id: session, cwd: work, prompt: '[keepwarm] Cache keep-alive ping. Reply with just: ok' }));
+    expect(p.stdout.trim()).toBe('');
+    await run(['speak', '--config', cfgNormal], JSON.stringify({ session_id: session, cwd: work, transcript_path: transcript, last_assistant_message: 'ok' }));
+    let added = readLog().slice(before);
+    expect(added).toContain('ping keepwarm');
+    expect(added).not.toContain('signal submitted');
+    expect(added).not.toContain('speak → play');
+
+    const mid = readLog().length;
+    await run(['prompt', '--config', cfgNormal], JSON.stringify({ session_id: session, cwd: work, prompt: 'tiếp tục' }));
+    await run(['speak', '--config', cfgNormal, '--voice', 'vi-VN-HoaiMyNeural'], JSON.stringify({ session_id: session, cwd: work, transcript_path: transcript, last_assistant_message: 'Xong.\n\n🔊 Câu thật.' }));
+    added = readLog().slice(mid);
+    expect(added).toContain('speak → play');
+  });
+});
+
 /**
  * Stop có thể chạy trước khi câu trả lời cuối được ghi vào transcript: hook từng đọc phần 🔊 của câu trước
  * (19/10/2026, 89 lần đọc lặp trong log). Claude Code gửi kèm last_assistant_message, nên đọc từ đó.

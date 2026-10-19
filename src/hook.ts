@@ -409,6 +409,8 @@ interface SessionMark {
   proc?: { anchor: number; chain: number[] };
   /** Lượt hiện tại do tin nhắn hệ thống mở lại (việc nền xong, subagent báo về): phần 🔊 của nó không cắt câu đang đọc. */
   resumed?: boolean;
+  /** Lượt hiện tại là ping giữ ấm cache của mod promptdeck: không đọc, không nháy khi nó xong. */
+  ping?: boolean;
 }
 
 function markPath(session: string): string {
@@ -426,10 +428,11 @@ function readMark(session: string): SessionMark {
   const n = Number(raw);
   if (!Number.isNaN(n)) return { count: n };
   try {
-    const o = JSON.parse(raw) as { count?: unknown; lang?: unknown; style?: unknown; resumed?: unknown; proc?: { anchor?: unknown; chain?: unknown } };
+    const o = JSON.parse(raw) as { count?: unknown; lang?: unknown; style?: unknown; resumed?: unknown; ping?: unknown; proc?: { anchor?: unknown; chain?: unknown } };
     const mark: SessionMark = { count: Number(o.count) || 0, lang: o.lang === 'en' ? 'en' : o.lang === 'vi' ? 'vi' : undefined };
     if (o.style === 'announce' || o.style === 'recap') mark.style = o.style;
     if (o.resumed === true) mark.resumed = true;
+    if (o.ping === true) mark.ping = true;
     // Dấu cũ (proc.pid) không có anchor: bỏ, tra lại.
     if (o.proc && typeof o.proc.anchor === 'number' && Array.isArray(o.proc.chain)) {
       mark.proc = { anchor: o.proc.anchor, chain: o.proc.chain.filter((n): n is number => typeof n === 'number') };
@@ -526,6 +529,11 @@ function isSystemPrompt(text: string): boolean {
   return /^\s*<(task-notification|agent-message|system-reminder)\b/.test(text);
 }
 
+/** Ping giữ ấm cache của mod promptdeck (nút Keepwarm): gửi khi người dùng đi vắng, câu trả lời chỉ là "ok". */
+function isKeepwarmPing(text: string): boolean {
+  return /^\s*\[keepwarm\]/.test(text);
+}
+
 function systemPromptKind(text: string): string {
   const m = /^\s*<([\w-]+)/.exec(text);
   return m?.[1] === 'task-notification' ? 'background task notification' : `tin nhắn hệ thống <${m?.[1] ?? '?'}>`;
@@ -549,6 +557,13 @@ async function modePrompt(): Promise<void> {
     return;
   }
   const promptText = typeof input.prompt === 'string' ? input.prompt : '';
+  if (isKeepwarmPing(promptText)) {
+    // Người dùng đi vắng: không dặn 🔊, không báo submitted (cửa sổ giữ nguyên "done"), không đếm lượt.
+    // Đánh dấu phiên để speak im lặng khi lượt ping xong.
+    if (input.session_id) writeMark(input.session_id, { ...readMark(input.session_id), ping: true });
+    log(`prompt: ping keepwarm, session ${input.session_id ?? '-'}, im lặng`);
+    return;
+  }
   if (isSystemPrompt(promptText)) {
     // Không phải người dùng nói: không đếm, không đổi ngôn ngữ, không tắt mic. Nhưng Claude sắp chạy tiếp,
     // cửa sổ không còn "done": bảo extension bỏ màu và chữ "Claude is done".
@@ -556,7 +571,7 @@ async function modePrompt(): Promise<void> {
     // hệ thống (7/10/2026: câu trước tiếng Việt, câu sau tiếng Anh). Phần 🔊 của lượt này xếp hàng, không cắt câu đang đọc.
     const cfg = loadConfig();
     const mark = input.session_id ? readMark(input.session_id) : { count: 0 };
-    if (input.session_id) writeMark(input.session_id, { ...mark, resumed: true });
+    if (input.session_id) writeMark(input.session_id, { ...mark, resumed: true, ping: undefined });
     const lang = isAuto(cfg.language) ? mark.lang ?? 'vi' : langOf(cfg.language);
     const recap = !voiceOff(cfg) && writesRecap(cfg);
     log(`prompt: ${systemPromptKind(promptText)}, session ${input.session_id ?? '-'}, chỉ báo resumed${recap ? `, dặn 🔊 tiếng ${lang}` : ''}`);
@@ -575,7 +590,7 @@ async function modePrompt(): Promise<void> {
     if (input.session_id) {
       const mark = readMark(input.session_id);
       const lang = isAuto(cfg.language) ? detectLang(promptText) ?? mark.lang ?? 'vi' : langOf(cfg.language);
-      writeMark(input.session_id, { ...mark, count: mark.count + 1, lang, resumed: undefined });
+      writeMark(input.session_id, { ...mark, count: mark.count + 1, lang, resumed: undefined, ping: undefined });
     }
     log('prompt: voiceResponse tắt, không chèn hướng dẫn');
   }
@@ -604,6 +619,11 @@ async function modeSpeak(): Promise<void> {
   if (!input.transcript_path) return;
   // Một hook khác vừa chặn Stop và Claude làm tiếp: không đọc lại để khỏi lặp.
   if (input.stop_hook_active) return;
+  // Lượt ping giữ ấm của promptdeck xong: người dùng đi vắng, không đọc "ok", không nháy, không mở mic.
+  if (input.session_id && readMark(input.session_id).ping) {
+    log(`speak: lượt ping keepwarm xong, session ${input.session_id}, im lặng`);
+    return;
+  }
   const cfg = loadConfig();
   // Ghi kiểu đọc và file cấu hình đang dùng: người dùng bật announce mà vẫn nghe recap thì log này chỉ ra hook đọc file nào.
   log(`speak: voiceStyle ${cfg.voiceStyle ?? 'recap (mặc định, không có trong config)'}, config ${arg('config', '') || '(không có --config)'}`);
