@@ -83,7 +83,7 @@
           "noIdle.voiceResponse": {
             "type": "boolean",
             "default": true,
-            "markdownDescription": "**Bật** thì đọc thành tiếng khi Claude Code, Copilot Chat và GitHub Copilot CLI trả lời xong, và đọc câu báo khi agent chờ bạn. **Tắt** thì không đọc, không báo bằng giọng, không chèn hướng dẫn recap. Không thay đổi mic: Hands Free vẫn hoạt động nếu đang bật. Có hiệu lực ở lượt sau, không cần restart. Lệnh nhanh: `NoIdle: Tắt/bật giọng đọc`.\n\nMic, nháy taskbar và đổi màu cửa sổ chạy độc lập.\n\nCần `node` (thiếu thì không cài hook) và `ffplay` đi kèm ffmpeg (thiếu thì không có tiếng) trong PATH.",
+            "markdownDescription": "**Bật** thì đọc thành tiếng khi Claude Code, Copilot Chat và GitHub Copilot CLI trả lời xong, và đọc câu báo khi agent chờ bạn. **Tắt** thì không đọc, không báo bằng giọng, không chèn hướng dẫn recap. Không thay đổi mic: Hands Free vẫn hoạt động nếu đang bật. Có hiệu lực ở lượt sau, không cần restart. Lệnh nhanh: `NoIdle: Tắt/bật giọng đọc`, phím **Alt+M**.\n\nMic, nháy taskbar và đổi màu cửa sổ chạy độc lập.\n\nCần `node` (thiếu thì không cài hook) và `ffplay` đi kèm ffmpeg (thiếu thì không có tiếng) trong PATH.",
             "scope": "application",
             "order": 0
           },
@@ -552,6 +552,10 @@
       {
         "command": "noIdle.skipSpeech",
         "key": "f7"
+      },
+      {
+        "command": "noIdle.toggleMute",
+        "key": "alt+m"
       },
       {
         "command": "noIdle.toggle",

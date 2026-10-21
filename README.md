@@ -76,6 +76,7 @@ Khi approve hoặc chọn đáp án, im lặng hoặc nói không rõ thì chuy�
 |---|---|
 | **F6** | Bắt đầu / dừng nghe. Mic đang tự mở thì F6 tắt mic. |
 | **F7** | Bỏ qua câu đang đọc, câu kế tiếp phát tiếp. Lúc đang đọc thì bấm được ở mọi app (Teams, trình duyệt...). |
+| **Alt+M** | Tắt / bật giọng đọc (Voice Response). Có hiệu lực ngay, cửa sổ vẫn nháy, mic không đổi. |
 | **Alt+D** | Bôi chữ rồi **Ctrl+C**, sau đó **Alt+D** để dịch / giải nghĩa clipboard (tối đa 2000 ký tự). Bật/tắt tại **NoIdle 6. Dịch → Translate** (`noIdle.translate`, mặc định bật). Ưu tiên model do Copilot cung cấp trong VS Code và lưu kết quả trong bộ nhớ; dự phòng bằng Claude Code CLI (Haiku), không có thì Copilot CLI. Không tự dịch khi copy hoặc bôi chữ. Editor và terminal cũng có menu chuột phải để dịch vùng chọn. |
 
 ## An toàn khi approve bằng giọng
@@ -92,7 +93,7 @@ Khi approve hoặc chọn đáp án, im lặng hoặc nói không rõ thì chuy�
 
 | Setting | Mặc định | Ý nghĩa |
 |---|---|---|
-| Voice Response | bật | Đọc câu trả lời và câu báo của Claude Code, Copilot Chat, Copilot CLI. Tắt thì không đọc; mic vẫn hoạt động theo Hands Free, cửa sổ vẫn nháy. Lệnh nhanh: `NoIdle: Tắt/bật giọng đọc`. |
+| Voice Response | bật | Đọc câu trả lời và câu báo của Claude Code, Copilot Chat, Copilot CLI. Tắt thì không đọc; mic vẫn hoạt động theo Hands Free, cửa sổ vẫn nháy. Lệnh nhanh: `NoIdle: Tắt/bật giọng đọc` hoặc **Alt+M**. |
 | Voice Style | `recap` | `recap`: đọc tóm tắt nội dung (tốn thêm ít token mỗi lượt). `announce`: chỉ đọc "Workspace X is done" (tiếng Anh), không tốn token. `ting`: không đọc gì, xong việc, cần approve, cần trả lời mỗi loại một tiếng ting khác nhau. |
 | Recap Prompt | bản tiếng Việt sẵn | Dặn agent viết gì trong phần recap; nghe mệt thì sửa ngắn lại. Viết một thứ tiếng, extension tự dịch sang tiếng kia bằng Copilot Chat hoặc Claude Code đang có (không cần key). Quy tắc số viết bằng chữ số luôn được nối sẵn, không cần ghi. |
 | Voice Notify | bật | Đọc "Workspace X cần approve" / "cần bạn trả lời". Tắt Voice Response thì không đọc dù đang bật. |
