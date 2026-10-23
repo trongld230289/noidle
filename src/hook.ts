@@ -224,6 +224,9 @@ async function askHeard(cwd: string, session: string, timeoutSec: number, label:
 async function requestMicrophone(signal: Signal & { event: 'listen' | 'ask' }): Promise<string | undefined> {
   const promptCount = readMark(signal.session).count;
   const ticket = takeTicket('notify', signal.session);
+  // Vé này giữ hàng đợi suốt lúc chờ câu trả lời; extension gọi skip ngay khi mở mic để cắt tiếng loa, và skip
+  // từng tắt chính tiến trình này: nghe đúng "yes" mà quyết định không tới được Claude (2026-10-23).
+  updateTicket(ticket, { mic: true });
   try {
     // Copilot Chat cũng có chuỗi (extension host nằm trong đó): hai cửa sổ cùng folder vẫn mở đúng ô chat.
     const ancestors = await agentChain(signal.session);
@@ -293,6 +296,8 @@ interface Ticket {
   player?: number;
   kind: 'speak' | 'notify';
   session: string;
+  /** Vé của lượt mở mic (listen/ask): tiến trình đang chờ câu trả lời, không phải câu đang đọc, skip không được tắt. */
+  mic?: boolean;
 }
 
 /**
@@ -709,6 +714,10 @@ function modeSkip(): void {
   const head = listTickets()[0];
   if (!head) {
     log('skip: không có gì đang đọc');
+    return;
+  }
+  if (head.t.mic) {
+    log(`skip: vé đầu hàng ${head.file} là lượt mở mic, không có gì đang đọc`);
     return;
   }
   if (head.t.player) {

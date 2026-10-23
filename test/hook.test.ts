@@ -490,6 +490,18 @@ describe('claude-hook skip', () => {
     expect(r.code).toBe(0);
     expect(await exited(play)).toBe(true);
   });
+
+  it('vé đầu hàng là lượt mở mic (hook approve đang chờ câu trả lời) thì không tắt gì', async () => {
+    // Extension gọi skip ngay khi mở mic nghe approve; skip từng tắt chính hook đang chờ, nên "yes" nghe đúng mà không tới Claude.
+    fs.rmSync(queueDir, { recursive: true, force: true });
+    fs.mkdirSync(queueDir, { recursive: true });
+    const asking = idle();
+    fs.writeFileSync(path.join(queueDir, `${'0'.padStart(15, '0')}-${asking.pid}.json`), JSON.stringify({ pid: asking.pid, kind: 'notify', session: 's', mic: true }));
+    const r = await run(['skip'], '');
+    expect(r.code).toBe(0);
+    expect(await exited(asking)).toBe(false);
+    asking.kill();
+  });
 });
 
 describe('claude-hook với Copilot Chat', () => {
