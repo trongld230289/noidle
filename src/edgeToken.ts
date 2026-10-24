@@ -165,11 +165,35 @@ export function secMsGecV2(unixSeconds: number): string {
 /** Endpoint edge-tts 7.3.1 dùng; api.msedgeservices.com của msedge-tts từ chối token v2. */
 export const EDGE_WSS = 'wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1';
 
-interface EdgeTtsClass { _clockOffsetMs?: number; generateUUID(): string; getSynthUrl(): Promise<string> }
+/**
+ * "vi-VN-HoaiMyNeural" → "Microsoft Server Speech Text to Speech Voice (vi-VN, HoaiMyNeural)", tên Edge tự gửi
+ * (edge-tts 7.3.1 data_classes.py). Từ 24/10/2026 gửi tên ngắn của giọng vi-VN thì dịch vụ đóng luồng không có tiếng
+ * ("Stream closed before the synthesis completed"); giọng en-US multilingual vẫn nhận tên ngắn.
+ */
+export function fullVoiceName(voice: string): string {
+  const m = /^([a-z]{2,})-([A-Z]{2,})-(.+Neural)$/.exec(voice);
+  if (!m) return voice;
+  let [, lang, region, name] = m;
+  const dash = name.indexOf('-');
+  if (dash !== -1) { region = `${region}-${name.slice(0, dash)}`; name = name.slice(dash + 1); }
+  return `Microsoft Server Speech Text to Speech Voice (${lang}-${region}, ${name})`;
+}
 
-/** Cho msedge-tts kết nối như edge-tts 7.3.1, với token v2; gọi một lần trước khi đọc. */
+type SetMetadata = (voice: string, format: unknown, options?: { voiceLocale?: string } & Record<string, unknown>) => Promise<void>;
+interface EdgeTtsClass { _clockOffsetMs?: number; generateUUID(): string; getSynthUrl(): Promise<string>; prototype: { setMetadata: SetMetadata & { v2?: boolean } } }
+
+/**
+ * Cho msedge-tts kết nối như edge-tts 7.3.1, với token v2; gọi một lần trước khi đọc. SSML cũng ghi xml:lang="en-US"
+ * và tên giọng đầy đủ như edge-tts, giọng nào cũng vậy.
+ */
 export function useV2Token(cls: unknown): void {
   const c = cls as EdgeTtsClass;
+  const set = c.prototype.setMetadata;
+  if (!set.v2) {
+    const patched: SetMetadata & { v2?: boolean } = function (this: unknown, voice, format, options) { return set.call(this, fullVoiceName(voice), format, { ...options, voiceLocale: 'en-US' }); };
+    patched.v2 = true;
+    c.prototype.setMetadata = patched;
+  }
   c.getSynthUrl = async function getSynthUrl() {
     const token = secMsGecV2((Date.now() + (c._clockOffsetMs ?? 0)) / 1000);
     return `${EDGE_WSS}?TrustedClientToken=${TRUSTED_CLIENT_TOKEN}&ConnectionId=${c.generateUUID().replace(/-/g, '')}&Sec-MS-GEC=${token}&Sec-MS-GEC-Version=${SEC_MS_GEC_VERSION}`;
