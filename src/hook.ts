@@ -25,6 +25,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { spawn } from 'child_process';
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
+import { useV2Token } from './edgeToken';
 import { lastAssistantText, pickSpeech, hasSpeakSection, pendingBackgroundTasks, queuedPrompts, briefTool, promptStopRecap, splitSentences, announcement, doneAnnouncement, workspaceName, spoken, HookInput } from './speech';
 import { recapInstruction, type RecapPrompts } from './recapPrompt';
 import { langOf, isAuto, detectLang, effectiveVoice, usesVietPronunciation, DEFAULT_VOICE, type Lang } from './lang';
@@ -1094,6 +1095,9 @@ async function playNow(text: string, kind: Ticket['kind'], session: string, lang
     /* bỏ qua */
   }
 }
+
+// Edge đòi token v2 từ 24/10/2026 (xem edgeToken.ts).
+useV2Token(MsEdgeTTS);
 
 /** Một yêu cầu Edge trên kết nối mới; quá SYNTH_TIMEOUT_MS thì đóng kết nối để không treo vô hạn. */
 const SYNTH_TIMEOUT_MS = 20_000;
