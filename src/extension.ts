@@ -103,6 +103,7 @@ function config() {
     glossary: c.get<string[]>('glossary', []),
     pronunciations: c.get<Record<string, string>>('pronunciations', {}) || {},
     voiceSayWorkspace: c.get<'auto' | 'always' | 'never'>('voiceSayWorkspace', 'auto') || 'auto',
+    voiceLeadInMs: c.get<number>('voiceLeadInMs', 1000),
     voiceStyle: (['announce', 'ting'].includes(c.get<string>('voiceStyle', 'recap')) ? c.get<string>('voiceStyle') : 'recap') as 'recap' | 'announce' | 'ting',
     /** Thân hướng dẫn recap người dùng tự sửa; rỗng là bản mặc định (recapPromptsFor xử lý). */
     recapPrompt: (c.get<string>('recapPrompt', '') || '').trim(),
@@ -402,6 +403,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
       handsFree: cfg.handsFree,
       pronunciations: cfg.pronunciations,
       voiceSayWorkspace: cfg.voiceSayWorkspace,
+      voiceLeadInMs: cfg.voiceLeadInMs,
       voiceStyle: cfg.voiceStyle,
       language: cfg.language,
       recapPrompt: recapPromptsFor(cfg.recapPrompt, cachedTranslation(cfg.recapPrompt)),

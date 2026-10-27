@@ -26,7 +26,7 @@ import * as crypto from 'crypto';
 import { spawn } from 'child_process';
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
 import { useV2Token } from './edgeToken';
-import { lastAssistantText, pickSpeech, hasSpeakSection, pendingBackgroundTasks, queuedPrompts, briefTool, promptStopRecap, splitSentences, announcement, doneAnnouncement, workspaceName, spoken, HookInput } from './speech';
+import { lastAssistantText, pickSpeech, hasSpeakSection, pendingBackgroundTasks, queuedPrompts, briefTool, promptStopRecap, splitSentences, leadInMs, announcement, doneAnnouncement, workspaceName, spoken, HookInput } from './speech';
 import { recapInstruction, type RecapPrompts } from './recapPrompt';
 import { langOf, isAuto, detectLang, effectiveVoice, usesVietPronunciation, DEFAULT_VOICE, type Lang } from './lang';
 import { parseApproval, isDangerous, voiceApprovable, parseChoice, isChoiceCancellation, isAmbiguousChoice, permissionRequestOutput } from './decision';
@@ -126,6 +126,8 @@ interface HookConfig {
   voiceStyle?: 'recap' | 'announce' | 'ting';
   /** Mở đầu phần đọc bằng "Workspace X:" — auto: chỉ khi có hơn một cửa sổ VS Code đang mở. */
   voiceSayWorkspace?: 'auto' | 'always' | 'never';
+  /** Setting noIdle.voiceLeadInMs: khoảng lặng phát trước khi đọc để loa Bluetooth đang ngủ không nuốt chữ đầu. */
+  voiceLeadInMs?: number;
   /**
    * Setting noIdle.language: 'en' thì hướng dẫn, câu báo và lý do trả về Claude đều tiếng Anh, bỏ bảng phiên âm mặc định.
    * 'auto' thì đoán theo prompt vừa gửi và nhớ theo phiên (dấu phiên trong SESSION_DIR).
@@ -680,11 +682,11 @@ async function modeSpeak(): Promise<void> {
   }
   if (cfg.voiceStyle === 'announce') {
     // Câu cứng luôn có tên workspace, không cần tiền tố "Workspace X:" nữa.
-    text = doneAnnouncement(answer, cwd, lang);
+    text = doneAnnouncement(answer, nameDir(cwd), lang);
   } else {
     text = pickSpeech(answer);
     // Nhiều workspace cùng chạy thì người nghe không biết câu trả lời của cửa sổ nào: mở đầu bằng tên workspace.
-    if (text && saysWorkspace(cfg)) text = `Workspace ${workspaceName(cwd, lang)}: ${text}`;
+    if (text && saysWorkspace(cfg)) text = `Workspace ${workspaceName(nameDir(cwd), lang)}: ${text}`;
   }
   // Hands-free: extension mở mic sau khi loa phát xong. Tiến trình play gửi tín hiệu listen khi xong;
   // không có gì để đọc thì gửi ngay từ đây.
@@ -700,6 +702,14 @@ async function modeSpeak(): Promise<void> {
   }
   // Nháy cửa sổ mất gần một giây (PowerShell): tách play trước rồi mới chờ, để giọng đọc không bị chậm theo.
   await attentionSent;
+}
+
+/**
+ * Thư mục để đặt tên workspace khi đọc. Claude Code đưa thư mục gốc project qua CLAUDE_PROJECT_DIR; cwd của hook đi
+ * theo lệnh cd của agent, nên cùng một cửa sổ có lúc bị đọc là "WMS", lúc "WMS WebApp". Copilot không có biến này: dùng cwd.
+ */
+function nameDir(cwd?: string): string | undefined {
+  return process.env.CLAUDE_PROJECT_DIR || cwd;
 }
 
 /** auto: có hơn một cửa sổ VS Code đăng ký (sổ trong WINDOWS_DIR) thì mới cần nói tên. */
@@ -845,9 +855,10 @@ async function modeNotify(): Promise<void> {
   const say = spoken(lang);
   const approval = input.hook_event_name === 'PermissionRequest' || (chat && input.chat_voice_tool === 'approval');
   // Chat: nói thêm tool và vài từ đầu của lệnh (không đọc nguyên câu lệnh dài), có dấu chấm để câu sau tách ra.
+  const named = { ...input, cwd: nameDir(input.cwd) };
   const text = approval && chat
-    ? `${announcement({ ...input, hook_event_name: 'PermissionRequest' }, lang)} ${briefTool(input.tool_name ?? '', input.tool_input)}.`
-    : announcement(input, lang);
+    ? `${announcement({ ...named, hook_event_name: 'PermissionRequest' }, lang)} ${briefTool(input.tool_name ?? '', input.tool_input)}.`
+    : announcement(named, lang);
   log(`notify ${input.hook_event_name ?? '?'} ${input.notification_type ?? input.tool_name ?? ''}: ${JSON.stringify(text)}`);
   if (!text) return;
   const reasonKind: AttentionReason = /approve|approval/i.test(text) ? 'approve' : 'answer';
@@ -1409,9 +1420,12 @@ async function playText(text: string, ticket: string, voice: string): Promise<vo
   const playerExe = await resolvePlayer(arg('player', 'ffplay'));
   if (playerExe !== arg('player', 'ffplay')) log(`player: ${arg('player', 'ffplay')} → ${playerExe}`);
 
+  // adelay: phát khoảng lặng trước tiếng thật. Loa Bluetooth ngủ khi rảnh và nuốt phần đầu ("Workspace" chỉ còn
+  // nghe "pace"); khoảng lặng cho thiết bị kịp thức. 0 thì bỏ filter.
+  const lead = leadInMs(loadConfig().voiceLeadInMs);
   const player = spawn(
     playerExe,
-    ['-nodisp', '-autoexit', '-loglevel', 'error', '-f', 'mp3', '-i', 'pipe:0'],
+    ['-nodisp', '-autoexit', '-loglevel', 'error', '-f', 'mp3', '-i', 'pipe:0', ...(lead > 0 ? ['-af', `adelay=${lead}:all=1`] : [])],
     { stdio: ['pipe', 'ignore', 'pipe'], windowsHide: true },
   );
   updateTicket(ticket, { player: player.pid });

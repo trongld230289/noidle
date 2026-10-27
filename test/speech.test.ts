@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { lastAssistantText, pickSpeech, stripMarkdown, pendingBackgroundTasks, queuedPrompts, briefTool } from '../src/speech';
 import { DEFAULT_RECAP_PROMPT } from '../src/recapPrompt';
 import { applyHooks, hookCommands } from '../src/claudeHooks';
-import { splitSentences, announcement, workspaceName, doneAnnouncement } from '../src/speech';
+import { splitSentences, announcement, workspaceName, doneAnnouncement, leadInMs, DEFAULT_LEAD_IN_MS } from '../src/speech';
 
 const line = (o: unknown) => JSON.stringify(o);
 
@@ -223,6 +223,22 @@ describe('applyHooks', () => {
     const off = applyHooks(on, { ...opts, enabled: false });
     expect(off.hooks).toEqual({ PostToolUse: [{ hooks: [{ type: 'command', command: 'node keep.js' }] }] });
     expect(applyHooks(applyHooks({}, opts), { ...opts, enabled: false })).toEqual({});
+  });
+});
+
+describe('leadInMs', () => {
+  it('mặc định 1000 ms khi thiếu hay sai kiểu: loa Bluetooth nuốt "Work" của "Workspace" với 400 ms', () => {
+    expect(DEFAULT_LEAD_IN_MS).toBe(1000);
+    expect(leadInMs(undefined)).toBe(1000);
+    expect(leadInMs('800')).toBe(1000);
+    expect(leadInMs(NaN)).toBe(1000);
+  });
+
+  it('giữ giá trị hợp lệ, kẹp vào [0, 3000] và làm tròn', () => {
+    expect(leadInMs(0)).toBe(0);
+    expect(leadInMs(650.4)).toBe(650);
+    expect(leadInMs(-50)).toBe(0);
+    expect(leadInMs(10000)).toBe(3000);
   });
 });
 

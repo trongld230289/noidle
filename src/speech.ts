@@ -331,6 +331,19 @@ export function splitSentences(text: string, maxChars = 220, firstMax = 90, firs
   return out;
 }
 
+/**
+ * Khoảng lặng mặc định trước khi đọc. Loa Bluetooth (Bose Portable Home Speaker, 27/10/2026) ngủ khi rảnh và nuốt
+ * phần đầu không đều: 400 ms vẫn còn nghe "pace" thay vì "Workspace", 1000 ms thì đủ.
+ */
+export const DEFAULT_LEAD_IN_MS = 1000;
+const MAX_LEAD_IN_MS = 3000;
+
+/** Setting voiceLeadInMs kẹp vào [0, 3000] ms; thiếu hay sai kiểu thì dùng mặc định. */
+export function leadInMs(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_LEAD_IN_MS;
+  return Math.min(MAX_LEAD_IN_MS, Math.max(0, Math.round(value)));
+}
+
 export interface HookInput {
   hook_event_name?: string;
   notification_type?: string;

@@ -420,10 +420,11 @@ describe('claude-hook workspace prefix', () => {
     fs.mkdirSync(windowsDir, { recursive: true });
     fs.writeFileSync(path.join(windowsDir, `${pid}.json`), JSON.stringify({ pid, pipe: `pipe-${pid}`, folders: [folder] }));
   }
-  async function spoken(cfgFile: string): Promise<string> {
+  // CLAUDE_PROJECT_DIR rỗng mặc định: test chạy bên trong một phiên Claude Code thừa hưởng biến này từ shell.
+  async function spoken(cfgFile: string, cwd = work, env: NodeJS.ProcessEnv = { CLAUDE_PROJECT_DIR: '' }): Promise<string> {
     fs.writeFileSync(transcript, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: '🔊 Xong việc.' }] } }) + '\n');
     const before = readLog().length;
-    const r = await run(['speak', '--config', cfgFile, '--voice', 'vi-VN-HoaiMyNeural', '--player', bogusPlayer], JSON.stringify({ session_id: 'ws-1', cwd: work, transcript_path: transcript }));
+    const r = await run(['speak', '--config', cfgFile, '--voice', 'vi-VN-HoaiMyNeural', '--player', bogusPlayer], JSON.stringify({ session_id: 'ws-1', cwd, transcript_path: transcript }), env);
     expect(r.code).toBe(0);
     const m = /speak → play pid \d+ \([^)]*\): (".*")/.exec(readLog().slice(before));
     return m ? (JSON.parse(m[1]) as string) : '';
@@ -451,6 +452,17 @@ describe('claude-hook workspace prefix', () => {
     registerWindow(12, path.join(work, '..', 'other-project'));
     expect(await spoken(never)).toBe('Xong việc.');
     fs.rmSync(windowsDir, { recursive: true, force: true });
+  });
+
+  it('đọc tên project từ CLAUDE_PROJECT_DIR, không theo thư mục con agent vừa cd vào', async () => {
+    // 27/10/2026: cùng một cửa sổ có lúc bị đọc "Workspace WMS", lúc "Workspace WMS WebApp" vì cwd của hook đi theo cd.
+    const always = path.join(work, 'say-always-project.json');
+    fs.writeFileSync(always, JSON.stringify({ voiceSayWorkspace: 'always' }));
+    const project = path.join(work, 'shop-app');
+    const sub = path.join(project, 'Shop.WebApp');
+    fs.mkdirSync(sub, { recursive: true });
+    expect(await spoken(always, sub, { CLAUDE_PROJECT_DIR: project })).toBe(pronounce('Workspace shop app: Xong việc.'));
+    expect(await spoken(always, sub)).toBe(pronounce('Workspace Shop WebApp: Xong việc.'));
   });
 });
 

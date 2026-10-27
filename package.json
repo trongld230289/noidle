@@ -135,6 +135,15 @@
             "scope": "application",
             "markdownDescription": "Có đọc \"Workspace X:\" ở đầu câu trả lời (kiểu `recap`) để biết cửa sổ nào vừa xong không. `auto`: chỉ khi đang mở hơn một cửa sổ VS Code.",
             "order": 4
+          },
+          "noIdle.voiceLeadInMs": {
+            "type": "number",
+            "default": 1000,
+            "minimum": 0,
+            "maximum": 3000,
+            "scope": "application",
+            "markdownDescription": "Khoảng lặng (ms) phát trước khi đọc. Loa/tai nghe Bluetooth tự ngủ khi rảnh và nuốt phần đầu câu (\"Workspace\" chỉ còn nghe \"pace\"); khoảng lặng cho thiết bị kịp thức. Loa có dây không bị thì đặt `0` để đọc sớm hơn.",
+            "order": 5
           }
         }
       },
