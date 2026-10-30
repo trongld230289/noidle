@@ -369,6 +369,7 @@ describe('Copilot CLI voice permissions', () => {
     fs.writeFileSync(transcriptPath, events.map((e) => JSON.stringify(e)).join('\n') + '\n');
     return {
       input,
+      transcriptPath,
       complete: (kind: 'approved' | 'denied' = 'approved') => fs.appendFileSync(transcriptPath, JSON.stringify({
         type: 'permission.completed', data: { requestId: session, result: { kind } },
       }) + '\n'),
@@ -382,6 +383,21 @@ describe('Copilot CLI voice permissions', () => {
     const before = log().length;
     await run('notify', fixture.input, ['--event', 'Notification']);
     expect(signals).toEqual([]);
+    expect(log().slice(before)).not.toContain('play pid');
+  });
+
+  it.each([false, true])('does not announce or highlight out-of-order auto-approval (muted: %s)', async (muted) => {
+    configure({ handsFree: false, voiceResponse: !muted });
+    const fixture = permissionFixture('cli-permission-auto-approved', true);
+    fixture.complete();
+    const file = fixture.transcriptPath;
+    const [notification, request, completion] = fs.readFileSync(file, 'utf8').trim().split('\n');
+    fs.writeFileSync(file, [notification, completion, request].join('\n') + '\n');
+    const before = log().length;
+    const result = await run('notify', fixture.input, ['--event', 'Notification']);
+    expect(result.stdout).toBe('');
+    expect(signals).toEqual([]);
+    expect(log().slice(before)).toContain('dropping stale alert');
     expect(log().slice(before)).not.toContain('play pid');
   });
 

@@ -30,6 +30,26 @@ describe('Copilot permission notification lifecycle', () => {
     ];
     expect(copilotPermissionState(transcript(...events), notification)).toEqual({ requestId: 'request-1', completed: done });
   });
+  it('recognizes auto-approval recorded between the notification and request', () => {
+    expect(copilotPermissionState(transcript(
+      { ...hook, id: 'notification-1' },
+      { ...completed, parentId: 'permission-1' },
+      { ...request, id: 'permission-1', parentId: 'notification-1' },
+    ), notification)).toEqual({ requestId: 'request-1', completed: true });
+  });
+  it('correlates interleaved notifications by parent ID without completing another request', () => {
+    const second = { timestamp: 124, message: 'Fetch URL' };
+    const events = transcript(
+      { ...hook, id: 'notification-1' },
+      { ...hook, id: 'notification-2', data: { ...hook.data, input: { ...hook.data.input, ...second } } },
+      completed,
+      { ...request, id: 'permission-1', parentId: 'notification-1' },
+      { type: 'hook.end', data: { hookType: 'preToolUse' } },
+      { type: 'permission.requested', id: 'permission-2', parentId: 'notification-2', data: { requestId: 'request-2' } },
+    );
+    expect(copilotPermissionState(events, notification)).toEqual({ requestId: 'request-1', completed: true });
+    expect(copilotPermissionState(events, second)).toEqual({ requestId: 'request-2', completed: false });
+  });
   it('does not confuse concurrent embedded CLI notifications', () => {
     const second = { timestamp: 124, message: 'Read file' };
     const events = transcript(

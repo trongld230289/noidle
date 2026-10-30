@@ -49,12 +49,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return prototype === Object.prototype || prototype === null;
 }
 
-/** Terminal CLI records the request before its notification; embedded CLI can record it immediately after. */
+/** Embedded CLI can record completion before the request; correlate explicit parent IDs across interleaved events. */
 export function copilotPermissionState(
   jsonl: string,
   notification: { timestamp: number | string; message: string } | string,
 ): { requestId: string; completed: boolean } | undefined {
   let requestId = typeof notification === 'string' ? notification : undefined;
+  let notificationEventId: string | undefined;
+  const requestsByNotification = new Map<string, string>();
   let previousRequest: { requestId: string; eventId: unknown } | undefined;
   let previousNotification: { eventId: unknown } | undefined;
   const linked = (parentId: unknown, eventId: unknown) =>
@@ -71,6 +73,7 @@ export function copilotPermissionState(
     const data = event.data;
     if (event.type === 'permission.requested' && nonempty(data.requestId)) {
       requested.add(data.requestId);
+      if (nonempty(event.parentId)) requestsByNotification.set(event.parentId, data.requestId);
       if (precedingNotification && linked(event.parentId, precedingNotification.eventId)) requestId = data.requestId;
       previousRequest = { requestId: data.requestId, eventId: event.id };
       continue;
@@ -83,12 +86,14 @@ export function copilotPermissionState(
       }
       if (isRecord(input) && input.notificationType === 'permission_prompt' &&
           input.timestamp === notification.timestamp && input.message === notification.message) {
+        if (nonempty(event.id)) notificationEventId = event.id;
         if (previousRequest && linked(event.parentId, previousRequest.eventId)) requestId = previousRequest.requestId;
         previousNotification = { eventId: event.id };
       }
     }
     previousRequest = undefined;
   }
+  if (notificationEventId) requestId = requestsByNotification.get(notificationEventId) ?? requestId;
   return requestId && requested.has(requestId) ? { requestId, completed: completed.has(requestId) } : undefined;
 }
 
