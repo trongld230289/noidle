@@ -309,6 +309,34 @@ describe('claude-hook keepwarm ping', () => {
   });
 });
 
+/** Thông báo dọn dẹp (ngừng theo dõi artifact đã xoá) đánh thức phiên ngủ: không đọc, không nháy (31/10/2026). */
+describe('claude-hook housekeeping notification', () => {
+  const housekeeping = '<task-notification>\n<task-type>artifact-watch-lifecycle</task-type>\n<summary>Stopped watching Artifact: "Acme Timeline" (artifact not found)</summary>\n</task-notification>';
+
+  it('artifact-watch-lifecycle im lặng; việc nền thật sau đó vẫn đọc', async () => {
+    const transcript = path.join(work, 'transcript-housekeeping.jsonl');
+    fs.writeFileSync(transcript, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: '🔊 Câu thật.' }] } }) + '\n');
+    const session = 's-housekeeping';
+    const before = readLog().length;
+    const p = await run(['prompt', '--config', cfgNormal], JSON.stringify({ session_id: session, cwd: work, prompt: housekeeping }));
+    expect(p.stdout.trim()).toBe('');
+    await run(['speak', '--config', cfgNormal], JSON.stringify({ session_id: session, cwd: work, transcript_path: transcript, last_assistant_message: 'Còn hai việc.\n\n🔊 Còn hai việc đang chờ bạn.' }));
+    let added = readLog().slice(before);
+    expect(added).toContain('thông báo dọn dẹp');
+    expect(added).not.toContain('signal resumed');
+    expect(added).not.toContain('speak → play');
+
+    const mid = readLog().length;
+    const done = '<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n<summary>Background command finished</summary>\n</task-notification>';
+    const r = await run(['prompt', '--config', cfgNormal], JSON.stringify({ session_id: session, cwd: work, prompt: done }));
+    expect(r.stdout).toContain('🔊');
+    await run(['speak', '--config', cfgNormal, '--voice', 'vi-VN-HoaiMyNeural'], JSON.stringify({ session_id: session, cwd: work, transcript_path: transcript, last_assistant_message: 'Xong.\n\n🔊 Câu thật.' }));
+    added = readLog().slice(mid);
+    expect(added).toContain('background task notification');
+    expect(added).toContain('speak → play');
+  });
+});
+
 /**
  * Stop có thể chạy trước khi câu trả lời cuối được ghi vào transcript: hook từng đọc phần 🔊 của câu trước
  * (19/10/2026, 89 lần đọc lặp trong log). Claude Code gửi kèm last_assistant_message, nên đọc từ đó.

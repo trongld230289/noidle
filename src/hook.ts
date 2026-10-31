@@ -417,7 +417,10 @@ interface SessionMark {
   proc?: { anchor: number; chain: number[] };
   /** Lượt hiện tại do tin nhắn hệ thống mở lại (việc nền xong, subagent báo về): phần 🔊 của nó không cắt câu đang đọc. */
   resumed?: boolean;
-  /** Lượt hiện tại là ping giữ ấm cache của mod promptdeck: không đọc, không nháy khi nó xong. */
+  /**
+   * Lượt hiện tại không phải việc người dùng chờ: ping giữ ấm cache của mod promptdeck, hoặc thông báo dọn dẹp của
+   * Claude Code (isHousekeepingNotification). Không đọc, không nháy khi nó xong.
+   */
   ping?: boolean;
 }
 
@@ -542,6 +545,15 @@ function isKeepwarmPing(text: string): boolean {
   return /^\s*\[keepwarm\]/.test(text);
 }
 
+/**
+ * Thông báo dọn dẹp của Claude Code, không phải kết quả người dùng chờ: ví dụ ngừng theo dõi một artifact đã bị xoá
+ * (artifact-watch-lifecycle). 31/10/2026: thông báo này đánh thức một phiên ngủ từ hôm trước, Claude trả lời bằng bản
+ * tóm tắt việc còn dở và NoIdle đọc to lên, người dùng không hiểu câu đó ở đâu ra.
+ */
+function isHousekeepingNotification(text: string): boolean {
+  return /^\s*<task-notification>[\s\S]*?<task-type>\s*artifact-watch-lifecycle\s*<\/task-type>/.test(text);
+}
+
 function systemPromptKind(text: string): string {
   const m = /^\s*<([\w-]+)/.exec(text);
   return m?.[1] === 'task-notification' ? 'background task notification' : `tin nhắn hệ thống <${m?.[1] ?? '?'}>`;
@@ -570,6 +582,12 @@ async function modePrompt(): Promise<void> {
     // Đánh dấu phiên để speak im lặng khi lượt ping xong.
     if (input.session_id) writeMark(input.session_id, { ...readMark(input.session_id), ping: true });
     log(`prompt: ping keepwarm, session ${input.session_id ?? '-'}, im lặng`);
+    return;
+  }
+  if (isHousekeepingNotification(promptText)) {
+    // Như keepwarm: không dặn 🔊, không báo resumed (cửa sổ giữ nguyên trạng thái cũ), speak của lượt này im lặng.
+    if (input.session_id) writeMark(input.session_id, { ...readMark(input.session_id), ping: true });
+    log(`prompt: thông báo dọn dẹp, session ${input.session_id ?? '-'}, im lặng`);
     return;
   }
   if (isSystemPrompt(promptText)) {
@@ -629,7 +647,7 @@ async function modeSpeak(): Promise<void> {
   if (input.stop_hook_active) return;
   // Lượt ping giữ ấm của promptdeck xong: người dùng đi vắng, không đọc "ok", không nháy, không mở mic.
   if (input.session_id && readMark(input.session_id).ping) {
-    log(`speak: lượt ping keepwarm xong, session ${input.session_id}, im lặng`);
+    log(`speak: lượt ping keepwarm/thông báo dọn dẹp xong, session ${input.session_id}, im lặng`);
     return;
   }
   const cfg = loadConfig();
