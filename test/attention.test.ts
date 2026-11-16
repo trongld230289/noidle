@@ -251,11 +251,11 @@ describe('attention: nháy theo handle đã học thay vì theo tên (hai cửa 
 
 describe('attention: handle đã học phải là cửa sổ của workspace mình', () => {
   it('acceptLearnedWindow: tiêu đề đọc được phải có tên workspace (khi biết tên); mất focus giữa chừng thì bỏ', () => {
-    const w = { hwnd: '66674', title: 'BillingPaymentService.cs - SHIPNGO-BE-HotFix (Workspace) - Visual Studio Code [Administrator]' };
+    const w = { hwnd: '66674', title: 'BillingPaymentService.cs - ACME-BE-HotFix (Workspace) - Visual Studio Code [Administrator]' };
     // Cửa sổ mới mở: extension đã "focused" nhưng OS còn để cửa sổ cũ ở foreground → đọc nhầm handle cửa sổ khác.
     expect(acceptLearnedWindow(w, 'role-permission-management (Workspace)', true)).toBe(false);
-    expect(acceptLearnedWindow(w, 'SHIPNGO-BE-HotFix (Workspace)', true)).toBe(true);
-    expect(acceptLearnedWindow(w, 'SHIPNGO-BE-HotFix (Workspace)', false)).toBe(false);
+    expect(acceptLearnedWindow(w, 'ACME-BE-HotFix (Workspace)', true)).toBe(true);
+    expect(acceptLearnedWindow(w, 'ACME-BE-HotFix (Workspace)', false)).toBe(false);
     // Không biết tên (cửa sổ không có folder) thì chỉ dựa vào focus.
     expect(acceptLearnedWindow(w, '', true)).toBe(true);
     // Hai cửa sổ trùng tên: tên khớp cả hai, focus quyết định (đó là lý do cần handle).
