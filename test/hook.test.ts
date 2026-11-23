@@ -192,6 +192,28 @@ describe('claude-hook background task notifications', () => {
     }
   });
 
+  it('a message from another Claude session (cross-session-message, with or without the "Another Claude session" line) is system text: no turn counted, no language switch, only resumed', async () => {
+    // 23/11/2026: <cross-session-message> chưa có trong danh sách → hook coi là người dùng gõ: đếm lượt, báo submitted
+    // (tắt mic), ở chế độ auto còn đổi ngôn ngữ phiên sang tiếng Anh.
+    const cfg = path.join(work, 'cross-session-auto.json');
+    fs.writeFileSync(cfg, JSON.stringify({ language: 'auto' }));
+    const session = 'cross-session-context';
+    await run(['prompt', '--config', cfg], JSON.stringify({ session_id: session, cwd: work, prompt: 'Review giúp mình bước 13' }));
+    const tag = '<cross-session-message from="uds:\\\\.\\pipe\\LOCAL\\cc-msg-1" from-name="observer-1">\nStanding by. Capture complete.\n</cross-session-message>';
+    for (const message of [tag, `Another Claude session sent a message:\n${tag}`]) {
+      const before = readLog().length;
+      const result = await run(['prompt', '--config', cfg], JSON.stringify({ session_id: session, cwd: work, prompt: message }));
+      expect(result.code).toBe(0);
+      expect(JSON.parse(result.stdout).hookSpecificOutput.additionalContext).toContain('tiếng Việt');
+      const logged = readLog().slice(before);
+      expect(logged).toContain('<cross-session-message>');
+      expect(logged).toContain('resumed');
+    }
+    const mark = JSON.parse(fs.readFileSync(path.join(work, 'tmp', 'noidle-tts', 'sessions', session), 'utf8'));
+    expect(mark.count).toBe(1);
+    expect(mark.lang).toBe('vi');
+  });
+
   it('a subagent hand-back message is system text too: instruction stays in the session language, no language switch, only resumed', async () => {
     // 3/10/2026: "<agent-message ...>[Subagent hand-back] ..." bị coi là prompt tiếng Anh → Claude đọc phần 🔊 bằng tiếng Anh
     // ngay sau một đoạn tiếng Việt.
@@ -398,7 +420,7 @@ describe('claude-hook prompt context per session', () => {
     const first = ctx((await prompt('ctx-a')).stdout);
     expect(first).toContain('🔊');
     expect(first).toContain(DEFAULT_RECAP_PROMPT.vi);
-    expect(first).toMatch(/tiếng Việt\.$/);
+    expect(first).toMatch(/luôn viết bằng tiếng Việt, kể cả khi [^\n]*tiếng Anh\.$/);
     expect(ctx((await prompt('ctx-a')).stdout)).toBe(first);
     expect(ctx((await prompt('ctx-a')).stdout)).toBe(first);
   });
@@ -416,22 +438,22 @@ describe('claude-hook prompt context per session', () => {
     expect(text).not.toContain('Keep it short');
     expect(text).not.toContain(DEFAULT_RECAP_PROMPT.vi);
     expect(text).toContain('🔊');
-    expect(text).toMatch(/tiếng Việt\.$/);
+    expect(text).toMatch(/luôn viết bằng tiếng Việt, kể cả khi [^\n]*tiếng Anh\.$/);
   });
 
-  it('language en: lấy bản tiếng Anh; chưa dịch thì dùng bản gốc cộng câu "Write that section in English"', async () => {
+  it('language en: lấy bản tiếng Anh; chưa dịch thì dùng bản gốc cộng câu "Always write the 🔊 section in English"', async () => {
     const both = path.join(work, 'recap-en.json');
     fs.writeFileSync(both, JSON.stringify({ language: 'en', recapPrompt: { vi: 'Ngắn thôi.', en: 'Keep it short.' } }));
     const translated = ctx((await run(['prompt', '--config', both], JSON.stringify({ session_id: 'ctx-en', cwd: work }))).stdout);
     expect(translated).toContain('Keep it short.');
     expect(translated).not.toContain('Ngắn thôi.');
-    expect(translated).toMatch(/Write that section in English\.$/);
+    expect(translated).toMatch(/section in English, even when the rest of the answer, the message or the tool output is in another language\.$/);
 
     const pending = path.join(work, 'recap-en-pending.json');
     fs.writeFileSync(pending, JSON.stringify({ language: 'en', recapPrompt: { vi: 'Ngắn thôi.' } }));
     const fallback = ctx((await run(['prompt', '--config', pending], JSON.stringify({ session_id: 'ctx-en2', cwd: work }))).stdout);
     expect(fallback).toContain('Ngắn thôi.');
-    expect(fallback).toMatch(/Write that section in English\.$/);
+    expect(fallback).toMatch(/section in English, even when the rest of the answer, the message or the tool output is in another language\.$/);
   });
 });
 

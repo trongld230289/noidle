@@ -45,7 +45,7 @@ describe('recapInstruction', () => {
     const lines = recapInstruction({ vi: 'Dòng một\n- Dòng hai' }, 'vi').split('\n');
     expect(lines[0]).toContain('🔊');
     expect(lines.slice(1, 3)).toEqual(['Dòng một', '- Dòng hai']);
-    expect(lines[3]).toMatch(/tiếng Việt\.$/);
+    expect(lines[3]).toMatch(/luôn viết bằng tiếng Việt, kể cả khi [^\n]*tiếng Anh\.$/);
   });
 
   it('no custom prompt: default Vietnamese body wrapped with the 🔊 contract and a Vietnamese language line', () => {

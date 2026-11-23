@@ -39,10 +39,14 @@ const CONTRACT: Record<Lang, string> = {
   en: `End every answer with a separate section that starts with ${SPEAK_MARK} at the beginning of a line; everything from there to the end of the answer is read aloud.`,
 };
 
-/** Câu ngôn ngữ, nối cuối: phần thân có thể đang là thứ tiếng khác (chưa dịch) nên vẫn phải nói rõ. */
+/**
+ * Câu ngôn ngữ, nối cuối: phần thân có thể đang là thứ tiếng khác (chưa dịch) nên vẫn phải nói rõ.
+ * 23/11/2026: câu cũ "Viết phần đó bằng tiếng Việt." quá nhẹ, cả câu trả lời đang tiếng Anh (tin nhắn từ phiên khác
+ * cũng tiếng Anh) thì Claude viết phần 🔊 theo tiếng Anh. Nói thẳng vào trường hợp đó.
+ */
 const LANGUAGE_LINE: Record<Lang, string> = {
-  vi: 'Viết phần đó bằng tiếng Việt.',
-  en: 'Write that section in English.',
+  vi: `Phần ${SPEAK_MARK} luôn viết bằng tiếng Việt, kể cả khi phần trên, tin nhắn hay kết quả công cụ đang là tiếng Anh.`,
+  en: `Always write the ${SPEAK_MARK} section in English, even when the rest of the answer, the message or the tool output is in another language.`,
 };
 
 /**
