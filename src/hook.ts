@@ -534,10 +534,14 @@ async function modeStart(): Promise<void> {
 
 /**
  * Prompt do Claude Code tự gửi, không phải người dùng gõ: việc nền xong (<task-notification>), subagent báo kết quả
- * về (<agent-message>, 3/10/2026: bị coi là prompt tiếng Anh nên Claude đọc phần 🔊 bằng tiếng Anh), nhắc nhở hệ thống.
+ * về (<agent-message>, 3/10/2026: bị coi là prompt tiếng Anh nên Claude đọc phần 🔊 bằng tiếng Anh), nhắc nhở hệ thống,
+ * tin nhắn từ một phiên Claude khác (<cross-session-message>, 23/11/2026: bị coi là người dùng gõ nên đếm lượt, tắt mic,
+ * chế độ auto đổi phiên sang tiếng Anh). Hai loại tin nhắn có thể mở đầu bằng dòng "Another Claude session sent a message:".
  */
+const SYSTEM_PROMPT = /^\s*(?:Another Claude session[^\n]*\n\s*)?<(task-notification|agent-message|cross-session-message|system-reminder)\b/;
+
 function isSystemPrompt(text: string): boolean {
-  return /^\s*<(task-notification|agent-message|system-reminder)\b/.test(text);
+  return SYSTEM_PROMPT.test(text);
 }
 
 /** Ping giữ ấm cache của mod promptdeck (nút Keepwarm): gửi khi người dùng đi vắng, câu trả lời chỉ là "ok". */
@@ -555,7 +559,7 @@ function isHousekeepingNotification(text: string): boolean {
 }
 
 function systemPromptKind(text: string): string {
-  const m = /^\s*<([\w-]+)/.exec(text);
+  const m = SYSTEM_PROMPT.exec(text);
   return m?.[1] === 'task-notification' ? 'background task notification' : `tin nhắn hệ thống <${m?.[1] ?? '?'}>`;
 }
 

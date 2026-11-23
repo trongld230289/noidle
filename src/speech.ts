@@ -104,7 +104,7 @@ function isTypedPrompt(content: unknown): boolean {
   const text = (typeof content === 'string' ? content : joinTextBlocks(content)).trimStart();
   if (!text) return false;
   if (text.startsWith('<task-notification>')) return false;
-  if (text.startsWith('Another Claude session') || /<agent-message\b/.test(text)) return false;
+  if (text.startsWith('Another Claude session') || /<(agent|cross-session)-message\b/.test(text)) return false;
   return true;
 }
 
